@@ -14,18 +14,18 @@ Every task below has a **measurable pass/fail condition** listed beside it. A sp
 
 ### Deliverables
 
-| # | Task | Done when |
-|---|---|---|
-| 0.1 | Confirm metadata fields: `project`, `tool`, `userName` | Written and agreed in `projectplan.md`; no open questions |
-| 0.2 | Define object naming convention and sanitization rules | Naming pattern documented; 3 example paths written out and reviewed |
-| 0.3 | Choose Cloud region: `northamerica-northeast1` (Montréal) | Region recorded in `projectplan.md` and used in all infra commands |
-| 0.4 | Choose auth strategy: API key via `X-Api-Key` header stored in Secret Manager | Decision documented; no alternative left open |
-| 0.5 | Decide Chrome Web Store visibility: **Unlisted** | Recorded in `projectplan.md` |
-| 0.6 | Create GCP project; enable APIs: Cloud Run, Artifact Registry, Cloud Storage, Secret Manager | `gcloud services list --enabled --project=PROJECT_ID` output includes `run.googleapis.com`, `artifactregistry.googleapis.com`, `storage.googleapis.com`, `secretmanager.googleapis.com` |
-| 0.7 | Create GCS bucket with versioning off, 90-day lifecycle rule, region `northamerica-northeast1` | `gcloud storage ls gs://thehammer-screenshots` exits 0; `gcloud storage buckets describe gs://thehammer-screenshots` shows `location: NORTHAMERICA-NORTHEAST1` and lifecycle rule present |
-| 0.8 | Create service account `thehammer-backend` with `roles/storage.objectCreator` on bucket | `gcloud storage buckets get-iam-policy gs://thehammer-screenshots` output includes `serviceAccount:thehammer-backend@PROJECT_ID.iam.gserviceaccount.com` with role `roles/storage.objectCreator` |
-| 0.9 | Store API key in Secret Manager; grant SA `roles/secretmanager.secretAccessor` | `gcloud secrets versions access latest --secret=thehammer-api-key --project=PROJECT_ID` returns the key value without error |
-| 0.10 | Set up Artifact Registry Docker repository | `gcloud artifacts repositories describe thehammer --location=northamerica-northeast1 --project=PROJECT_ID` shows `format: DOCKER` |
+| # | Task | Done when | Success % |
+|---|---|---|---|
+| 0.1 | Confirm metadata fields: `project`, `tool`, `userName` | Written and agreed in `projectplan.md`; no open questions | 99% |
+| 0.2 | Define object naming convention and sanitization rules | Naming pattern documented; 3 example paths written out and reviewed | 99% |
+| 0.3 | Choose Cloud region: `northamerica-northeast1` (Montréal) | Region recorded in `projectplan.md` and used in all infra commands | 99% |
+| 0.4 | Choose auth strategy: API key via `X-Api-Key` header stored in Secret Manager | Decision documented; no alternative left open | 99% |
+| 0.5 | Decide Chrome Web Store visibility: **Unlisted** | Recorded in `projectplan.md` | 99% |
+| 0.6 | Create GCP project; enable APIs: Cloud Run, Artifact Registry, Cloud Storage, Secret Manager | `gcloud services list` includes all 4 APIs | 97% |
+| 0.7 | Create GCS bucket with versioning off, 90-day lifecycle rule, region `northamerica-northeast1` | `gcloud storage buckets describe` shows region and lifecycle | 97% |
+| 0.8 | Create service account `thehammer-backend` with `roles/storage.objectCreator` on bucket | IAM policy on bucket lists SA with correct role | 97% |
+| 0.9 | Store API key in Secret Manager; grant SA `roles/secretmanager.secretAccessor` | `gcloud secrets versions access latest` returns key value | 96% |
+| 0.10 | Set up Artifact Registry Docker repository | Describe command shows `format: DOCKER` | 97% |
 
 > **Note on 0.6:** `gsutil` commands are deprecated in favour of `gcloud storage`. All infra commands in this plan use `gcloud storage`.
 
@@ -40,17 +40,17 @@ Every task below has a **measurable pass/fail condition** listed beside it. A sp
 
 ### Deliverables
 
-| # | Task | Done when |
-|---|---|---|
-| 1.1 | `manifest.json` with MV3, correct permissions | Loading the unpacked extension at `chrome://extensions` shows 0 errors and manifest version `3` in the extension card |
-| 1.2 | `commands` key with `Ctrl+Shift+S` / `Command+Shift+S` | Shortcut appears in `chrome://extensions/shortcuts`; pressing it logs `"command fired"` to the service worker console (open via `chrome://extensions` → service worker "inspect") |
-| 1.3 | Popup saves/loads `project`, `tool`, `userName` via `chrome.storage.local` | Fill all 3 fields → close popup → reopen popup → all 3 fields show the saved values. Verify in DevTools: `chrome.storage.local.get(null, console.log)` in the popup console shows the 3 keys |
-| 1.4 | Service worker: `chrome.commands.onCommand` listener calls `captureVisibleTab` | Pressing shortcut logs a data URL beginning with `data:image/png;base64,` and length > 10,000 chars to the service worker console |
-| 1.5 | Popup "Capture Now" button triggers capture | Clicking the button inside the popup logs a PNG data URL to the service worker console. **Note:** `chrome.action.onClicked` is not used because `default_popup` is set — the popup button sends a `chrome.runtime.sendMessage({ type: 'capture' })` message to the service worker instead |
-| 1.6 | Service worker: `chrome.runtime.onMessage` relay from content script | Clicking the floating page button sends a message; service worker receives it and logs PNG data URL |
-| 1.7 | Content script injects floating capture button | Button element is visible in the DOM on any `http://` or `https://` page; confirmed via DevTools Elements panel; button has a distinct `id` or `data-` attribute to avoid conflicts with page styles |
-| 1.8 | Error handling on `chrome://` pages | Attempting capture on `chrome://newtab` shows a `chrome.notifications` notification with non-empty `message` text; service worker console shows no uncaught exception; background page remains alive |
-| 1.9 | PNG data URL is a real screenshot | Data URL length > 10,000 characters; opening the data URL in a new tab renders a recognisable image of the captured page |
+| # | Task | Done when | Success % |
+|---|---|---|---|
+| 1.1 | `manifest.json` with MV3, correct permissions | 0 errors in `chrome://extensions`, manifest version `3` visible | 98% |
+| 1.2 | `commands` key with `Ctrl+Shift+S` / `Command+Shift+S` | Shortcut appears in `chrome://extensions/shortcuts`; logs `"command fired"` | 95% |
+| 1.3 | Popup saves/loads `project`, `tool`, `userName` via `chrome.storage.local` | All 3 fields reload after popup closed and reopened | 97% |
+| 1.4 | Service worker: `chrome.commands.onCommand` calls `captureVisibleTab` | Logs PNG data URL > 10,000 chars in service worker console | 95% |
+| 1.5 | Popup "Capture Now" button sends `runtime.sendMessage` → service worker | Service worker receives message and logs PNG data URL | 94% |
+| 1.6 | Service worker: `chrome.runtime.onMessage` relay from content script | Floating button message received; PNG data URL logged | 92% |
+| 1.7 | Content script injects floating capture button | Button visible in DOM on any http/https page | 93% |
+| 1.8 | Error handling on `chrome://` pages | `chrome.notifications` notification shown; no uncaught exception | 91% |
+| 1.9 | PNG data URL is a real screenshot | Length > 10,000 chars; renders correctly when opened in new tab | 97% |
 
 ### Manifest Skeleton
 
@@ -80,16 +80,16 @@ Every task below has a **measurable pass/fail condition** listed beside it. A sp
 
 ### Backend Deliverables
 
-| # | Task | Done when |
-|---|---|---|
-| 2.1 | Express app with `POST /capture` and `GET /health` routes | `curl https://SERVICE_URL/health` returns HTTP 200 and JSON body `{ "status": "ok" }` |
-| 2.2 | `multer` parses `multipart/form-data` | `curl -F project=test -F tool=figma -F name=alice -F file=@test.png https://SERVICE_URL/capture` with valid API key returns HTTP 200; sending the same request without the `file` field returns HTTP 400 |
-| 2.3 | Validate required fields; return 400 on missing | Omitting `project`, `tool`, or `name` individually each returns HTTP 400 with a JSON body containing a non-empty `error` string describing which field is missing |
-| 2.4 | Sanitize fields: lowercase, strip non-`[a-z0-9_-]`, truncate to 64 chars | Sending `project="My Project!!"` produces an object path segment `my-project` or `my_project` (consistent with the sanitizer); sending a field of 100 characters produces a path segment of exactly 64 characters — verified by inspecting the GCS object name |
-| 2.5 | Build object path with timestamp | GCS object name matches the regex `^[a-z0-9_-]+/[a-z0-9_-]+/\d{4}/\d{2}/\d{2}/[a-z0-9_-]+_\d+\.png$`; verified by `gcloud storage ls --recursive gs://thehammer-screenshots/` after a test upload |
-| 2.6 | Upload buffer to GCS | Object appears in bucket within 5 seconds of the POST; `gcloud storage ls gs://thehammer-screenshots/PROJECT/TOOL/YYYY/MM/DD/` lists the file |
-| 2.7 | Validate `X-Api-Key`; return 401 on mismatch | `curl` without `X-Api-Key` header → HTTP 401; with wrong key value → HTTP 401; with correct key → HTTP 200 |
-| 2.8 | Return `{ success: true, path, size }` | Response JSON contains `success: true`, a `path` string matching the GCS object name, and a `size` integer equal to the file's byte count confirmed by `gcloud storage objects describe gs://thehammer-screenshots/PATH --format="value(size)"` |
+| # | Task | Done when | Success % |
+|---|---|---|---|
+| 2.1 | Express app with `POST /capture` and `GET /health` routes | `curl /health` returns HTTP 200 and `{ "status": "ok" }` | 97% |
+| 2.2 | `multer` parses `multipart/form-data` | Valid upload returns 200; missing `file` field returns 400 | 95% |
+| 2.3 | Validate required fields; return 400 on missing | Each missing field individually returns 400 with named error | 97% |
+| 2.4 | Sanitize fields: lowercase, strip non-`[a-z0-9_-]`, truncate 64 chars | Object path contains sanitized values; 100-char input truncates to 64 | 95% |
+| 2.5 | Build object path with timestamp | Object name matches regex `^[a-z0-9_-]+/.../[a-z0-9_-]+_\d+\.png$` | 96% |
+| 2.6 | Upload buffer to GCS | Object appears in bucket within 5s of POST | 94% |
+| 2.7 | Validate `X-Api-Key`; return 401 on mismatch | Missing or wrong key → 401; correct key → 200 | 97% |
+| 2.8 | Return `{ success, path, size }` | Response matches GCS object metadata | 96% |
 
 ### Dockerfile
 
@@ -136,13 +136,13 @@ gcloud run deploy thehammer-backend \
 
 ### Extension Deliverables
 
-| # | Task | Done when |
-|---|---|---|
-| 2.9 | Convert data URL to `Blob` in service worker | In the service worker console: `blob instanceof Blob === true` and `blob.type === 'image/png'` logged before the POST fires |
-| 2.10 | `fetch()` POST to Cloud Run with correct fields and `X-Api-Key` header | Cloud Run logs (Cloud Logging → `run.googleapis.com/requests`) show a POST to `/capture` with HTTP 200 and response time < 5s |
-| 2.11 | Success notification shows GCS object path | `chrome.notifications` notification appears with a `message` field containing the full GCS path string (e.g. `project/figma/2026/06/08/alice_1749430800000.png`) |
-| 2.12 | Error notification on failure | Scale Cloud Run to 0 manually or point URL to a bad host; triggering capture shows a notification with non-empty error text within 10 seconds; no uncaught exception in service worker |
-| 2.13 | Cloud Run URL configurable in popup settings | Update the URL field in settings to a second test Cloud Run service; trigger capture; Cloud Logging on the second service shows the request |
+| # | Task | Done when | Success % |
+|---|---|---|---|
+| 2.9 | Convert data URL to `Blob` in service worker | `blob instanceof Blob === true` and `blob.type === 'image/png'` | 96% |
+| 2.10 | `fetch()` POST to Cloud Run with `X-Api-Key` header | Cloud Logging shows POST `/capture` HTTP 200 < 5s | 93% |
+| 2.11 | Success notification shows GCS path | Notification `message` contains full GCS path string | 94% |
+| 2.12 | Error notification on failure | Unreachable host shows error notification within 10s; no crash | 91% |
+| 2.13 | Cloud Run URL configurable in popup settings | Changing URL in settings routes request to new service | 95% |
 
 ---
 
@@ -154,12 +154,12 @@ gcloud run deploy thehammer-backend \
 
 ### Backend Deliverables
 
-| # | Task | Done when |
-|---|---|---|
-| 3.1 | `POST /upload-url` endpoint accepts `{ project, tool, name }` JSON body | `curl -X POST -H "Content-Type: application/json" -H "X-Api-Key: KEY" -d '{"project":"p","tool":"t","name":"n"}' https://SERVICE_URL/upload-url` returns HTTP 200 and JSON with a `signedUrl` field |
-| 3.2 | Generates V4 signed PUT URL with 10-minute expiry | The returned URL contains the query parameter `X-Goog-Signature`; a `curl -X PUT -H "Content-Type: image/png" --data-binary @test.png "SIGNED_URL"` returns HTTP 200 and the object appears in GCS |
-| 3.3 | Returns `{ signedUrl, path }` | Both fields present and non-empty; `path` matches the same naming convention verified in task 2.5 |
-| 3.4 | SA has `roles/iam.serviceAccountTokenCreator` | `gcloud projects get-iam-policy PROJECT_ID --flatten="bindings[].members" --filter="bindings.members:thehammer-backend"` lists `roles/iam.serviceAccountTokenCreator`; signing call does not throw a 403 |
+| # | Task | Done when | Success % |
+|---|---|---|---|
+| 3.1 | `POST /upload-url` accepts `{ project, tool, name }` JSON body | Returns HTTP 200 with `signedUrl` field | 95% |
+| 3.2 | Generates V4 signed PUT URL, 10-minute expiry | `curl -X PUT` with PNG against URL returns 200; object appears in GCS | 91% |
+| 3.3 | Returns `{ signedUrl, path }` | Both fields present and non-empty; path matches naming convention | 95% |
+| 3.4 | SA has `roles/iam.serviceAccountTokenCreator` | IAM policy lists role; signing call does not throw 403 | 90% |
 
 ### Bucket CORS Config (`infra/cors.json`)
 
@@ -186,18 +186,18 @@ gcloud storage buckets describe gs://thehammer-screenshots --format="json(cors)"
 
 ### Extension Deliverables
 
-| # | Task | Done when |
-|---|---|---|
-| 3.5 | POST to `/upload-url` and receive signed URL | Service worker logs the signed URL string; URL starts with `https://storage.googleapis.com/thehammer-screenshots/` |
-| 3.6 | PUT blob directly to GCS signed URL | Object appears in GCS; Cloud Run logs show `/upload-url` request body size < 300 bytes (metadata only — no image bytes); GCS object size matches the original PNG blob size |
-| 3.7 | Fallback to `/capture` on `/upload-url` failure | Mock a non-200 from `/upload-url` (e.g. temporarily return 500 from backend); extension falls back to Sprint 2 `/capture` path; object still lands in GCS; Cloud Logging confirms the `/capture` request was made |
+| # | Task | Done when | Success % |
+|---|---|---|---|
+| 3.5 | POST to `/upload-url` and receive signed URL | Service worker logs URL starting with `https://storage.googleapis.com/thehammer-screenshots/` | 92% |
+| 3.6 | PUT blob directly to GCS signed URL | Object in GCS; Cloud Run logs show < 300 bytes body (no image bytes) | 88% |
+| 3.7 | Fallback to `/capture` on `/upload-url` failure | Mock 500 from `/upload-url` → extension uses `/capture` path; object still lands in GCS | 90% |
 
 ### CORS Verification
 
-| # | Check | Done when |
-|---|---|---|
-| 3.8 | CORS preflight passes | `curl -s -o /dev/null -w "%{http_code}" -X OPTIONS -H "Origin: chrome-extension://YOUR_EXTENSION_ID" -H "Access-Control-Request-Method: PUT" -H "Access-Control-Request-Headers: Content-Type" "SIGNED_URL"` returns `200` (GCS returns 200, not 204, for OPTIONS on signed URLs); response includes `Access-Control-Allow-Origin: chrome-extension://YOUR_EXTENSION_ID` |
-| 3.9 | Signed URL expires correctly | Wait until after the 10-minute TTL; `curl -X PUT -H "Content-Type: image/png" --data-binary @test.png "SIGNED_URL"` returns HTTP 403 with an XML body containing `<Code>ExpiredToken</Code>` or `<Code>AccessDenied</Code>` |
+| # | Check | Done when | Success % |
+|---|---|---|---|
+| 3.8 | CORS preflight passes | `curl -X OPTIONS` returns 200 with `Access-Control-Allow-Origin: chrome-extension://ID` | 85% |
+| 3.9 | Signed URL expires correctly | After 10-min TTL, `curl -X PUT` returns HTTP 403 with `<Code>ExpiredToken</Code>` | 93% |
 
 ---
 
@@ -207,30 +207,47 @@ gcloud storage buckets describe gs://thehammer-screenshots --format="json(cors)"
 
 ### Extension Deliverables
 
-| # | Task | Done when |
-|---|---|---|
-| 4.1 | Offline queue persisted in `chrome.storage.local` | With Cloud Run URL set to an unreachable host, trigger 2 captures; `chrome.storage.local.get('queue', console.log)` shows 2 pending entries; restore the real URL and trigger any capture (or reload the extension); both queued uploads complete and appear in GCS |
-| 4.2 | Exponential backoff retry (max 3 attempts, delays 1s / 2s / 4s) | Service worker console shows 3 timestamped attempt logs; time between attempt 1→2 ≈ 1s, 2→3 ≈ 2s; after the 3rd failure the entry moves to a `failed` state in storage |
-| 4.3 | Upload progress indicator via `XMLHttpRequest.upload.onprogress` | A progress bar or percentage label in the popup updates from 0% to 100% during an upload of a ≥ 100 KB PNG; `fetch` is **not** used for this request because it does not expose upload progress |
-| 4.4 | Settings page persists all 5 fields across browser restart | Fill Cloud Run URL, API key, project, tool, name → quit Chrome completely → relaunch → open popup → all 5 fields show saved values; confirmed by `chrome.storage.local.get(null, console.log)` |
-| 4.5 | History tab shows last 20 uploads; oldest drops off at limit | After 21 captures, the history tab shows exactly 20 rows; the 21st capture's entry is present and the oldest is gone; each row shows GCS path, ISO timestamp, and status (`success` or `failed`) |
+| # | Task | Done when | Success % |
+|---|---|---|---|
+| 4.1 | Offline queue persisted in `chrome.storage.local` | 2 queued entries visible in storage; both upload on restore | 88% |
+| 4.2 | Exponential backoff retry (max 3 attempts, 1s/2s/4s) | 3 attempt logs with correct delays; 3rd failure → `failed` state | 87% |
+| 4.3 | Upload progress via `XMLHttpRequest.upload.onprogress` | Progress bar updates 0–100% for ≥ 100 KB PNG | 85% |
+| 4.4 | Settings page persists all 5 fields across browser restart | All 5 fields reload after full Chrome restart | 95% |
+| 4.5 | History tab shows last 20 uploads; oldest drops off at 21 | After 21 captures, exactly 20 rows; oldest gone; each row has path, timestamp, status | 86% |
 
 ### Backend Deliverables
 
-| # | Task | Done when |
-|---|---|---|
-| 4.6 | Rate limiting: 60 requests/IP/minute via `express-rate-limit` | `for i in $(seq 1 65); do curl -s -o /dev/null -w "%{http_code}\n" -X POST ... ; done` — first 60 return 200, requests 61–65 return HTTP 429 with a JSON body containing a `retryAfter` field |
-| 4.7 | Cloud Monitoring uptime check on `/health` | Uptime check visible in Cloud Monitoring → Uptime checks; manually stopping the Cloud Run service causes the check to fail within 2 minutes and an email alert fires |
-| 4.8 | Alert: error rate > 5% over 5 minutes | A Cloud Monitoring alerting policy exists targeting the `run.googleapis.com/request_count` metric filtered to `response_code_class=5xx`; manually sending 10 requests of which 6 return 500 triggers an incident within 5 minutes |
-| 4.9 | Firestore write on upload (optional) | Each successful `/capture` or signed URL upload creates a document in `uploads/{uploadId}` with all 8 fields non-null; `gcloud firestore documents list --collection-id=uploads --project=PROJECT_ID` lists the document |
+| # | Task | Done when | Success % |
+|---|---|---|---|
+| 4.6 | Rate limiting: 60 req/IP/min via `express-rate-limit` | Requests 61–65 return HTTP 429 with `retryAfter` field | 93% |
+| 4.7 | Cloud Monitoring uptime check on `/health` | Stopping Cloud Run causes alert email within 2 minutes | 91% |
+| 4.8 | Alert: error rate > 5% over 5 minutes | Alerting policy fires incident within 5 min when 6/10 requests return 500 | 87% |
+| 4.9 | Firestore write on upload (optional) | Each upload creates document in `uploads/{uploadId}` with 8 non-null fields | 89% |
 
 ### Container Hardening Deliverables
 
-| # | Task | Done when |
-|---|---|---|
-| 4.10 | Pin base image to digest | `Dockerfile` `FROM` line is `node:20-alpine@sha256:DIGEST`; `docker build` succeeds; the digest can be retrieved with `docker pull node:20-alpine && docker inspect node:20-alpine --format='{{index .RepoDigests 0}}'` |
-| 4.11 | Run as non-root user | `Dockerfile` contains `USER node` before the `CMD` line; `docker run --rm --entrypoint whoami IMAGE` outputs `node` |
-| 4.12 | `.dockerignore` excludes dev files | `.dockerignore` lists `node_modules`, `src/`, `.env`, `*.test.ts`; after `docker build`, `docker run --rm IMAGE ls /app` does not show `src/` or `node_modules/` directories |
+| # | Task | Done when | Success % |
+|---|---|---|---|
+| 4.10 | Pin base image to digest | `FROM node:20-alpine@sha256:DIGEST`; build succeeds | 96% |
+| 4.11 | Run as non-root user | `docker run --entrypoint whoami IMAGE` outputs `node` | 97% |
+| 4.12 | `.dockerignore` excludes dev files | `docker run IMAGE ls /app` does not show `src/` or `node_modules/` | 96% |
+
+---
+
+## Success Probability Summary
+
+| Sprint | Description | Avg Task % | Sprint-level Completion % |
+|---|---|---|---|
+| Sprint 0 | Spec & Infrastructure | 98% | **97%** |
+| Sprint 1 | Extension Shell | 95% | **88%** |
+| Sprint 2 | Cloud Run + GCS Upload | 95% | **82%** |
+| Sprint 3 | Direct Signed URL Upload | 91% | **72%** |
+| Sprint 4 | Hardening & UX | 91% | **70%** |
+| **Full project end-to-end** | All sprints complete and working | — | **~55–60%** |
+
+> Sprint-level completion % = product of all task probabilities in that sprint.
+> Full project % = product of all sprint-level probabilities.
+> The biggest risk driver is Sprint 3 CORS/signed URL configuration (tasks 3.6, 3.8) and Sprint 4 queue/retry UX (tasks 4.2, 4.3). Completing Sprint 2 (server-side upload) alone delivers ~82% of the core value.
 
 ---
 
