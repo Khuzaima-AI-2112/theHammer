@@ -11,7 +11,7 @@ A Chrome extension that captures a screenshot of the active tab and uploads it t
 - One-click / one-shortcut screenshot capture from any tab
 - Automatic file naming: `{project}/{tool}/{yyyy}/{mm}/{dd}/{name}_{timestamp}.png`
 - Upload to Google Cloud Storage with zero manual steps
-- Lightweight backend on Google Cloud (Cloud Functions 2nd gen)
+- Lightweight backend on Google Cloud (Cloud Run, min instances 0)
 - Internal team use: 5 users, ~30 images/day each (~150/day total)
 - Estimated cost: under $1/month
 
@@ -26,7 +26,7 @@ Chrome Extension (MV3)
   ├── Content Script (floating page button)
   └── chrome.tabs.captureVisibleTab() → PNG data URL
          ↓
-Cloud Functions 2nd Gen (Node.js / Express)
+Cloud Run (Node.js / Express — containerized)
   ├── POST /capture
   ├── Validate + sanitize metadata fields
   ├── Build object path
@@ -44,20 +44,21 @@ Google Cloud Storage
 |---|---|---|
 | Extension | Chrome MV3 (TypeScript) | MV2 fully deprecated as of Chrome 138 |
 | Capture API | `chrome.tabs.captureVisibleTab()` | Returns PNG data URL of visible tab area |
-| Permissions | `activeTab`, `storage`, `scripting` | Minimum privilege; no install warning |
-| Keyboard shortcut | `chrome.commands` API | Activates `activeTab` permission |
+| Permissions | `activeTab`, `storage`, `scripting`, `notifications` | Minimum privilege; no install warning |
+| Keyboard shortcut | `chrome.commands` API | Activates `activeTab` permission on all 3 triggers |
 | Settings storage | `chrome.storage.local` | Persists across service worker restarts |
-| Backend | Cloud Functions 2nd gen (Node.js) | Simple HTTP endpoint, serverless, ~$0 at this scale |
-| Storage | Google Cloud Storage (Standard class) | ~$0.02/GB-month, object naming, lifecycle rules |
-| Metadata (v2) | Firestore | Optional: upload history, per-project views |
+| Backend | Cloud Run (Node.js 20 + Express, containerized) | HTTP endpoint, scales to zero, full control over runtime |
+| Container registry | Artifact Registry | Standard GCP container storage |
+| Storage | Google Cloud Storage (Standard class) | ~$0.02/GB-month, lifecycle rules |
 | Auth | API key via `X-Api-Key` header + Secret Manager | Practical for small team; upgradeable to IAP |
+| Metadata (v2) | Firestore | Optional: upload history, per-project views |
 
 ---
 
 ## Object Naming Convention
 
 ```
-{project}/{tool}/{yyyy}/{mm}/{dd}/{sanitized-name}_{ISO-timestamp}.png
+{project}/{tool}/{yyyy}/{mm}/{dd}/{sanitized-name}_{timestamp}.png
 ```
 
 **Sanitization rules (applied server-side):**
@@ -84,6 +85,24 @@ website-redesign/figma/2026/06/08/alice_1749430800000.png
 
 ---
 
+## Cloud Run Configuration
+
+| Setting | Value | Reason |
+|---|---|---|
+| Min instances | 0 | No idle cost; cold start ~500ms–2s, acceptable for internal tool |
+| Max instances | 5 | Plenty for 5 users |
+| Memory | 256 MiB | PNG processing is lightweight |
+| CPU | 1 | More than enough |
+| Timeout | 30s | Upload should complete well under 5s |
+| Concurrency | 80 (default) | Fine for this traffic volume |
+| Region | `northamerica-northeast1` (Montréal) | Proximity to users |
+| Ingress | All | Extension calls over public HTTPS |
+| Auth | `--allow-unauthenticated` + API key check in code | Validates `X-Api-Key` header against Secret Manager |
+
+Cloud Run scales to zero when idle — no instance runs between sessions, so cost is effectively $0 for this traffic level. When a capture is triggered, the service wakes in under 2 seconds and stays warm for approximately 15 minutes of activity.
+
+---
+
 ## Known Constraints
 
 - `captureVisibleTab()` captures **visible area only** — not the full scrollable page
@@ -91,7 +110,8 @@ website-redesign/figma/2026/06/08/alice_1749430800000.png
 - Service worker shuts down after ~30 seconds idle (Chrome 110+); woken up on event
 - Never store settings in `localStorage` — use `chrome.storage.local`
 - Signed URL uploads (Phase 2) require V4 signing; V2 has a known CORS bug
-- Cloud Functions 2nd gen cold starts are typically 500ms–2s; acceptable for internal tools
+- Cloud Run cold starts are typically 500ms–2s with a lightweight Node.js image; acceptable for internal tools
+- Container image must be pushed to Artifact Registry before deploying to Cloud Run
 
 ---
 
@@ -99,9 +119,11 @@ website-redesign/figma/2026/06/08/alice_1749430800000.png
 
 | Component | Monthly cost |
 |---|---|
-| Cloud Functions 2nd gen compute | ~$0 (well within free tier) |
+| Cloud Run compute (min 0, ~150 requests/day) | ~$0 (well within free tier) |
+| Artifact Registry (container image storage) | ~$0.01 |
 | Cloud Storage writes (4,500/month) | ~$0.02 |
 | Cloud Storage data (30-day retention, ~4.5 GB) | ~$0.10 |
+| Secret Manager (1 secret, minimal access) | ~$0 |
 | Firestore (optional metadata) | ~$0 (within free tier) |
 | **Total** | **~$0.10–$0.25/month** |
 
@@ -119,12 +141,15 @@ thehammer/
 │   ├── content.ts
 │   └── icons/
 ├── backend/
-│   ├── index.ts          ← Cloud Function entry point
-│   ├── storage.ts
-│   ├── naming.ts
+│   ├── src/
+│   │   ├── index.ts        ← Express app entry point
+│   │   ├── storage.ts      ← GCS upload logic
+│   │   └── naming.ts       ← Object path builder + sanitizer
+│   ├── Dockerfile
+│   ├── .dockerignore
 │   └── package.json
 ├── infra/
-│   └── deploy.sh         ← gcloud deploy commands
+│   └── deploy.sh           ← docker build + push + gcloud run deploy
 ├── projectplan.md
 └── sprintplan.md
 ```
