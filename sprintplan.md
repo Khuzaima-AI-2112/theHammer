@@ -55,6 +55,11 @@ Every task below has a **measurable pass/fail condition** listed beside it. A sp
 | 1.8 | Error handling on `chrome://` pages | Notification shown; no uncaught exception | 91% | Wrap `captureVisibleTab` in a try/catch with an explicit check: if `tab.url.startsWith('chrome://')`, short-circuit before calling capture and fire the notification immediately. Never let the API call happen. |
 | 1.9 | PNG data URL is a real screenshot | Length > 10,000 chars; renders correctly | 97% | Validate in the service worker: after capture, assert `dataUrl.startsWith('data:image/png;base64,')` and `dataUrl.length > 10000`. If either fails, log the actual value and show an error notification. |
 | 1.10 | Service worker stays alive during async operations | Capture + log completes without silent drop | 93% | **New task.** The service worker terminates after ~30s of idle. For short operations (capture + console log only, < 2s), this is not a problem in Sprint 1. However, to prevent any edge-case silent drop, open a long-lived `chrome.runtime.connect` port from the content script to the service worker before sending the capture message, and close it immediately after the response is received. This keeps the worker alive for the duration of the operation. |
+| 1.11 | Admin config view exists (`admin.html` / `admin.js`) | Clicking "Admin" link in popup opens admin page | 96% | Use a separate HTML page (`admin.html`) with its own script (`admin.js`). Add a small "Admin" link or icon in the popup that calls `chrome.tabs.create({ url: chrome.runtime.getURL('admin.html') })`. Test that this works even when no normal tabs are open by clicking it from a fresh Chrome window with only the extensions page. |
+| 1.12 | Admin can create/update/delete Projects and Users | Admin UI shows 2 lists; changes persist via `chrome.storage.local` | 94% | Define a simple schema under a `config` key in `chrome.storage.local`, e.g. `{ projects: [...], users: [...] }`. In `admin.js`, implement add/remove for both lists and call `chrome.storage.local.set({ config })` on every change. Unit-test the pure functions that add/remove items so UI bugs are easier to isolate. |
+| 1.13 | Popup Project/User dropdowns populate from admin config | Dropdowns show all configured Projects/Users | 95% | In `popup.js`, read the `config` key from `chrome.storage.local` on `DOMContentLoaded` and populate two `<select>` elements. If `config` is missing (first run), fall back to a small hardcoded seed list and prompt the admin to open the Admin view to customize. |
+| 1.14 | Session selection stored under `session` key | After selecting Project/User, reload popup: same selection is shown | 96% | When the user selects a Project/User/Tool and clicks "Save", call `chrome.storage.local.set({ session: { projectId, userId, tool } })`. On popup load, read `session` and set `<select>` and input values accordingly. This must survive a full Chrome restart, not just popup close. |
+| 1.15 | Capture blocked when Project/User not set | All three triggers show clear error and do not capture | 95% | In the service worker capture handler, read `session` from `chrome.storage.local`. If `!session || !session.projectId || !session.userId`, show a `chrome.notifications.create` or popup-level error and **return early without calling `captureVisibleTab`**. Test this path for keyboard shortcut, popup button, and floating button. |
 
 ### Manifest Skeleton
 
@@ -102,6 +107,10 @@ chrome.runtime.onInstalled.addListener(async () => {
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('capture-btn').addEventListener('click', () => {
     chrome.runtime.sendMessage({ type: 'CAPTURE' });
+  });
+
+  document.getElementById('admin-link').addEventListener('click', () => {
+    chrome.tabs.create({ url: chrome.runtime.getURL('admin.html') });
   });
 });
 ```
