@@ -6,12 +6,12 @@
 # =============================================================================
 $ErrorActionPreference = 'SilentlyContinue'
 
-$PROJECT_ID    = 'YOUR_GCP_PROJECT_ID'
-$REGION        = 'northamerica-northeast1'
-$BUCKET        = 'thehammer-screenshots'
-$SA_NAME       = 'thehammer-backend'
-$SA_EMAIL      = "$SA_NAME@$PROJECT_ID.iam.gserviceaccount.com"
-$SECRET_NAME   = 'thehammer-api-key'
+$PROJECT_ID = 'thehammer'
+$REGION = 'northamerica-northeast1'
+$BUCKET = 'thehammer-screenshots'
+$SA_NAME = 'thehammer-backend'
+$SA_EMAIL = "$SA_NAME@$PROJECT_ID.iam.gserviceaccount.com"
+$SECRET_NAME = 'thehammer-api-key'
 $REGISTRY_REPO = 'thehammer'
 
 $PASS = 0
@@ -24,11 +24,13 @@ function Check {
     if ($result) {
       Write-Host "  [PASS] [$Id] $Desc" -ForegroundColor Green
       $script:PASS++
-    } else {
+    }
+    else {
       Write-Host "  [FAIL] [$Id] $Desc" -ForegroundColor Red
       $script:FAIL++
     }
-  } catch {
+  }
+  catch {
     Write-Host "  [FAIL] [$Id] $Desc  <- exception: $_" -ForegroundColor Red
     $script:FAIL++
   }
@@ -58,7 +60,7 @@ Check '0.6d' 'secretmanager.googleapis.com enabled' {
 
 # 0.7 — Bucket exists, correct region, lifecycle rule present
 Check '0.7a' "Bucket gs://$BUCKET exists" {
-  $r = gcloud storage ls "gs://$BUCKET" 2>$null
+  $r = gcloud storage buckets describe "gs://$BUCKET" --format='value(name)' 2>$null
   $null -ne $r
 }
 Check '0.7b' 'Bucket region is NORTHAMERICA-NORTHEAST1' {
@@ -66,8 +68,8 @@ Check '0.7b' 'Bucket region is NORTHAMERICA-NORTHEAST1' {
   $r -match 'NORTHAMERICA-NORTHEAST1'
 }
 Check '0.7c' 'Bucket has lifecycle rule' {
-  $r = gcloud storage buckets describe "gs://$BUCKET" --format='json(lifecycle)' 2>$null
-  $r -match 'lifecycleConfig'
+  $r = gcloud storage buckets describe "gs://$BUCKET" --format='json' 2>$null
+  $r -match 'lifecycle_config'
 }
 
 # 0.8 — SA has objectCreator on bucket
@@ -104,7 +106,8 @@ Write-Host "Results: $PASS passed, $FAIL failed"
 if ($FAIL -gt 0) {
   Write-Host 'Sprint 0 is NOT complete. Fix failing checks before Sprint 1.' -ForegroundColor Red
   exit 1
-} else {
+}
+else {
   Write-Host 'All Sprint 0 checks passed. Ready for Sprint 1.' -ForegroundColor Green
   exit 0
 }
