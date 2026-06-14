@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>The Hammer — Admin</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      min-height: 100vh;
+      padding: 32px 24px;
+      font-family: system-ui, sans-serif;
+      font-size: 14px;
+      color: #1a1a1a;
+      background: #f7f6f2;
+    }
+    h1 { font-size: 20px; font-weight: 700; margin-bottom: 24px; }
+    .panels { display: flex; gap: 32px; flex-wrap: wrap; }
+    .panel {
+      flex: 1 1 280px;
+      background: #fff;
+      border: 1px solid #dcd9d5;
+      border-radius: 10px;
+      padding: 20px;
+    }
+    .panel h2 { font-size: 15px; font-weight: 700; margin-bottom: 14px; }
+    .add-row { display: flex; gap: 8px; margin-bottom: 14px; }
+    .add-row input {
+      flex: 1; padding: 6px 10px; border: 1px solid #ccc;
+      border-radius: 6px; font-size: 13px;
+    }
+    .add-row input:focus { outline: 2px solid #01696f; outline-offset: 1px; }
+    .add-row button {
+      padding: 6px 14px; background: #01696f; color: #fff;
+      border: none; border-radius: 6px; font-size: 13px;
+      font-weight: 600; cursor: pointer;
+    }
+    .add-row button:hover { background: #0c4e54; }
+    ul { list-style: none; display: flex; flex-direction: column; gap: 6px; }
+    li {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 7px 10px; background: #f9f8f5;
+      border: 1px solid #e6e4df; border-radius: 6px;
+      font-size: 13px;
+    }
+    li .id { font-size: 10px; color: #aaa; margin-left: 6px; }
+    li button {
+      background: none; border: none; cursor: pointer;
+      color: #a12c7b; font-size: 15px; line-height: 1;
+      padding: 0 4px;
+    }
+    li button:hover { color: #7d1e5e; }
+    .empty { font-size: 12px; color: #aaa; font-style: italic; padding: 4px 0; }
+    #status {
+      margin-top: 20px; font-size: 13px; color: #01696f;
+      font-weight: 600; min-height: 20px;
+    }
+  </style>
+</head>
+<body>
+  <h1>🔨 The Hammer — Admin</h1>
+
+  <div class="panels">
+    <!-- Projects panel -->
+    <div class="panel" id="projects-panel">
+      <h2>Projects</h2>
+      <div class="add-row">
+        <input id="new-project" type="text" placeholder="Project name" maxlength="64" />
+        <button id="add-project-btn">Add</button>
+      </div>
+      <ul id="project-list"></ul>
+    </div>
+
+    <!-- Users panel -->
+    <div class="panel" id="users-panel">
+      <h2>Users</h2>
+      <div class="add-row">
+        <input id="new-user" type="text" placeholder="User name" maxlength="64" />
+        <button id="add-user-btn">Add</button>
+      </div>
+      <ul id="user-list"></ul>
+    </div>
+  </div>
+
+  <p id="status"></p>
+
+  <script src="admin.js"></script>
+</body>
+</html>
