@@ -19,11 +19,11 @@
   "action": {
     "default_popup": "popup.html",
     "default_icon": {
-      "128": "icons/icon128.png"
+      "128": "icons/icon128.svg"
     }
   },
   "icons": {
-    "128": "icons/icon128.png"
+    "128": "icons/icon128.svg"
   },
   "content_scripts": [
     {

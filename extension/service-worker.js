@@ -3,6 +3,14 @@
 // No backend yet: capture goes to console only.
 // ─────────────────────────────────────────────────────────────────
 
+// Notification icon: a 1x1 teal PNG encoded as a data URI.
+// chrome.notifications.create requires an iconUrl — a missing or broken
+// icon causes silent failure on some platforms (task 2.11 note).
+// Using a data URI avoids any file-path resolution issue.
+const ICON_DATA_URI =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ' +
+  'AAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+
 // ── 1. Install: inject content.js into already-open tabs (task 1.6) ──
 chrome.runtime.onInstalled.addListener(async () => {
   const tabs = await chrome.tabs.query({ url: ['http://*/*', 'https://*/*'] });
@@ -31,50 +39,49 @@ chrome.commands.onCommand.addListener(async (command) => {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type !== 'CAPTURE') return;
 
-  // Determine which tab to capture
-  const tabPromise = sender.tab
-    ? Promise.resolve(sender.tab)                                    // from content script
-    : chrome.tabs.query({ active: true, currentWindow: true })       // from popup
-        .then(([t]) => t);
+  // sender.frameId === 0: only accept messages from top-level frames (task 1.6)
+  if (sender.tab && sender.frameId !== 0) return;
 
-  // Keep service worker alive: hold port open (task 1.10)
-  // The content script connects before sending, then disconnects on response.
-  // For popup messages there is no port — the async response keeps the worker alive.
+  const tabPromise = sender.tab
+    ? Promise.resolve(sender.tab)
+    : chrome.tabs.query({ active: true, currentWindow: true }).then(([t]) => t);
+
   tabPromise
     .then((tab) => capture(tab))
     .then((dataUrl) => sendResponse({ ok: true, length: dataUrl?.length ?? 0 }))
     .catch((err) => sendResponse({ ok: false, error: err.message }));
 
-  return true; // keep the message channel open for the async response
+  return true; // keep message channel open for async response
 });
 
 // ─────────────────────────────────────────────────────────────────
-// capture(tab) — core capture logic shared by all three triggers
+// capture(tab) — shared by all three triggers
 // ─────────────────────────────────────────────────────────────────
 async function capture(tab) {
-  // ── Guard: chrome:// and restricted pages (task 1.8) ──
-  if (!tab || !tab.url || tab.url.startsWith('chrome://') ||
+  // ── Guard: restricted pages (task 1.8) ──
+  if (!tab || !tab.url ||
+      tab.url.startsWith('chrome://') ||
       tab.url.startsWith('chrome-extension://') ||
       tab.url.startsWith('edge://') ||
       tab.url.startsWith('about:')) {
     await showNotification(
       'Cannot capture this page',
-      'The Hammer cannot capture browser UI pages. Navigate to a normal web page first.'
+      'Navigate to a normal web page first.'
     );
     return null;
   }
 
-  // ── Guard: session must have project + user set (task 1.15) ──
+  // ── Guard: session must have project + user (task 1.15) ──
   const { session } = await chrome.storage.local.get('session');
   if (!session || !session.projectId || !session.userId) {
     await showNotification(
       'Project / User not set',
-      'Open The Hammer popup and save a Project and User before capturing.'
+      'Open the popup and save a Project and User before capturing.'
     );
     return null;
   }
 
-  // ── Capture (task 1.4, 1.9) ──
+  // ── Capture (tasks 1.4, 1.9) ──
   let dataUrl;
   try {
     dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
@@ -90,29 +97,28 @@ async function capture(tab) {
     return null;
   }
 
-  console.log('[Hammer SW] captured PNG, length:', dataUrl.length,
+  console.log(
+    '[Hammer SW] captured PNG ✓',
+    '| length:', dataUrl.length,
     '| project:', session.projectId,
     '| user:', session.userId,
-    '| tool:', session.tool ?? '(none)');
+    '| tool:', session.tool ?? '(none)'
+  );
 
   return dataUrl;
 }
 
 // ─────────────────────────────────────────────────────────────────
-// showNotification — thin wrapper so every call includes iconUrl
-// (required on some platforms — task 2.11 note)
+// showNotification — always includes iconUrl (task 2.11 note)
+// Uses a data URI so no file path resolution is needed.
 // ─────────────────────────────────────────────────────────────────
 function showNotification(title, message) {
   return new Promise((resolve) => {
-    chrome.notifications.create(
-      '',
-      {
-        type: 'basic',
-        iconUrl: 'icons/icon128.png',
-        title,
-        message
-      },
-      resolve
-    );
+    chrome.notifications.create('', {
+      type: 'basic',
+      iconUrl: ICON_DATA_URI,
+      title,
+      message
+    }, resolve);
   });
 }
