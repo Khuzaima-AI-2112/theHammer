@@ -14,22 +14,24 @@ const SEED_CONFIG = {
   ]
 };
 
-const projectSelect = document.getElementById('project-select');
-const userSelect    = document.getElementById('user-select');
-const toolInput     = document.getElementById('tool-input');
-const saveBtn       = document.getElementById('save-btn');
-const captureBtn    = document.getElementById('capture-btn');
-const adminLink     = document.getElementById('admin-link');
-const statusEl      = document.getElementById('status');
+const projectSelect    = document.getElementById('project-select');
+const userSelect       = document.getElementById('user-select');
+const toolInput        = document.getElementById('tool-input');
+const saveBtn          = document.getElementById('save-btn');
+const captureBtn       = document.getElementById('capture-btn');
+const adminLink        = document.getElementById('admin-link');
+const openAdminBanner  = document.getElementById('open-admin-banner');
+const seedBanner       = document.getElementById('seed-banner');
+const statusEl         = document.getElementById('status');
 
 document.addEventListener('DOMContentLoaded', async () => {
   // ── Load config + session from storage (tasks 1.13, 1.14) ──
   let { config, session } = await chrome.storage.local.get(['config', 'session']);
 
   if (!config) {
-    // First run: use seed list and notify admin (task 1.13)
+    // First run: use seed list and show persistent banner (task 1.13)
     config = SEED_CONFIG;
-    setStatus('Using sample data — open Admin to customise.');
+    seedBanner.style.display = 'block';
   }
 
   populateSelect(projectSelect, config.projects);
@@ -68,21 +70,25 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
       if (response?.ok) {
         setStatus('Captured ✓ (' + response.length + ' chars)');
+      } else if (response?.reason === 'blocked') {
+        // fix #3: blocked capture is clearly surfaced, not shown as success
+        setStatus('Blocked — set Project & User first.');
       } else {
         setStatus('Failed: ' + (response?.error ?? 'unknown'));
       }
     });
   });
 
-  // ── Admin link (task 1.11) ──
-  adminLink.addEventListener('click', () => {
+  // ── Admin link — both footer button and banner button (task 1.11) ──
+  function openAdmin() {
     chrome.tabs.create({ url: chrome.runtime.getURL('admin.html') });
-  });
+  }
+  adminLink.addEventListener('click', openAdmin);
+  openAdminBanner.addEventListener('click', openAdmin);
 });
 
 // ── Helpers ──
 function populateSelect(selectEl, items) {
-  // Keep the placeholder option, remove any previously built options
   while (selectEl.options.length > 1) selectEl.remove(1);
   (items || []).forEach(({ id, name }) => {
     const opt = document.createElement('option');

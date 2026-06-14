@@ -3,10 +3,9 @@
 // No backend yet: capture goes to console only.
 // ─────────────────────────────────────────────────────────────────
 
-// Notification icon: a 1x1 teal PNG encoded as a data URI.
+// Notification icon: a 1x1 teal PNG as a data URI.
 // chrome.notifications.create requires an iconUrl — a missing or broken
-// icon causes silent failure on some platforms (task 2.11 note).
-// Using a data URI avoids any file-path resolution issue.
+// icon causes silent failure on some platforms.
 const ICON_DATA_URI =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ' +
   'AAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
@@ -35,12 +34,25 @@ chrome.commands.onCommand.addListener(async (command) => {
   await capture(tab);
 });
 
-// ── 3. Messages from popup and content script (tasks 1.5, 1.6, 1.10) ──
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.type !== 'CAPTURE') return;
+// ── 3. Long-lived port from content script (task 1.10) ──
+// No-op handler: prevents Chrome from logging
+// "Could not establish connection. Receiving end does not exist."
+// The port is used purely to keep the service worker alive during capture.
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name !== 'capture-port') return;
+  // Keep port reference; disconnect is driven by content.js after sendResponse.
+  port.onDisconnect.addListener(() => {
+    console.log('[Hammer SW] capture-port disconnected');
+  });
+});
 
-  // sender.frameId === 0: only accept messages from top-level frames (task 1.6)
-  if (sender.tab && sender.frameId !== 0) return;
+// ── 4. Messages from popup and content script (tasks 1.5, 1.6, 1.10) ──
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.type !== 'CAPTURE') return false;
+
+  // Only accept messages from top-level frames (task 1.6)
+  // sender.tab is undefined for popup messages — that's intentional.
+  if (sender.tab && sender.frameId !== 0) return false;
 
   const tabPromise = sender.tab
     ? Promise.resolve(sender.tab)
@@ -48,7 +60,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   tabPromise
     .then((tab) => capture(tab))
-    .then((dataUrl) => sendResponse({ ok: true, length: dataUrl?.length ?? 0 }))
+    .then((result) => {
+      if (result === null) {
+        // Capture was blocked (page guard or session guard) — fix #3
+        sendResponse({ ok: false, reason: 'blocked' });
+      } else {
+        sendResponse({ ok: true, length: result.length });
+      }
+    })
     .catch((err) => sendResponse({ ok: false, error: err.message }));
 
   return true; // keep message channel open for async response
@@ -56,6 +75,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 // ─────────────────────────────────────────────────────────────────
 // capture(tab) — shared by all three triggers
+// Returns the data URL string on success, or null if blocked.
 // ─────────────────────────────────────────────────────────────────
 async function capture(tab) {
   // ── Guard: restricted pages (task 1.8) ──
@@ -109,8 +129,7 @@ async function capture(tab) {
 }
 
 // ─────────────────────────────────────────────────────────────────
-// showNotification — always includes iconUrl (task 2.11 note)
-// Uses a data URI so no file path resolution is needed.
+// showNotification — uses a data URI iconUrl so no file resolution needed
 // ─────────────────────────────────────────────────────────────────
 function showNotification(title, message) {
   return new Promise((resolve) => {

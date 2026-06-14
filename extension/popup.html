@@ -28,9 +28,9 @@
       font-size: 13px; font-weight: 600; cursor: pointer;
       transition: background 140ms ease;
     }
-    #save-btn   { background: #e6e4df; color: #1a1a1a; }
+    #save-btn         { background: #e6e4df; color: #1a1a1a; }
     #save-btn:hover   { background: #d4d1ca; }
-    #capture-btn { background: #01696f; color: #fff; }
+    #capture-btn      { background: #01696f; color: #fff; }
     #capture-btn:hover { background: #0c4e54; }
     .footer { margin-top: 12px; text-align: right; }
     #admin-link {
@@ -42,8 +42,29 @@
       margin-top: 10px; font-size: 12px; color: #555; min-height: 16px;
       text-align: center;
     }
-    .seed-notice {
-      font-size: 11px; color: #888; margin-top: 6px;
+    /* First-run banner (task 1.13) — hidden by default, shown by popup.js */
+    #seed-banner {
+      display: none;
+      margin-top: 10px;
+      padding: 8px 10px;
+      background: #fff8e1;
+      border: 1px solid #ffe082;
+      border-radius: 6px;
+      font-size: 11px;
+      color: #6d4c00;
+      line-height: 1.4;
+    }
+    #seed-banner button {
+      flex: none;
+      display: inline;
+      padding: 0;
+      background: none;
+      border: none;
+      color: #01696f;
+      font-weight: 700;
+      font-size: 11px;
+      cursor: pointer;
+      text-decoration: underline;
     }
   </style>
 </head>
@@ -63,6 +84,11 @@
   <div class="field">
     <label for="tool-input">Tool / Context <span style="font-weight:400;text-transform:none">(optional)</span></label>
     <input id="tool-input" type="text" placeholder="e.g. Figma, Jira, Notion" maxlength="64" />
+  </div>
+
+  <!-- First-run notice (task 1.13) — populated and shown by popup.js -->
+  <div id="seed-banner">
+    Using sample data. <button id="open-admin-banner">Open Admin</button> to add your real projects and users.
   </div>
 
   <div class="row">
