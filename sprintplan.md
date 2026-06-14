@@ -21,11 +21,11 @@ Every task below has a **measurable pass/fail condition** listed beside it. A sp
 | 0.3 | Choose Cloud region: `northamerica-northeast1` (Montréal) | Region recorded in `projectplan.md` and used in all infra commands | 99% | Grep all infra scripts for hardcoded region strings before Sprint 2 starts. |
 | 0.4 | Choose auth strategy: API key via `X-Api-Key` header stored in Secret Manager | Decision documented; no alternative left open | 99% | Close any open Slack threads or comments about OAuth alternatives before starting. |
 | 0.5 | Decide Chrome Web Store visibility: **Unlisted** | Recorded in `projectplan.md` | 99% | Already decided. No action needed. |
-| 0.6 | Create GCP project; enable APIs | `gcloud services list` includes all 4 APIs | 97% | Use a `setup.sh` script that runs all `gcloud services enable` commands in one shot and exits non-zero on any failure. Re-run until clean. |
-| 0.7 | Create GCS bucket with versioning off, 90-day lifecycle rule | `gcloud storage buckets describe` shows region and lifecycle | 97% | Store the `gcloud storage buckets create` command with all flags in `infra/setup.sh`. Verify with `gcloud storage buckets describe --format=json` after creation and assert the two fields in CI. |
+| 0.6 | Create GCP project; enable APIs | `gcloud services list` includes all 4 APIs | 97% | Use `infra/setup.ps1` — runs all `gcloud services enable` commands in one shot and exits non-zero on any failure. Re-run until clean. |
+| 0.7 | Create GCS bucket with versioning off, 90-day lifecycle rule | `gcloud storage buckets describe` shows region and lifecycle | 97% | All flags are in `infra/setup.ps1`. Verify with `gcloud storage buckets describe --format=json` after creation and assert the two fields. |
 | 0.8 | Create service account with `roles/storage.objectCreator` | IAM policy on bucket lists SA with correct role | 97% | Run `gcloud storage buckets get-iam-policy` immediately after binding and grep for the SA name. If missing, re-apply and re-verify. |
 | 0.9 | Store API key in Secret Manager; grant SA accessor | `gcloud secrets versions access latest` returns key value | 96% | Script the secret creation and IAM grant together. Run the access command as the SA (using `--impersonate-service-account`) to confirm it works from the SA's perspective, not just your own. |
-| 0.10 | Set up Artifact Registry Docker repository | Describe command shows `format: DOCKER` | 97% | Add the `gcloud artifacts repositories create` command to `infra/setup.sh`. The only failure mode is a typo in the repo name — verify with describe immediately after. |
+| 0.10 | Set up Artifact Registry Docker repository | Describe command shows `format: DOCKER` | 97% | The `gcloud artifacts repositories create` command is in `infra/setup.ps1`. The only failure mode is a typo in the repo name — verify with describe immediately after. |
 
 > **Note on 0.6:** `gsutil` commands are deprecated in favour of `gcloud storage`. All infra commands in this plan use `gcloud storage`.
 
@@ -36,21 +36,25 @@ Every task below has a **measurable pass/fail condition** listed beside it. A sp
 **Goal:** Working extension that captures a screenshot and logs the data URL to the console. No backend yet.
 
 > **Architecture note — toolbar button vs. popup:**
-> `chrome.action.onClicked` **does not fire when `default_popup` is set** in the manifest. Because the popup is always present (project/tool/name settings live there), the toolbar button click opens the popup — it cannot simultaneously trigger a capture. The three capture triggers are therefore: **(1) keyboard shortcut**, **(2) a dedicated "Capture Now" button inside the popup**, **(3) the floating page button injected by the content script**. Task 1.5 below reflects this correction.
+> `chrome.action.onClicked` **does not fire when `default_popup` is set** in the manifest. Because the popup is always present (project/tool/name settings live there), the toolbar button click opens the popup — it cannot simultaneously trigger a capture. The three capture triggers are therefore: **(1) keyboard shortcut**, **(2) a dedicated "Capture Now" button inside the popup**, **(3) the floating page button injected by the content script**. Task 1.5 below reflects this.
+
+> **⚠️ Developer Mode warning (Chrome 149+, June 2026):**
+> Loading an unpacked extension in developer mode causes Chrome to show a "Disable developer mode extensions" banner **every time Chrome starts**. This is a Chrome security feature and cannot be suppressed in a standard profile. It is expected and normal during development. Dismiss it with the X or press Escape. The warning disappears permanently once the extension is published to the Chrome Web Store (even as Unlisted). Do not spend time trying to suppress it during Sprint 1 — it is not a bug.
 
 ### Deliverables
 
 | # | Task | Done when | Success % | How to reach 100% |
 |---|---|---|---|---|
 | 1.1 | `manifest.json` with MV3, correct permissions | 0 errors in `chrome://extensions` | 98% | Copy the validated skeleton from this plan verbatim. The only gap is a typo — lint with `npx @crxjs/manifest-types` or the Chrome extension linter before loading. |
-| 1.2 | `commands` key with `Ctrl+Shift+S` / `Command+Shift+S` | Shortcut appears in shortcuts page; logs `"command fired"` | 95% | Shortcut conflicts with existing OS/browser bindings are the #1 failure. Test on both Mac and Windows. If `Ctrl+Shift+S` is taken, define an alternative in the manifest and document it. |
-| 1.3 | Popup saves/loads via `chrome.storage.local` | All 3 fields reload after popup closed/reopened | 97% | Wrap every `chrome.storage.local.set` call in a try/catch and log errors. Test the reload in an Incognito window where storage behaves slightly differently. |
+| 1.2 | `commands` key with `Ctrl+Shift+S` / `Command+Shift+S` | Shortcut appears in `chrome://extensions/shortcuts`; logs `"command fired"` | 93% | **Known conflict risk on Windows:** `Ctrl+Shift+S` is claimed by AMD Radeon software, some screen recorders, and certain Office apps. Test immediately after loading. If the shortcut is silently swallowed, open `chrome://extensions/shortcuts`, reassign to `Ctrl+Shift+Y`, and update `suggested_key` in the manifest. Always verify in `chrome://extensions/shortcuts` — Chrome will show "(Not set)" if the key is in conflict with another extension. |
+| 1.3 | Popup saves/loads via `chrome.storage.local` | All 3 fields reload after popup closed/reopened | 97% | Wrap every `chrome.storage.local.set` call in a try/catch and log errors. Test the reload in an Incognito window where storage behaves slightly differently. **Never use `localStorage` in an extension** — use `chrome.storage.local` only. |
 | 1.4 | Service worker: `onCommand` calls `captureVisibleTab` | Logs PNG data URL > 10,000 chars | 95% | `captureVisibleTab` requires the tab to be active and focused. In tests, ensure the Chrome window is in the foreground. Add an `activeTab` guard: check `tab.active === true` before calling. |
-| 1.5 | Popup "Capture Now" button sends `runtime.sendMessage` | Service worker receives message and logs PNG data URL | 94% | The popup and service worker are separate contexts. Confirm the `chrome.runtime.sendMessage` call fires from the popup script (not from an inline `onclick` attribute, which CSP blocks in MV3). Use `popup.js` as a separate file. |
-| 1.6 | `onMessage` relay from content script | Floating button message received; PNG data URL logged | 92% | Content scripts can be injected into iframes unintentionally. Use `sender.frameId === 0` check in the service worker listener to confirm messages come from the top-level frame only. |
-| 1.7 | Content script injects floating capture button | Button visible in DOM on any http/https page | 93% | Some pages (e.g. Google Docs, Figma) override `z-index` or use Shadow DOM. Give the button `z-index: 2147483647` (max) and `position: fixed`. Use a unique `id="thehammer-float-btn"` to detect and skip re-injection. |
+| 1.5 | Popup "Capture Now" button sends `runtime.sendMessage` | Service worker receives message and logs PNG data URL | 94% | The popup and service worker are separate contexts. Confirm the `chrome.runtime.sendMessage` call fires from `popup.js` as a **separate file** — never use inline `onclick="..."` attributes in HTML, which are blocked by MV3's Content Security Policy. Attach listeners via `addEventListener` in `popup.js`. |
+| 1.6 | `onMessage` relay from content script | Floating button message received; PNG data URL logged | 90% | **New risk:** Content scripts declared in `manifest.json` are **not automatically injected into tabs that were already open** when the extension is first loaded or updated. Add a `chrome.runtime.onInstalled` listener in the service worker that calls `chrome.scripting.executeScript` to inject `content.js` into all existing `http/https` tabs. Also use `sender.frameId === 0` in the service worker message listener to ignore messages from iframes. |
+| 1.7 | Content script injects floating capture button | Button visible in DOM on any http/https page | 93% | Some pages (e.g. Google Docs, Figma) override `z-index` or use Shadow DOM. Give the button `z-index: 2147483647` (max) and `position: fixed`. Use a unique `id="thehammer-float-btn"` to detect and skip re-injection on already-open tabs after the `onInstalled` injection. |
 | 1.8 | Error handling on `chrome://` pages | Notification shown; no uncaught exception | 91% | Wrap `captureVisibleTab` in a try/catch with an explicit check: if `tab.url.startsWith('chrome://')`, short-circuit before calling capture and fire the notification immediately. Never let the API call happen. |
 | 1.9 | PNG data URL is a real screenshot | Length > 10,000 chars; renders correctly | 97% | Validate in the service worker: after capture, assert `dataUrl.startsWith('data:image/png;base64,')` and `dataUrl.length > 10000`. If either fails, log the actual value and show an error notification. |
+| 1.10 | Service worker stays alive during async operations | Capture + log completes without silent drop | 93% | **New task.** The service worker terminates after ~30s of idle. For short operations (capture + console log only, < 2s), this is not a problem in Sprint 1. However, to prevent any edge-case silent drop, open a long-lived `chrome.runtime.connect` port from the content script to the service worker before sending the capture message, and close it immediately after the response is received. This keeps the worker alive for the duration of the operation. |
 
 ### Manifest Skeleton
 
@@ -70,6 +74,36 @@ Every task below has a **measurable pass/fail condition** listed beside it. A sp
   "action": { "default_popup": "popup.html" },
   "content_scripts": [{ "matches": ["<all_urls>"], "js": ["content.js"] }]
 }
+```
+
+### Content Script Injection Fix (service-worker.js)
+
+```js
+// Inject content.js into all already-open tabs on install/update
+chrome.runtime.onInstalled.addListener(async () => {
+  const tabs = await chrome.tabs.query({ url: ['http://*/*', 'https://*/*'] });
+  for (const tab of tabs) {
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        files: ['content.js']
+      });
+    } catch (e) {
+      // Tab may be a restricted page — ignore silently
+    }
+  }
+});
+```
+
+### Popup Script Pattern (popup.js — never inline onclick)
+
+```js
+// popup.js — always a separate file, never inline onclick in HTML
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('capture-btn').addEventListener('click', () => {
+    chrome.runtime.sendMessage({ type: 'CAPTURE' });
+  });
+});
 ```
 
 ---
@@ -103,30 +137,27 @@ EXPOSE 8080
 CMD ["node", "dist/index.js"]
 ```
 
-### Deploy Commands (`infra/deploy.sh`)
+### Deploy Commands (`infra/deploy.ps1`)
 
-```bash
-#!/usr/bin/env bash
-set -euo pipefail
-
-PROJECT_ID="YOUR_GCP_PROJECT_ID"
-REGION="northamerica-northeast1"
-IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/thehammer/backend:latest"
+```powershell
+$PROJECT_ID = 'YOUR_GCP_PROJECT_ID'
+$REGION     = 'northamerica-northeast1'
+$IMAGE      = "$REGION-docker.pkg.dev/$PROJECT_ID/thehammer/backend:latest"
 
 gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
-docker build -t "$IMAGE" ./backend
-docker push "$IMAGE"
+docker build -t $IMAGE ./backend
+docker push $IMAGE
 
-gcloud run deploy thehammer-backend \
-  --image "$IMAGE" \
-  --region "$REGION" \
-  --platform managed \
-  --allow-unauthenticated \
-  --min-instances 0 \
-  --max-instances 5 \
-  --memory 256Mi \
-  --timeout 30s \
-  --set-secrets API_KEY=thehammer-api-key:latest \
+gcloud run deploy thehammer-backend `
+  --image $IMAGE `
+  --region $REGION `
+  --platform managed `
+  --allow-unauthenticated `
+  --min-instances 0 `
+  --max-instances 5 `
+  --memory 256Mi `
+  --timeout 30s `
+  --set-secrets API_KEY=thehammer-api-key:latest `
   --service-account "thehammer-backend@$PROJECT_ID.iam.gserviceaccount.com"
 ```
 
@@ -135,7 +166,7 @@ gcloud run deploy thehammer-backend \
 | # | Task | Done when | Success % | How to reach 100% |
 |---|---|---|---|---|
 | 2.9 | Convert data URL to `Blob` in service worker | `blob instanceof Blob`, `blob.type === 'image/png'` | 96% | Use the `fetch(dataUrl).then(r => r.blob())` pattern — it's more reliable than manual base64 decoding. Assert `blob.size > 0` before attaching to the FormData. |
-| 2.10 | `fetch()` POST to Cloud Run with `X-Api-Key` | Cloud Logging shows POST 200 < 5s | 93% | The service worker has a 30s idle timeout. Ensure the `fetch` call is awaited inside the `onCommand` handler and the handler is declared `async`. If the service worker sleeps mid-request, the upload silently drops — wrapping in `chrome.runtime.sendMessage` keeps the worker alive for the duration. |
+| 2.10 | `fetch()` POST to Cloud Run with `X-Api-Key` | Cloud Logging shows POST 200 < 5s | 93% | **Keep the service worker alive during the upload** by opening a `chrome.runtime.connect` port from the content script before the message is sent and holding it open until the upload response is received. The upload is typically < 2s, but without the port, a cold worker restart mid-upload will silently drop the request. |
 | 2.11 | Success notification shows GCS path | Notification contains full GCS path | 94% | `chrome.notifications` requires the `notifications` permission and an `iconUrl` — a missing icon causes the notification to silently fail on some platforms. Include a 128×128 PNG icon in the extension and reference it in every `chrome.notifications.create` call. |
 | 2.12 | Error notification on failure | Error shown within 10s; no crash | 91% | Set an explicit `AbortController` timeout on the `fetch` (e.g. 15s). Without it, a hung Cloud Run container will keep the service worker alive until Chrome kills it, leaving the user with no feedback. |
 | 2.13 | Cloud Run URL configurable in settings | Changing URL routes to new service | 95% | Validate the URL format (must start with `https://`) before saving in `chrome.storage.local`. Show an inline error in the popup if the URL is invalid rather than silently saving a broken value. |
@@ -171,12 +202,12 @@ gcloud run deploy thehammer-backend \
 ```
 
 Apply with:
-```bash
-gcloud storage buckets update gs://thehammer-screenshots --cors-file=infra/cors.json
+```powershell
+gcloud storage buckets update gs://thehammer-screenshots --cors-file=infra\cors.json
 ```
 
 Verify:
-```bash
+```powershell
 gcloud storage buckets describe gs://thehammer-screenshots --format="json(cors)"
 ```
 
@@ -192,7 +223,7 @@ gcloud storage buckets describe gs://thehammer-screenshots --format="json(cors)"
 
 | # | Check | Done when | Success % | How to reach 100% |
 |---|---|---|---|---|
-| 3.8 | CORS preflight passes | `curl -X OPTIONS` returns 200 with correct `Access-Control-Allow-Origin` | 85% | **Highest-risk task in the project.** Do this in 3 steps before touching extension code: (1) Apply `cors.json`. (2) Run `gcloud storage buckets describe --format=json(cors)` and confirm it's set. (3) Run the `curl -X OPTIONS` command from the plan with your actual extension ID. Only proceed to task 3.6 after step 3 passes. CORS config propagates in < 60s but can take up to 5 minutes — wait and retry if the first check fails. |
+| 3.8 | CORS preflight passes | `curl -X OPTIONS` returns 200 with correct `Access-Control-Allow-Origin` | 85% | **Highest-risk task in the project.** Do this in 3 steps before touching extension code: (1) Apply `cors.json`. (2) Run `gcloud storage buckets describe --format=json(cors)` and confirm it's set. (3) Run the `curl -X OPTIONS` command with your actual extension ID. Only proceed to task 3.6 after step 3 passes. CORS config propagates in < 60s but can take up to 5 minutes — wait and retry if the first check fails. |
 | 3.9 | Signed URL expires correctly | After 10-min TTL, PUT returns HTTP 403 | 93% | This is a passive verification — just wait and test. The only failure mode is generating the URL with the wrong expiry. Assert `expiresAt = Date.now() + 600_000` in the signing code and log it. |
 
 ---
@@ -206,7 +237,7 @@ gcloud storage buckets describe gs://thehammer-screenshots --format="json(cors)"
 | # | Task | Done when | Success % | How to reach 100% |
 |---|---|---|---|---|
 | 4.1 | Offline queue persisted in `chrome.storage.local` | 2 queued entries visible; both upload on restore | 88% | Use a simple array in `chrome.storage.local` with keys `queue` (pending) and `failed` (exhausted retries). On every service worker startup, check `queue.length > 0` and drain it. The service worker wakes on browser start — this is the natural drain trigger. |
-| 4.2 | Exponential backoff retry (max 3, 1s/2s/4s) | 3 attempt logs with correct delays; 3rd fail → `failed` | 87% | Do not use `setTimeout` directly in a service worker — the worker may sleep between retries and `setTimeout` callbacks are dropped. Use `chrome.alarms.create` with the retry delay as the alarm period. The alarm wakes the worker reliably. |
+| 4.2 | Exponential backoff retry (max 3, 1s/2s/4s) | 3 attempt logs with correct delays; 3rd fail → `failed` | 87% | Do not use `setTimeout` directly in a service worker — the worker may sleep between retries and `setTimeout` callbacks are dropped. Use `chrome.alarms.create` with the retry delay as the alarm period. The alarm wakes the worker reliably. Note: `chrome.alarms` has a **minimum interval of 30 seconds** — retries at 1s/2s/4s must be handled in a single worker wake cycle while the worker is alive, only falling back to `chrome.alarms` for the final long retry. |
 | 4.3 | Upload progress via `XMLHttpRequest.upload.onprogress` | Progress bar updates 0–100% for ≥ 100 KB PNG | 85% | `fetch()` does not expose upload progress in service workers. Use `XMLHttpRequest` wrapped in a Promise for the upload call. The `onprogress` handler must post a message back to the popup via `chrome.runtime.sendMessage` since the popup is a separate context. Test this with a throttled network connection in Chrome DevTools (Network tab → Slow 3G). |
 | 4.4 | Settings persist all 5 fields across restart | All 5 fields reload after full Chrome restart | 95% | Use one `chrome.storage.local.set({ settings: { ...allFields } })` call rather than 5 separate `set` calls. A single atomic write prevents partial saves if the popup closes mid-save. |
 | 4.5 | History tab: last 20 uploads; oldest drops at 21 | After 21 captures, exactly 20 rows | 86% | Store history as a fixed-length array. On each push, use `history.unshift(newEntry); if (history.length > 20) history.pop();`. Write this as a pure function and unit-test it with 0, 1, 20, and 21 items. |
@@ -235,13 +266,13 @@ gcloud storage buckets describe gs://thehammer-screenshots --format="json(cors)"
 | Sprint | Description | Avg Task % | Sprint-level % | Key risk task |
 |---|---|---|---|---|
 | Sprint 0 | Spec & Infrastructure | 98% | **97%** | 0.9 — SA secret access verification |
-| Sprint 1 | Extension Shell | 95% | **88%** | 1.8 — Error handling on chrome:// pages |
-| Sprint 2 | Cloud Run + GCS Upload | 95% | **82%** | 2.12 — Error notification + AbortController |
+| Sprint 1 | Extension Shell | 95% | **90%** | 1.6 — Content script injection into open tabs |
+| Sprint 2 | Cloud Run + GCS Upload | 95% | **83%** | 2.12 — Error notification + AbortController |
 | Sprint 3 | Direct Signed URL Upload | 91% | **72%** | 3.8 — CORS preflight verification |
 | Sprint 4 | Hardening & UX | 91% | **70%** | 4.2 — Retry via chrome.alarms |
-| **Full project end-to-end** | All sprints complete | — | **~55–60%** | Sprint 3 CORS + Sprint 4 retry |
+| **Full project end-to-end** | All sprints complete | — | **~58–63%** | Sprint 3 CORS + Sprint 4 retry |
 
-> With every "How to reach 100%" mitigation applied, conservative re-estimates: Sprint 1 → 94%, Sprint 2 → 89%, Sprint 3 → 82%, Sprint 4 → 78%. Full project → **~65–70%**.
+> With every "How to reach 100%" mitigation applied, conservative re-estimates: Sprint 1 → 95%, Sprint 2 → 90%, Sprint 3 → 82%, Sprint 4 → 78%. Full project → **~67–72%**.
 
 ---
 
@@ -264,12 +295,16 @@ A sprint is **not done** until all of the following are true:
 |---|---|---|
 | `captureVisibleTab` fails on `chrome://` pages | Medium | Short-circuit before calling capture if `tab.url.startsWith('chrome://')` (task 1.8) |
 | `chrome.action.onClicked` silently never fires | High — **already fixed** | Popup button sends `runtime.sendMessage` instead; `onClicked` is not used |
+| Content scripts not injected into already-open tabs | Medium — **new** | `onInstalled` listener calls `chrome.scripting.executeScript` on all open http/https tabs (task 1.6, code snippet above) |
+| Inline `onclick` attributes blocked by MV3 CSP | Medium — **new** | All event listeners attached via `addEventListener` in separate `.js` files (task 1.5, code snippet above) |
+| `Ctrl+Shift+S` shortcut conflict on Windows | Medium — **new** | Verify in `chrome://extensions/shortcuts` after loading; fallback to `Ctrl+Shift+Y` if silently ignored (task 1.2) |
+| Developer mode banner on Chrome restart | Low — **expected** | Normal during development; disappears after Web Store publish. Do not attempt to suppress (noted in Sprint 1 intro) |
+| Service worker terminated mid-upload | Medium — **updated** | Hold `chrome.runtime.connect` port open from content script during capture+upload; close on response (tasks 1.10, 2.10) |
 | Cloud Run cold start delays first capture | Low | ~500ms–2s acceptable; set `--min-instances 1` if team complaints arise |
-| Service worker terminated mid-upload | Low | PNGs < 1 MB; upload < 2s; retry queue handles edge cases (task 4.1) |
 | CORS misconfiguration blocks Sprint 3 uploads | High | Verify with `curl -X OPTIONS` before wiring extension (task 3.8); fallback in place (task 3.7) |
-| `Content-Type` mismatch on signed URL PUT | High — **new** | Set identical `Content-Type: image/png` in both signing call and PUT headers (task 3.6) |
-| `setTimeout` dropped in sleeping service worker | Medium — **new** | Use `chrome.alarms` for retry delays (task 4.2) |
-| XHR progress events not reaching popup | Medium — **new** | Post progress via `chrome.runtime.sendMessage` from service worker to popup (task 4.3) |
+| `Content-Type` mismatch on signed URL PUT | High | Set identical `Content-Type: image/png` in both signing call and PUT headers (task 3.6) |
+| `setTimeout` dropped in sleeping service worker | Medium | Use `chrome.alarms` for retry delays > 30s; handle short retries in same wake cycle (task 4.2) |
+| XHR progress events not reaching popup | Medium | Post progress via `chrome.runtime.sendMessage` from service worker to popup (task 4.3) |
 | Signed URL intercepted in transit | Medium | HTTPS enforced by GCS; 10-minute TTL limits exposure window |
 | Object name collision | Low | `Date.now()` epoch suffix on every filename (task 2.5) |
 | Container running as root | Medium — **fixed** | `USER node` + `chown -R node:node /app` in Dockerfile (task 4.11) |
@@ -280,7 +315,7 @@ A sprint is **not done** until all of the following are true:
 ## Backlog (Post-Sprint 4)
 
 - Full-page scroll-and-stitch capture
-- Chrome Web Store public listing
+- Chrome Web Store public listing (removes developer mode banner permanently)
 - Per-project GCS bucket isolation
 - Slack / Teams webhook notification on upload
 - Admin dashboard (Firestore-backed web app or Cloud Storage Browser)
