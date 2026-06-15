@@ -1,8 +1,7 @@
 // popup.js — always a separate file, never inline onclick in HTML (task 1.5)
-// Handles: storage load/save (1.3), dropdowns from config (1.13),
-//          session persistence (1.14), capture message (1.5), admin link (1.11).
+// Sprint 2 adds: Settings panel with Cloud Run URL + API key (task 2.13)
 
-// ── Seed config used on first run before admin sets anything (task 1.13) ──
+// ── Seed config used on first run before admin sets anything ──
 const SEED_CONFIG = {
   projects: [
     { id: 'proj-seed-1', name: 'Sample Project A' },
@@ -14,22 +13,29 @@ const SEED_CONFIG = {
   ]
 };
 
-const projectSelect    = document.getElementById('project-select');
-const userSelect       = document.getElementById('user-select');
-const toolInput        = document.getElementById('tool-input');
-const saveBtn          = document.getElementById('save-btn');
-const captureBtn       = document.getElementById('capture-btn');
-const adminLink        = document.getElementById('admin-link');
-const openAdminBanner  = document.getElementById('open-admin-banner');
-const seedBanner       = document.getElementById('seed-banner');
-const statusEl         = document.getElementById('status');
+const projectSelect   = document.getElementById('project-select');
+const userSelect      = document.getElementById('user-select');
+const toolInput       = document.getElementById('tool-input');
+const saveBtn         = document.getElementById('save-btn');
+const captureBtn      = document.getElementById('capture-btn');
+const adminLink       = document.getElementById('admin-link');
+const openAdminBanner = document.getElementById('open-admin-banner');
+const seedBanner      = document.getElementById('seed-banner');
+const statusEl        = document.getElementById('status');
+
+// Settings panel elements (task 2.13)
+const settingsToggle  = document.getElementById('settings-toggle');
+const settingsPanel   = document.getElementById('settings-panel');
+const cloudRunUrlInput= document.getElementById('cloud-run-url');
+const apiKeyInput     = document.getElementById('api-key-input');
+const urlError        = document.getElementById('url-error');
+const settingsSaveBtn = document.getElementById('settings-save-btn');
 
 document.addEventListener('DOMContentLoaded', async () => {
-  // ── Load config + session from storage (tasks 1.13, 1.14) ──
-  let { config, session } = await chrome.storage.local.get(['config', 'session']);
+  // ── Load config + session + settings from storage ──
+  let { config, session, settings } = await chrome.storage.local.get(['config', 'session', 'settings']);
 
   if (!config) {
-    // First run: use seed list and show persistent banner (task 1.13)
     config = SEED_CONFIG;
     seedBanner.style.display = 'block';
   }
@@ -37,14 +43,20 @@ document.addEventListener('DOMContentLoaded', async () => {
   populateSelect(projectSelect, config.projects);
   populateSelect(userSelect, config.users);
 
-  // ── Restore saved session (task 1.14) ──
+  // ── Restore saved session ──
   if (session) {
     if (session.projectId) projectSelect.value = session.projectId;
     if (session.userId)    userSelect.value    = session.userId;
     if (session.tool)      toolInput.value     = session.tool;
   }
 
-  // ── Save button (task 1.14) ──
+  // ── Restore saved settings ──
+  if (settings) {
+    if (settings.cloudRunUrl) cloudRunUrlInput.value = settings.cloudRunUrl;
+    if (settings.apiKey)      apiKeyInput.value      = settings.apiKey;
+  }
+
+  // ── Save session button ──
   saveBtn.addEventListener('click', async () => {
     const s = {
       projectId: projectSelect.value,
@@ -60,7 +72,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
-  // ── Capture Now button (task 1.5) ──
+  // ── Capture Now button ──
   captureBtn.addEventListener('click', () => {
     setStatus('Capturing…');
     chrome.runtime.sendMessage({ type: 'CAPTURE' }, (response) => {
@@ -69,9 +81,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         return;
       }
       if (response?.ok) {
-        setStatus('Captured ✓ (' + response.length + ' chars)');
+        setStatus('Uploaded ✓');
       } else if (response?.reason === 'blocked') {
-        // fix #3: blocked capture is clearly surfaced, not shown as success
         setStatus('Blocked — set Project & User first.');
       } else {
         setStatus('Failed: ' + (response?.error ?? 'unknown'));
@@ -79,12 +90,50 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   });
 
-  // ── Admin link — both footer button and banner button (task 1.11) ──
+  // ── Admin link ──
   function openAdmin() {
     chrome.tabs.create({ url: chrome.runtime.getURL('admin.html') });
   }
   adminLink.addEventListener('click', openAdmin);
   openAdminBanner.addEventListener('click', openAdmin);
+
+  // ── Settings toggle (task 2.13) ──
+  settingsToggle.addEventListener('click', () => {
+    settingsPanel.classList.toggle('open');
+    settingsToggle.textContent = settingsPanel.classList.contains('open')
+      ? '✕ Settings'
+      : '⚙ Settings';
+  });
+
+  // ── Settings save (task 2.13) ──
+  // Validates https:// prefix before saving; shows inline error if invalid.
+  settingsSaveBtn.addEventListener('click', async () => {
+    const rawUrl = cloudRunUrlInput.value.trim();
+    const key    = apiKeyInput.value.trim();
+
+    // Validate URL — must start with https://
+    if (rawUrl && !rawUrl.startsWith('https://')) {
+      urlError.style.display = 'block';
+      cloudRunUrlInput.focus();
+      return;
+    }
+    urlError.style.display = 'none';
+
+    try {
+      await chrome.storage.local.set({
+        settings: { cloudRunUrl: rawUrl, apiKey: key }
+      });
+      setStatus('Settings saved ✓');
+    } catch (err) {
+      console.error('[Hammer popup] settings save error:', err);
+      setStatus('Settings save failed: ' + err.message);
+    }
+  });
+
+  // Hide url-error when user edits the field
+  cloudRunUrlInput.addEventListener('input', () => {
+    urlError.style.display = 'none';
+  });
 });
 
 // ── Helpers ──
