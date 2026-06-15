@@ -1,5 +1,5 @@
-node_modules
-npm-debug.log
-tests
-.env
-*.md
+# 4.12: whitelist approach — ignore everything, then allow only what the image needs.
+# Safer than a blacklist (new dev files added later are automatically excluded).
+*
+!src/
+!package*.json

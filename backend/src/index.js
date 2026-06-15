@@ -1,18 +1,44 @@
 // ─────────────────────────────────────────────────────────────────
-// The Hammer — Backend (Sprint 3: adds POST /upload-url)
+// The Hammer — Backend (Sprint 4: adds rate limiting 4.6)
 // POST /capture    → Content-Type guard → auth → multer → validate → sanitize → GCS
 // POST /upload-url → auth → JSON validate → sanitize → V4 signed URL
 // GET  /health     → 200 {status:"ok"} — zero GCS dependency
 // ─────────────────────────────────────────────────────────────────
 'use strict';
 
-const express  = require('express');
-const multer   = require('multer');
-const crypto   = require('crypto');
+const express   = require('express');
+const multer    = require('multer');
+const crypto    = require('crypto');
+const rateLimit = require('express-rate-limit');
 const { Storage } = require('@google-cloud/storage');
 
 const app  = express();
 const PORT = process.env.PORT || 8080;
+
+// ── 4.6: trust proxy 1 — MANDATORY for Cloud Run.
+// Without this all traffic appears from one IP and rate limiting is useless.
+app.set('trust proxy', 1);
+
+// ── 4.6: 60 req / IP / min rate limiter ──
+const limiter = rateLimit({
+  windowMs:          60 * 1000,   // 1 minute
+  max:               60,
+  standardHeaders:   true,        // sets RateLimit-* headers
+  legacyHeaders:     false,
+  // express-rate-limit v7 uses handler for custom response
+  handler: (req, res, _next, options) => {
+    res.status(options.statusCode).json({
+      error:      'Too many requests',
+      retryAfter: Math.ceil(options.windowMs / 1000)
+    });
+  }
+});
+
+// Apply limiter to all routes EXCEPT /health (uptime check must not be rate-limited)
+app.use((req, res, next) => {
+  if (req.path === '/health') return next();
+  return limiter(req, res, next);
+});
 
 // ── JSON body parser — needed for /upload-url ──
 app.use(express.json());
@@ -28,7 +54,7 @@ const upload = multer({
 });
 
 // ─────────────────────────────────────────────────────────────────
-// HMAC-based constant-time key comparison (Sprint 2, item 3 fix).
+// HMAC-based constant-time key comparison.
 // Both sides hashed to fixed 32-byte digest before timingSafeEqual.
 // ─────────────────────────────────────────────────────────────────
 function keysEqual(provided, expected) {
@@ -41,7 +67,7 @@ function keysEqual(provided, expected) {
 }
 
 // ─────────────────────────────────────────────────────────────────
-// 2.7 — API key auth middleware
+// API key auth middleware
 // ─────────────────────────────────────────────────────────────────
 function requireApiKey(req, res, next) {
   const expected = process.env.API_KEY;
@@ -56,7 +82,7 @@ function requireApiKey(req, res, next) {
 }
 
 // ─────────────────────────────────────────────────────────────────
-// Pre-multer Content-Type guard (Sprint 2, items 2+5 fix).
+// Pre-multer Content-Type guard.
 // ─────────────────────────────────────────────────────────────────
 function requireMultipart(req, res, next) {
   const ct = req.headers['content-type'] || '';
@@ -70,7 +96,7 @@ function requireMultipart(req, res, next) {
 }
 
 // ─────────────────────────────────────────────────────────────────
-// 2.4 — Sanitize a string field
+// Sanitize a string field
 // ─────────────────────────────────────────────────────────────────
 function sanitize(value, maxLen = 64) {
   if (typeof value !== 'string') return '';
@@ -82,7 +108,7 @@ function sanitize(value, maxLen = 64) {
 }
 
 // ─────────────────────────────────────────────────────────────────
-// 2.5 — Build GCS object path
+// Build GCS object path
 // Format: {projectId}/{userId}/{ISO-ts}_{tool}_{rand4}.png
 // ─────────────────────────────────────────────────────────────────
 function buildObjectPath(projectId, userId, tool, now = new Date()) {
@@ -98,28 +124,19 @@ function buildObjectPath(projectId, userId, tool, now = new Date()) {
 // Routes
 // ─────────────────────────────────────────────────────────────────
 
-// 2.1 — Health check — zero GCS dependency
+// Health check — zero GCS dependency, exempt from rate limiter
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok' });
 });
 
 // ─────────────────────────────────────────────────────────────────
-// 3.1 / 3.2 / 3.3 — POST /upload-url
+// POST /upload-url
 // Body: { project, tool, name }
 // Returns: { signedUrl, path }
-//
-// SA must have roles/iam.serviceAccountTokenCreator (task 3.4)
-// before this endpoint will work. Grant it BEFORE deploying.
-// A missing role produces a cryptic 403 easily misread as a signing bug.
-//
-// Content-Type: image/png is set IDENTICALLY in both the signing call
-// and must be sent identically in the extension PUT header.
-// Any mismatch → silent 403 (task 3.6).
 // ─────────────────────────────────────────────────────────────────
 app.post('/upload-url', requireApiKey, async (req, res) => {
   const { project, tool, name } = req.body || {};
 
-  // ── 3.1 Validate required fields — return 400 with field name ──
   const missing = [];
   if (!project) missing.push('project');
   if (!tool)    missing.push('tool');
@@ -133,42 +150,34 @@ app.post('/upload-url', requireApiKey, async (req, res) => {
     return res.status(500).json({ error: 'Server misconfiguration: GCS_BUCKET not set' });
   }
 
-  // ── Sanitize — reuse Sprint 2 functions (task 3.1: share, do not copy) ──
   const safeProject = sanitize(project);
   const safeTool    = sanitize(tool, 32);
   const safeName    = sanitize(name);
-
-  // ── 3.3 Build object path using same convention as /capture ──
-  const objectPath = buildObjectPath(safeProject, safeName, safeTool);
+  const objectPath  = buildObjectPath(safeProject, safeName, safeTool);
 
   try {
-    // ── 3.2 Generate V4 signed PUT URL, 10-minute expiry ──
-    // contentType here MUST match Content-Type header in the extension PUT (task 3.6).
     const [signedUrl] = await gcs
       .bucket(BUCKET_NAME)
       .file(objectPath)
       .getSignedUrl({
-        version: 'v4',
-        action: 'write',
-        expires: Date.now() + 10 * 60 * 1000, // 10 minutes
+        version:     'v4',
+        action:      'write',
+        expires:     Date.now() + 10 * 60 * 1000,
         contentType: 'image/png',
       });
 
     console.log('[Hammer backend] signed URL issued for', objectPath);
-
-    // ── 3.3 Return { signedUrl, path } ──
     return res.json({ signedUrl, path: objectPath });
 
   } catch (err) {
     console.error('[Hammer backend] signing error:', err);
-    // 403 usually means missing serviceAccountTokenCreator role (task 3.4)
     const status = err.code === 403 ? 403 : 502;
     return res.status(status).json({ error: 'Failed to generate signed URL', detail: err.message });
   }
 });
 
 // ─────────────────────────────────────────────────────────────────
-// 2.2 / 2.3 / 2.6 / 2.7 / 2.8 — POST /capture (Sprint 2, unchanged)
+// POST /capture
 // ─────────────────────────────────────────────────────────────────
 app.post(
   '/capture',
