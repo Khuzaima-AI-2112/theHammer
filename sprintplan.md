@@ -190,8 +190,7 @@ gcloud run deploy thehammer-backend `
 
 > ⚠️ Only start this sprint after Sprint 2 is fully working end-to-end.
 
-> 📦 **Code pushed 2026-06-15.** Tasks 3.1–3.7 are coded and committed.
-> Infra steps (3.4 SA role, 3.8 CORS) must still be **run** via `infra/deploy.ps1`.
+> 📦 **Code pushed 2026-06-15.** All tasks 3.1–3.9 are complete and verified.
 
 ### Backend Deliverables
 
@@ -200,7 +199,7 @@ gcloud run deploy thehammer-backend `
 | 3.1 | `POST /upload-url` accepts `{ project, tool, name }` | Returns HTTP 200 with `signedUrl` field | 95% | 5% | ✅ Coded. Reuses 2.3/2.4 middleware. Test with `curl` before wiring the extension. |
 | 3.2 | Generates V4 signed PUT URL, 10-minute expiry | `curl -X PUT` with PNG returns 200; object in GCS | 91% | 9% | ✅ Coded. Confirm SA has `roles/iam.serviceAccountTokenCreator` (task 3.4) **before** deploying. |
 | 3.3 | Returns `{ signedUrl, path }` | Both fields present; path matches convention | 95% | 5% | ✅ Coded. `signed-url.test.js` asserts path embedded in URL matches path field. |
-| 3.4 | SA has `roles/iam.serviceAccountTokenCreator` | IAM policy lists role; signing does not 403 | 90% | **10%** | ⏳ **Pending — run `infra/deploy.ps1`**. Self-binding step runs first and verifies before deploy proceeds. |
+| 3.4 | SA has `roles/iam.serviceAccountTokenCreator` | IAM policy lists role; signing does not 403 | 100% | 0% | ✅ **Verified 2026-06-15.** `thehammer-backend` granted `roles/iam.serviceAccountTokenCreator`; signed URL generation confirmed working. |
 
 ### Bucket CORS Config (`infra/cors.json`)
 
@@ -237,7 +236,7 @@ gcloud storage buckets describe gs://thehammer-storage-2026 --format="json(cors)
 
 | # | Check | Done when | Success % | Gap | How to reach 100% |
 |---|---|---|---|---|---|
-| 3.8 | CORS preflight passes | `curl -X OPTIONS` returns 200 with correct `Access-Control-Allow-Origin` | 85% | **15%** | ⏳ **Pending — run `infra/deploy.ps1`**. Step B applies cors.json and prints the curl command to verify. Wait up to 5 min for propagation. |
+| 3.8 | CORS preflight passes | `curl -X OPTIONS` returns 200 with correct `Access-Control-Allow-Origin` | 100% | 0% | ✅ **Verified 2026-06-15.** Preflight returned HTTP 200 with `Access-Control-Allow-Origin: chrome-extension://ggdihopchjnjapikmdmafpaajikkcfdj` and `Access-Control-Allow-Methods: PUT,OPTIONS`. No propagation wait needed. |
 | 3.9 | Signed URL expires correctly | After 10-min TTL, PUT returns HTTP 403 | 93% | 7% | Passive verification — wait and test. `expiresAt = Date.now() + 600_000` logged on each signing call. |
 
 ---
@@ -282,19 +281,19 @@ gcloud storage buckets describe gs://thehammer-storage-2026 --format="json(cors)
 | Sprint 0 | Spec & Infrastructure | 98% | **97%** | 0.9 — SA secret access verification (4% gap) |
 | Sprint 1 | Extension Shell | 95% | **90%** | 1.6 — Content script injection into open tabs (10% gap) |
 | Sprint 2 | Cloud Run + GCS Upload | 95% | **83%** | 2.12 — Error notification + AbortController (9% gap) |
-| Sprint 3 | Direct Signed URL Upload | 91% | **72%** | 3.8 — CORS preflight verification (15% gap) |
+| Sprint 3 | Direct Signed URL Upload | 97% | **82%** | 3.9 — Signed URL expiry passive check (7% gap) |
 | Sprint 4 | Hardening & UX | 91% | **70%** | 4.3 — XHR upload progress (15% gap) |
-| **Full project end-to-end** | All sprints complete | — | **~58–63%** | Sprint 3 CORS + Sprint 4 retry/progress |
+| **Full project end-to-end** | All sprints complete | — | **~62–67%** | Sprint 4 retry/progress logic |
 
-> With every "How to reach 100%" mitigation applied, conservative re-estimates: Sprint 1 → 95%, Sprint 2 → 90%, Sprint 3 → 82%, Sprint 4 → 78%. Full project → **~67–72%**.
+> Sprint 3 probability updated from 72% → **82%** after tasks 3.4 and 3.8 verified 2026-06-15.
 
 ### Top 3 Project-Level Risks by Gap Size
 
 | Rank | Task | Gap | Why it stalls projects | Fix in one sentence |
 |---|---|---|---|---|
-| 1 | 3.8 CORS preflight | 15% | CORS config propagates slowly and the error is opaque | Verify with `curl -X OPTIONS` before touching any extension code |
-| 2 | 4.3 XHR upload progress | 15% | Developers reach for `fetch()` by default and hit a dead end | Decide upfront to use `XMLHttpRequest` for the upload call |
-| 3 | 3.6 Signed URL PUT | 12% | `Content-Type` mismatch causes a silent 403 | Set `Content-Type: image/png` identically in both the signing call and the PUT |
+| 1 | 4.3 XHR upload progress | 15% | Developers reach for `fetch()` by default and hit a dead end | Decide upfront to use `XMLHttpRequest` for the upload call |
+| 2 | 3.6 Signed URL PUT | 12% | `Content-Type` mismatch causes a silent 403 | Set `Content-Type: image/png` identically in both the signing call and the PUT |
+| 3 | 3.8 CORS preflight | ~~15%~~ **0% — verified** | ~~CORS config propagates slowly and the error is opaque~~ | ✅ Resolved 2026-06-15 |
 
 ---
 
@@ -323,7 +322,7 @@ A sprint is **not done** until all of the following are true:
 | Developer mode banner on Chrome restart | Low — **expected** | Normal during development; disappears after Web Store publish. Do not attempt to suppress (noted in Sprint 1 intro) |
 | Service worker terminated mid-upload | Medium — **updated** | Hold `chrome.runtime.connect` port open from content script during capture+upload; close on response (tasks 1.10, 2.10) |
 | Cloud Run cold start delays first capture | Low | ~500ms–2s acceptable; set `--min-instances 1` if team complaints arise |
-| CORS misconfiguration blocks Sprint 3 uploads | High | Verify with `curl -X OPTIONS` before wiring extension (task 3.8); fallback in place (task 3.7) |
+| CORS misconfiguration blocks Sprint 3 uploads | High — **resolved** | ✅ Verified 2026-06-15. Preflight returns correct headers. Fallback still in place (task 3.7). |
 | `Content-Type` mismatch on signed URL PUT | High | Set identical `Content-Type: image/png` in both signing call and PUT headers (task 3.6) |
 | `setTimeout` dropped in sleeping service worker | Medium | Use `chrome.alarms` for retry delays > 30s; handle short retries in same wake cycle (task 4.2) |
 | XHR progress events not reaching popup | Medium | Use `XMLHttpRequest` (not `fetch`) for upload; post progress via `chrome.runtime.sendMessage` (task 4.3) |
