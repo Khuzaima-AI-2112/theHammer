@@ -29,16 +29,10 @@ if (-not $BucketName) {
 }
 
 $REGION = 'northamerica-northeast1'
-$IMAGE  = "$REGION-docker.pkg.dev/$ProjectId/thehammer/backend:latest"
+$IMAGE = "$REGION-docker.pkg.dev/$ProjectId/thehammer/backend:latest"
 
-Write-Host "[deploy] Configuring Docker auth..."
-gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
-
-Write-Host "[deploy] Building image: $IMAGE"
-docker build -t $IMAGE ./backend
-
-Write-Host "[deploy] Pushing image..."
-docker push $IMAGE
+Write-Host "[deploy] Building and pushing image with Cloud Build: $IMAGE"
+gcloud builds submit --tag $IMAGE --gcs-source-staging-dir gs://$BucketName/source ./backend
 
 Write-Host "[deploy] Deploying to Cloud Run..."
 gcloud run deploy thehammer-backend `
@@ -62,9 +56,11 @@ try {
   $resp = Invoke-RestMethod -Uri "$SERVICE_URL/health" -Method GET
   if ($resp.status -eq 'ok') {
     Write-Host "[deploy] Health check PASSED: $($resp | ConvertTo-Json)"
-  } else {
+  }
+  else {
     Write-Warning "[deploy] Health check returned unexpected body: $($resp | ConvertTo-Json)"
   }
-} catch {
+}
+catch {
   Write-Warning "[deploy] Health check request failed: $_"
 }
