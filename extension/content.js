@@ -1,6 +1,10 @@
 // content.js — injected into all http/https pages (tasks 1.6, 1.7, 1.10)
 // Injects a floating capture button and relays the CAPTURE message
 // to the service worker via a long-lived port to keep it alive.
+//
+// CAPTURE response contract (defined in service-worker.js):
+// { ok: boolean, path?: string, reason?: string, error?: string }
+// Update this file whenever the contract in service-worker.js changes.
 
 (function () {
   // Skip if already injected (re-injection guard — task 1.7)
@@ -60,12 +64,13 @@
         return;
       }
       if (response?.ok) {
-        console.log('[Hammer content] captured OK, length:', response.length);
-        // Brief visual confirmation
+        // Item 1 fix (lessons_learned.md): log response.path, not response.length.
+        // response.length was a Sprint 1 field; the contract now uses { ok, path }.
+        console.log('[Hammer content] captured OK, path:', response.path);
         btn.innerHTML = '✅';
         setTimeout(() => { btn.innerHTML = '🔨'; }, 1200);
       } else {
-        console.error('[Hammer content] capture failed:', response?.error);
+        console.error('[Hammer content] capture failed:', response?.error ?? response?.reason);
         btn.innerHTML = '❌';
         setTimeout(() => { btn.innerHTML = '🔨'; }, 1500);
       }

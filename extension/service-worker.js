@@ -1,19 +1,25 @@
 // ─────────────────────────────────────────────────────────────────
-// The Hammer — Service Worker (Sprint 2)
-// Adds: blob conversion, fetch upload to Cloud Run, notifications
-// with GCS path on success, AbortController timeout, error notification.
+// The Hammer — Service Worker (Sprint 2, fixes applied per lessons_learned.md)
+// POST /capture   → blob convert → upload to Cloud Run → GCS
 // ─────────────────────────────────────────────────────────────────
 
-// Notification icon: a 1x1 teal PNG as a data URI.
+// CAPTURE response contract (authoritative — update all consumers when this changes):
+// { ok: boolean, path?: string, reason?: string, error?: string }
+// Consumers: content.js (floating button), popup.js (Capture Now button)
+
+// Notification icon: a 1×1 teal PNG as a data URI.
 // chrome.notifications.create requires an iconUrl — a missing or broken
 // icon causes silent failure on some platforms.
 const ICON_DATA_URI =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ' +
   'AAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
 
-// Default Cloud Run URL — overridden by the user in popup Settings.
-// Stored under storage key 'settings' as { cloudRunUrl: string, apiKey: string }.
-const DEFAULT_CLOUD_RUN_URL = 'https://YOUR_CLOUD_RUN_URL';
+// Item 4 fix (lessons_learned.md): deliberately empty sentinel.
+// An empty string triggers the explicit guard below so the user gets an
+// immediate notification instead of a silent 15-second AbortController hang.
+// DO NOT replace '' with a placeholder URL like 'https://YOUR_CLOUD_RUN_URL' —
+// that string passes the URL guard and causes a real DNS lookup + timeout.
+const DEFAULT_CLOUD_RUN_URL = '';
 
 // ── 1. Install: inject content.js into already-open tabs ──
 chrome.runtime.onInstalled.addListener(async () => {
@@ -111,10 +117,19 @@ async function capture(tab) {
   const cloudRunUrl = settings?.cloudRunUrl?.trim() || DEFAULT_CLOUD_RUN_URL;
   const apiKey      = settings?.apiKey?.trim() || '';
 
+  // Item 4 fix: explicit empty-string guard — fires immediately, no network attempt.
+  if (!cloudRunUrl) {
+    await showNotification(
+      'Cloud Run URL not set',
+      'Open popup ⚙ Settings and enter your Cloud Run URL before capturing.'
+    );
+    return null;
+  }
+
   if (!apiKey) {
     await showNotification(
       'API key not set',
-      'Open popup Settings and enter your API key before capturing.'
+      'Open popup ⚙ Settings and enter your API key before capturing.'
     );
     return null;
   }
@@ -154,7 +169,7 @@ async function capture(tab) {
     '| tool:', session.tool ?? '(none)'
   );
 
-  // ── Task 2.10 + 2.12: Upload with AbortController (15s timeout) ──
+  // ── Task 2.10 + 2.12: Upload with AbortController (15 s timeout) ──
   const controller = new AbortController();
   const timeoutId  = setTimeout(() => controller.abort(), 15_000);
 

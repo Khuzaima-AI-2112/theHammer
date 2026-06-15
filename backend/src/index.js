@@ -1,6 +1,6 @@
 // ─────────────────────────────────────────────────────────────────
-// The Hammer — Backend (Sprint 2)
-// POST /capture   → validate → sanitize → build path → upload to GCS
+// The Hammer — Backend (Sprint 2, fixes applied per lessons_learned.md)
+// POST /capture   → Content-Type guard → auth → multer → validate → sanitize → GCS
 // GET  /health    → 200 {status:"ok"} — zero GCS dependency
 // ─────────────────────────────────────────────────────────────────
 'use strict';
@@ -24,8 +24,23 @@ const upload = multer({
 });
 
 // ─────────────────────────────────────────────────────────────────
+// Item 3 fix (lessons_learned.md): HMAC-based constant-time key comparison.
+// Both sides are hashed to a fixed 32-byte digest before timingSafeEqual
+// so neither the comparison nor the length check leaks key length info.
+// NEVER split this into timingSafeEqual(...) && length === length —
+// the separate length check runs in non-constant time and narrows brute-force space.
+// ─────────────────────────────────────────────────────────────────
+function keysEqual(provided, expected) {
+  const h = (s) => crypto.createHmac('sha256', 'hammer-key-check').update(s).digest();
+  try {
+    return crypto.timingSafeEqual(h(provided), h(expected));
+  } catch (_) {
+    return false;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────
 // 2.7 — API key auth middleware
-// Uses crypto.timingSafeEqual to prevent timing attacks.
 // Key comes from Secret Manager via Cloud Run --set-secrets.
 // ─────────────────────────────────────────────────────────────────
 function requireApiKey(req, res, next) {
@@ -34,39 +49,38 @@ function requireApiKey(req, res, next) {
   if (!expected || !provided) {
     return res.status(401).json({ error: 'Missing API key' });
   }
-  // Pad to same length before comparison to avoid length leaks
-  const expBuf = Buffer.from(expected);
-  const provBuf = Buffer.alloc(expBuf.length);
-  provBuf.write(provided);
-  let valid = false;
-  try {
-    valid = crypto.timingSafeEqual(expBuf, provBuf) && provided.length === expected.length;
-  } catch (_) {
-    valid = false;
-  }
-  if (!valid) {
+  if (!keysEqual(provided, expected)) {
     return res.status(401).json({ error: 'Invalid API key' });
   }
   next();
 }
 
 // ─────────────────────────────────────────────────────────────────
-// 2.3 — Validate required fields BEFORE multer parses the body
-// so the buffer is never loaded for an obviously invalid request.
-// Required form fields sent as form-data text parts alongside file:
-//   projectId, userId, tool (optional), tabUrl (optional)
+// Items 2+5 fix (lessons_learned.md): pre-multer Content-Type guard.
+// Rejects non-multipart requests immediately — before multer buffers
+// anything — satisfying the spec constraint from task 2.3.
+//
+// NOTE: We cannot read body *fields* before multer (multipart fields
+// arrive interleaved with the binary data in the stream). What we CAN
+// do pre-multer is reject obviously wrong requests by Content-Type.
+// Full field validation (projectId, userId) still runs post-multer;
+// that tradeoff is intentional and documented here so no future reader
+// thinks the post-multer check is an oversight.
 // ─────────────────────────────────────────────────────────────────
-function validateRequiredFields(req, res, next) {
-  // For multipart we can't read body before multer.
-  // Instead we check after multer, but multer is a separate step below.
-  // The guard runs as a dedicated middleware BEFORE multer using a
-  // quick header-only pre-check; the full field validation runs post-multer.
+function requireMultipart(req, res, next) {
+  const ct = req.headers['content-type'] || '';
+  if (!ct.startsWith('multipart/form-data')) {
+    return res.status(400).json({
+      error: 'Content-Type must be multipart/form-data',
+      received: ct.slice(0, 120) || '(none)'
+    });
+  }
   next();
 }
 
 // ─────────────────────────────────────────────────────────────────
 // 2.4 — Sanitize a string field
-// • Strips path-traversal sequences (../ and ..\ and null bytes)
+// • Strips null bytes and path-traversal sequences (../ and ..\)
 // • Removes characters outside the safe set: a-z A-Z 0-9 _ - . space
 // • Truncates to maxLen (default 64)
 // ─────────────────────────────────────────────────────────────────
@@ -81,9 +95,9 @@ function sanitize(value, maxLen = 64) {
 
 // ─────────────────────────────────────────────────────────────────
 // 2.5 — Build GCS object path
-// Format: {projectId}/{userId}/{YYYY-MM-DDTHH-MM-SS-mmmZ}_{random4}.png
-// Using a 4-char random hex suffix ensures two captures in the same
-// millisecond produce different paths.
+// Format: {projectId}/{userId}/{YYYY-MM-DDTHH-MM-SS-mmmZ}_{tool}_{rand4}.png
+// 4-char random hex suffix ensures two captures in the same millisecond
+// produce different paths.
 // ─────────────────────────────────────────────────────────────────
 function buildObjectPath(projectId, userId, tool, now = new Date()) {
   const ts = now.toISOString()
@@ -104,12 +118,19 @@ app.get('/health', (_req, res) => {
 });
 
 // 2.2 / 2.3 / 2.6 / 2.7 / 2.8 — Capture endpoint
+// Middleware order:
+//   1. requireApiKey      — fast 401 before any body parsing
+//   2. requireMultipart   — fast 400 before multer streams the body (item 2+5 fix)
+//   3. upload.single      — streams + buffers the file
+//   4. handler            — post-multer field validation, sanitize, GCS upload
 app.post(
   '/capture',
   requireApiKey,
+  requireMultipart,
   upload.single('file'),
   (req, res) => {
     // ── 2.3 Post-multer field validation ──
+    // (Pre-multer field validation is impossible for multipart — see requireMultipart comment)
     const { projectId, userId, tool, tabUrl } = req.body || {};
     const missing = [];
     if (!projectId) missing.push('projectId');
@@ -144,16 +165,16 @@ app.post(
     const blob   = bucket.file(objectPath);
 
     // save() with resumable:false is appropriate for files < 5 MB.
-    // Multer already rejects files > 10 MB, and screenshots are typically < 5 MB.
+    // Multer rejects > 10 MB; screenshots are typically < 5 MB.
     blob.save(req.file.buffer, {
       resumable: false,
       metadata: {
         contentType: 'image/png',
         metadata: {
-          projectId: safeProject,
-          userId:    safeUser,
-          tool:      safeTool,
-          tabUrl:    tabUrl ? tabUrl.slice(0, 500) : '',
+          projectId:  safeProject,
+          userId:     safeUser,
+          tool:       safeTool,
+          tabUrl:     tabUrl ? tabUrl.slice(0, 500) : '',
           uploadedAt: new Date().toISOString()
         }
       }
