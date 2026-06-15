@@ -1,17 +1,8 @@
 [
   {
-    "origin": ["chrome-extension://YOUR_EXTENSION_ID"],
+    "origin": ["chrome-extension://ggdihopchjnjapikmdmafpaajikkcfdj"],
     "method": ["PUT", "OPTIONS"],
     "responseHeader": ["Content-Type"],
     "maxAgeSeconds": 300
   }
 ]
-
-// NOTE: Replace YOUR_EXTENSION_ID with the actual Chrome extension ID.
-// Find it at chrome://extensions after loading the unpacked extension.
-// Apply with:
-//   gcloud storage buckets update gs://thehammer-screenshots --cors-file=infra/cors.json
-// Verify with:
-//   gcloud storage buckets describe gs://thehammer-screenshots --format="json(cors)"
-// This config is only needed for Sprint 3 (direct signed URL uploads).
-// It does not affect Sprint 2 server-side uploads.
