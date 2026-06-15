@@ -173,3 +173,22 @@ Run this before starting any new sprint:
 - [ ] `sprintplan.md` previous sprint section is fully checked off
 - [ ] This file (`lessons_learned.md`) has been read and is current
 - [ ] Any new Dockerfile base-image digest was fetched from the registry, not written by hand
+- [ ] This file (`lessons_learned.md`) is linked from `AGENTS.md` so future agent sessions are aware of it
+
+---
+
+## Sprint 3 Lessons Learned
+
+### 9. PowerShell backtick continuations break silently with trailing whitespace
+
+**What happened:** Running `infra/deploy.ps1` failed with confusing `Unexpected token '}'` and `The Try statement is missing its Catch` errors.
+**Root cause:** PowerShell uses the backtick (`` ` ``) as a line continuation character. If a trailing space exists after the backtick, it acts as an escape for the space instead, breaking the continuation. This causes the next line to be parsed as a separate command, breaking the AST and triggering cascading syntax errors downstream.
+**Rule going forward:**
+- Avoid using backticks for line continuation in PowerShell scripts. Focus on natural line breaks (e.g. breaking after a pipe `|` or comma) or use splatting (`@params`) for long commands like `gcloud run deploy`.
+- If backticks must be used, ensure your editor is configured to trim trailing whitespace automatically.
+
+### 10. Deploy scripts should validate the active project environment
+
+**What happened:** The deploy script relied on `$env:GCP_PROJECT_ID` being set. If the environment variable isn't set in the current shell session, the deployment would fail or target the wrong project environment.
+**Rule going forward:**
+- Rather than solely relying on environment variables, build fallback validation into scripts. Using commands like `gcloud config get-value project` to confirm the target matches the intention (`thehammer`) prevents deployment accidents.
