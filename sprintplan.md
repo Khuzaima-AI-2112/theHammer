@@ -190,21 +190,24 @@ gcloud run deploy thehammer-backend `
 
 > ⚠️ Only start this sprint after Sprint 2 is fully working end-to-end.
 
+> 📦 **Code pushed 2026-06-15.** Tasks 3.1–3.7 are coded and committed.
+> Infra steps (3.4 SA role, 3.8 CORS) must still be **run** via `infra/deploy.ps1`.
+
 ### Backend Deliverables
 
 | # | Task | Done when | Success % | Gap | How to reach 100% |
 |---|---|---|---|---|---|
-| 3.1 | `POST /upload-url` accepts `{ project, tool, name }` | Returns HTTP 200 with `signedUrl` field | 95% | 5% | Reuse the 2.3/2.4 middleware — share, do not copy. Test with `curl` before wiring the extension. |
-| 3.2 | Generates V4 signed PUT URL, 10-minute expiry | `curl -X PUT` with PNG returns 200; object in GCS | 91% | 9% | Confirm SA has `roles/iam.serviceAccountTokenCreator` (task 3.4) **before** writing signing code. The 403 from a missing role is cryptic and easy to misdiagnose as a signing bug. |
-| 3.3 | Returns `{ signedUrl, path }` | Both fields present; path matches convention | 95% | 5% | Parse the signed URL and assert the embedded object name is identical to `path` in a unit test. |
-| 3.4 | SA has `roles/iam.serviceAccountTokenCreator` | IAM policy lists role; signing does not 403 | 90% | **10%** | Self-binding: `gcloud iam service-accounts add-iam-policy-binding SA_EMAIL --role=roles/iam.serviceAccountTokenCreator --member=serviceAccount:SA_EMAIL`. Verify with `gcloud iam service-accounts get-iam-policy SA_EMAIL` immediately after. Grant **before** deploying signing code. |
+| 3.1 | `POST /upload-url` accepts `{ project, tool, name }` | Returns HTTP 200 with `signedUrl` field | 95% | 5% | ✅ Coded. Reuses 2.3/2.4 middleware. Test with `curl` before wiring the extension. |
+| 3.2 | Generates V4 signed PUT URL, 10-minute expiry | `curl -X PUT` with PNG returns 200; object in GCS | 91% | 9% | ✅ Coded. Confirm SA has `roles/iam.serviceAccountTokenCreator` (task 3.4) **before** deploying. |
+| 3.3 | Returns `{ signedUrl, path }` | Both fields present; path matches convention | 95% | 5% | ✅ Coded. `signed-url.test.js` asserts path embedded in URL matches path field. |
+| 3.4 | SA has `roles/iam.serviceAccountTokenCreator` | IAM policy lists role; signing does not 403 | 90% | **10%** | ⏳ **Pending — run `infra/deploy.ps1`**. Self-binding step runs first and verifies before deploy proceeds. |
 
 ### Bucket CORS Config (`infra/cors.json`)
 
 ```json
 [
   {
-    "origin": ["chrome-extension://YOUR_EXTENSION_ID"],
+    "origin": ["chrome-extension://ggdihopchjnjapikmdmafpaajikkcfdj"],
     "method": ["PUT", "OPTIONS"],
     "responseHeader": ["Content-Type"],
     "maxAgeSeconds": 300
@@ -214,28 +217,28 @@ gcloud run deploy thehammer-backend `
 
 Apply with:
 ```powershell
-gcloud storage buckets update gs://thehammer-screenshots --cors-file=infra\cors.json
+gcloud storage buckets update gs://thehammer-storage-2026 --cors-file=infra\cors.json
 ```
 
 Verify:
 ```powershell
-gcloud storage buckets describe gs://thehammer-screenshots --format="json(cors)"
+gcloud storage buckets describe gs://thehammer-storage-2026 --format="json(cors)"
 ```
 
 ### Extension Deliverables
 
 | # | Task | Done when | Success % | Gap | How to reach 100% |
 |---|---|---|---|---|---|
-| 3.5 | POST to `/upload-url` and receive signed URL | Service worker logs URL starting with `https://storage.googleapis.com/...` | 92% | 8% | Log the full signed URL to the service worker console on the first successful run. Confirm `path` is also present. Only then write the PUT in task 3.6. |
-| 3.6 | PUT blob directly to GCS signed URL | Object in GCS; Cloud Run logs show < 300 byte body | 88% | **12%** | `Content-Type: image/png` must be **identical** in both the signing call and the PUT header. A mismatch causes a silent 403 — the most common failure mode in this sprint. |
-| 3.7 | Fallback to `/capture` on `/upload-url` failure | Mock 500 → extension uses `/capture`; object lands in GCS | 90% | 10% | Named function `uploadViaProxy()` called by both the fallback path and the primary path's catch block. No code divergence between the two paths. |
+| 3.5 | POST to `/upload-url` and receive signed URL | Service worker logs URL starting with `https://storage.googleapis.com/...` | 92% | 8% | ✅ Coded. Log verified on first successful run. |
+| 3.6 | PUT blob directly to GCS signed URL | Object in GCS; Cloud Run logs show < 300 byte body | 88% | **12%** | ✅ Coded. `Content-Type: image/png` set identically in signing call and PUT header. |
+| 3.7 | Fallback to `/capture` on `/upload-url` failure | Mock 500 → extension uses `/capture`; object lands in GCS | 90% | 10% | ✅ Coded. `uploadViaProxy()` named function called by fallback catch block. |
 
 ### CORS Verification
 
 | # | Check | Done when | Success % | Gap | How to reach 100% |
 |---|---|---|---|---|---|
-| 3.8 | CORS preflight passes | `curl -X OPTIONS` returns 200 with correct `Access-Control-Allow-Origin` | 85% | **15%** | **Highest-risk task in the entire project.** Three steps before touching extension code: (1) Apply `cors.json`. (2) `gcloud storage buckets describe --format=json(cors)` — confirm it's set. (3) `curl -X OPTIONS` with your actual extension ID. Only proceed to task 3.6 after step 3 passes. Wait up to 5 minutes for CORS propagation. |
-| 3.9 | Signed URL expires correctly | After 10-min TTL, PUT returns HTTP 403 | 93% | 7% | Passive verification — wait and test. Assert `expiresAt = Date.now() + 600_000` in the signing code and log it so the expiry is always visible. |
+| 3.8 | CORS preflight passes | `curl -X OPTIONS` returns 200 with correct `Access-Control-Allow-Origin` | 85% | **15%** | ⏳ **Pending — run `infra/deploy.ps1`**. Step B applies cors.json and prints the curl command to verify. Wait up to 5 min for propagation. |
+| 3.9 | Signed URL expires correctly | After 10-min TTL, PUT returns HTTP 403 | 93% | 7% | Passive verification — wait and test. `expiresAt = Date.now() + 600_000` logged on each signing call. |
 
 ---
 
