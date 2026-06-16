@@ -2,7 +2,9 @@
 
 ## Overview
 
-Sprints 5–10 extend The Hammer from a screenshot-capture tool into a **multi-role cloud platform**: a cloud-hosted Admin Portal, per-user activity and inactivity tracking, an Analyst report engine, and a cloud-based Instructional Designer workspace. All new work builds on the Firestore `uploads` collection and Cloud Run backend established in Sprints 0–4.
+Sprints 5–9 extend The Hammer from a screenshot-capture tool into a **multi-role cloud platform**: a cloud-hosted Admin Portal, per-user activity and inactivity tracking, an Analyst report engine, and a cloud-based Instructional Designer workspace. All new work builds on the Firestore `uploads` collection and Cloud Run backend established in Sprints 0–4.
+
+> **Network ingress layer (Global HTTPS LB, Cloud Armor WAF, Cloud DNS, SSL cert) is fully owned by [Sprint 21](./sprint21.md).** Sprint 21 must complete before Sprint 5 goes to production — the Admin Portal is deployed behind the LB, not via direct `*.run.app` URLs.
 
 ### Four New Roles
 
@@ -16,6 +18,7 @@ Sprints 5–10 extend The Hammer from a screenshot-capture tool into a **multi-r
 ### Build Order
 
 ```
+Sprint 21 → HTTPS LB + Cloud Armor + Cloud DNS  ← prerequisite for all portal work
 Sprint 5  → Admin Portal (CRUD + SPA)
 Sprint 6  → Inactivity tracking + session timestamps  
 Sprint 6S → Research spike: chrome.alarms sub-minute timing + OCR pipeline (red items isolated)
@@ -45,6 +48,8 @@ Probabilities reflect **first-attempt completion** without rework. A 🔴 task i
 
 **Sprint P%: 🟡 79%** — Backend CRUD is a copy-paste of existing Express/Firestore patterns. Risk concentrates in 5.15 (extension migration off local storage) and 5.11 (thumbnail signed URL refresh timing).
 
+> **Prerequisite:** Sprint 21 must be complete and `https://app.thehammer.io` must be live before Sprint 5 is considered production-ready. Development and testing may proceed against direct Cloud Run URLs; production cutover requires the LB.
+
 ### Pre-flight
 All Sprint 4 console items (M.1–M.4, I.1–I.4, A.1–A.2, C.1–C.4, F.1–F.3) verified ✅ before any Sprint 5 code is written.
 
@@ -70,7 +75,7 @@ All Sprint 4 console items (M.1–M.4, I.1–I.4, A.1–A.2, C.1–C.4, F.1–F.
 | 5.11 | Activity feed per tool | `?tool=` filter applied on click; screenshot thumbnails load via signed URLs; URLs auto-refreshed after 9 min | 🟡 79% |
 | 5.12 | Report viewer tab (placeholder) | Panel fetches `reports` Firestore collection; renders "No reports yet" empty state; full render deferred to Sprint 7 | 🟢 93% |
 | 5.13 | Auth guard | Missing or invalid `X-Api-Key` header → 401 on all `/admin/*` routes; copied from existing middleware | 🟢 96% |
-| 5.14 | Deploy Admin Portal to Cloud Run | `curl $ADMIN_URL/health` → `{"status":"ok"}`; portal accessible in browser; added to `deploy.ps1` | 🟢 92% |
+| 5.14 | Deploy Admin Portal to Cloud Run | `curl $ADMIN_URL/health` → `{"status":"ok"}`; portal service deployed; accessible via `https://app.thehammer.io` after Sprint 21 LB cutover (development testing against direct Cloud Run URL is acceptable pre-cutover) | 🟢 92% |
 
 ### Extension Migration
 
@@ -212,9 +217,11 @@ All Sprint 4 console items (M.1–M.4, I.1–I.4, A.1–A.2, C.1–C.4, F.1–F.
 
 ## Sprint 9 — Hardening, Auth & Integration
 
-**Goal:** Unified role-based auth, integration + smoke test suite, Cloud Monitoring expansion, Firestore security rules, mobile-responsive portal.
+**Goal:** Unified role-based auth, integration + smoke test suite, Cloud Monitoring expansion (application-layer alerts), Firestore security rules, mobile-responsive portal.
 
 **Sprint P%: 🟡 73%** — Individual tasks are well-understood. Sprint-level risk is that integration tests (9.5, 9.6) surface bugs from Sprints 5–8; budget rework time.
+
+> **Note:** Network-layer monitoring (LB 5xx rate, Cloud Armor block rate) is owned by [Sprint 21](./sprint21.md) tasks 21.21–21.22. Sprint 9 monitoring covers application-layer alerts only (report failures, export queue depth).
 
 ### Role-Based Auth
 
@@ -230,9 +237,9 @@ All Sprint 4 console items (M.1–M.4, I.1–I.4, A.1–A.2, C.1–C.4, F.1–F.
 | # | Task | Done when | P% |
 |---|---|---|---|
 | 9.5 | Integration test suite | `npm run test:integration` covers: project CRUD, user admission, capture → Firestore, report generation (mock OCR), video export (mock FFmpeg), inactivity logging; all pass in CI | 🟡 74% |
-| 9.6 | End-to-end smoke test script | `scripts/smoke-test.ps1` exercises all 4 roles; exits 0; runs on push to `main` via GitHub Actions or Cloud Build | 🟡 71% |
+| 9.6 | End-to-end smoke test script | `scripts/smoke-test.ps1` exercises all 4 roles against `https://app.thehammer.io`; exits 0; runs on push to `main` via GitHub Actions or Cloud Build | 🟡 71% |
 
-### Cloud Monitoring
+### Cloud Monitoring — Application Layer
 
 | # | Task | Done when | P% |
 |---|---|---|---|
@@ -255,28 +262,29 @@ All Sprint 4 console items (M.1–M.4, I.1–I.4, A.1–A.2, C.1–C.4, F.1–F.
 
 | Sprint | Focus | P% | Biggest single risk |
 |---|---|---|---|
+| 21 | HTTPS LB + Cloud Armor + DNS | 🟡 81% | 21.15 — Cloud Armor false positives on extension POST |
 | 5 | Admin Portal + project/user CRUD | 🟡 79% | 5.15 — extension migration off `chrome.storage.local` |
 | 6 | Session timestamps + inactivity timer | 🟡 74% | 6.2 — `sessionEnd` flush on Chrome shutdown |
 | 6S | Research spike (alarms + OCR) | 🟢 91% | S.4 — OCR PoC accuracy on real GTM screenshots |
 | 7 | Analyst report engine | 🟡 71% | 7.8–7.11 — OCR extraction accuracy (conditional on 6S) |
 | 8 | Instructional Designer workspace | 🟠 63% | 8.6 — FFmpeg `drawtext` subtitle burn-in in Docker |
 | 9 | Auth hardening + integration tests | 🟡 73% | 9.5/9.6 — integration + smoke tests expose upstream bugs |
-| **All six sprints (sequential gates)** | Full platform | **🟠 ~19%** | Compounded — every gate must pass |
+| **All sprints (sequential gates)** | Full platform | **🟠 ~15%** | Compounded — every gate must pass |
 
-> **On the ~19% figure:** Completing Sprints 5 + 6 + 7 (Firestore reports only, no OCR) is a 🟡 ~41% outcome and delivers immediate value to Admin and Analyst. Treat 6S as mandatory gating before Sprint 7 OCR tasks.
+> **On the ~15% figure:** Sprint 21 + Sprints 5 + 6 + 7 (Firestore reports only, no OCR) is a 🟡 ~33% outcome and delivers immediate Admin and Analyst value. Treat Sprint 21 and 6S as mandatory gates before portal go-live and Sprint 7 OCR tasks respectively.
 
 ---
 
 ## Sprint Completion Gates
 
-| Gate | S5 | S6 | S6S | S7 | S8 | S9 |
-|---|---|---|---|---|---|---|
-| All tasks verified against Done When | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
-| No open TODO comments in committed code | ⏳ | ⏳ | — | ⏳ | ⏳ | ⏳ |
-| Previous sprint acceptance criteria still pass | ⏳ | ⏳ | — | ⏳ | ⏳ | ⏳ |
-| Role enforcement verified for new routes | — | — | — | ⏳ | ⏳ | ⏳ |
-| Sprint 6S go/no-go decision recorded | — | — | ⏳ | — | — | — |
-| `lessons_learned.md` current | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
+| Gate | S21 | S5 | S6 | S6S | S7 | S8 | S9 |
+|---|---|---|---|---|---|---|---|
+| All tasks verified against Done When | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
+| No open TODO comments in committed code | ⏳ | ⏳ | ⏳ | — | ⏳ | ⏳ | ⏳ |
+| Previous sprint acceptance criteria still pass | — | ⏳ | ⏳ | — | ⏳ | ⏳ | ⏳ |
+| Role enforcement verified for new routes | — | — | — | — | ⏳ | ⏳ | ⏳ |
+| Sprint 6S go/no-go decision recorded | — | — | — | ⏳ | — | — | — |
+| `lessons_learned.md` current | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
 
 ---
 
@@ -294,6 +302,8 @@ All Sprint 4 console items (M.1–M.4, I.1–I.4, A.1–A.2, C.1–C.4, F.1–F.
 | Inactivity prompt fires on `chrome://` pages | Low | 6 | Check `tab.url` before sending `inactivity_warning`; suppress on non-http/https tabs |
 | LLM/OCR per-image cost exceeds estimate | Medium | 6S / 7 | Sprint 6S S.5 produces cost model; GCS-path deduplication avoids re-processing identical images |
 | Integration tests surface Sprint 5–8 regressions | Medium | 9 | Budget 1–2 days rework in Sprint 9; mock FFmpeg and OCR from day one |
+| Cloud Armor false positives on extension POST | High | 21 | **Moved to [sprint21.md](./sprint21.md) risk register** |
+| Direct `*.run.app` URLs remain accessible post-LB | Medium | 21 | **Moved to [sprint21.md](./sprint21.md) — tasks 21.17–21.18** |
 
 ---
 
@@ -302,6 +312,7 @@ All Sprint 4 console items (M.1–M.4, I.1–I.4, A.1–A.2, C.1–C.4, F.1–F.
 | Item | Disposition |
 |---|---|
 | Admin dashboard web app | **Delivered → Sprint 5** |
+| Global HTTPS Load Balancer + Cloud Armor + Cloud DNS | **Delivered → Sprint 21** |
 | BigQuery export for analytics | Backlog; depends on Sprint 7 report schema |
 | Full-page scroll-and-stitch capture | Backlog |
 | Chrome Web Store public listing | Backlog |
@@ -310,3 +321,5 @@ All Sprint 4 console items (M.1–M.4, I.1–I.4, A.1–A.2, C.1–C.4, F.1–F.
 | Cloud Run `--min-instances 1` on export service | **Promoted → Sprint 8** |
 | OCR/Vision PoC | **Promoted → Sprint 6S** |
 | LLM-assisted Executive Summary narrative | Optional enhancement for Sprint 7 task 7.7; not required for done-when |
+| CDN caching for portal static assets | Backlog; unlocked by Sprint 21 |
+| Per-country geo-blocking via Cloud Armor | Backlog; unlocked by Sprint 21 |
