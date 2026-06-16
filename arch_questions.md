@@ -14,20 +14,15 @@ The following P-priority decisions have been made. They are **closed** — no lo
 | **1B** — Export trigger topology | `hammer-export-trigger` as a dedicated Cloud Run **Service** (HTTP, orchestrates Job enqueue) | Adds a 4th Cloud Run service; separate SA `hammer-export-trigger-sa`; new `/export/*` LB path |
 | **2A** — Firestore schema | Flat top-level collections with `projectId` field | Simpler queries, no `collectionGroup` needed, standard composite indexes |
 | **3A** — SPA auth | Cloud IAP identity token in front of `hammer-portal` | Eliminates custom session code; Sprint 9.2 scope reduced; IAP setup checklist added to arch_decisions.md |
+| **P10** — Data / PII policy | Screenshots are **not confidential**; **no EU users** in initial cohort; **Cloud DLP scanning deferred** until > 50 users or EU onboarding event | Removes `data-classification.md` and DPA from pre-Sprint-5 blockers; DLP backlog item remains but is not a gate |
 
 See `arch_decisions.md` for full implementation detail on each.
 
 ---
 
-## Remaining Open Questions
+## ✅ Sprint 5 Gate — Pre-Coding Checklist — ALL CLEAR
 
-All P1 blocking questions are resolved. The items below are **sprint-gate questions** — they must be answered before work begins on the sprint that references them, not necessarily before Sprint 5.
-
----
-
-## Sprint 5 Gate — Pre-Coding Checklist
-
-> These were P1. All are now resolved or have a recorded decision. Verify each before Sprint 5 coding begins.
+All P1–P10 decisions are recorded. Sprint 5 coding may begin.
 
 - [x] **P1** — Service topology: 4 services (api, portal, export-trigger, export-worker Job)
 - [x] **P2** — Custom domain + CLB: `app.thehammer.io` via Global HTTPS LB
@@ -38,7 +33,13 @@ All P1 blocking questions are resolved. The items below are **sprint-gate questi
 - [x] **P7** — API keys SHA-256 hashed, quarterly automated rotation
 - [x] **P8** — GitHub Actions replaces `deploy.ps1`
 - [x] **P9** — 4 SLOs defined in `arch_decisions.md` §6.1
-- [ ] **P10** — Data residency / PII policy for screenshots: **still needs owner sign-off** — document classification policy must be agreed before first user onboards
+- [x] **P10** — Screenshots: not confidential; no EU users; Cloud DLP deferred ✅ *PO decision 2026-06-16*
+
+> **Remaining Sprint 5 pre-flight (console/infra steps — not decisions):**
+> - [ ] CRX key generated; `EXTENSION_ID` stored in Secret Manager
+> - [ ] `gcloud firestore databases describe` confirms `type: FIRESTORE_NATIVE`
+> - [ ] IAP OAuth consent screen created (internal, Google Workspace) in `hammer-prod`
+> - [ ] DNS zone confirmed in Cloud DNS or provisioned in Terraform
 
 ---
 
@@ -62,40 +63,41 @@ All P1 blocking questions are resolved. The items below are **sprint-gate questi
 
 ## Sprint 7 — Open (Analyst Engine)
 
-- **Vision API / OCR scope**: Which report types require OCR (reading tag names from screenshots)? Only GTM Configuration, GA4 Configuration, and Google Ads Setup reports need it. User Efficiency and Project Progress reports can be generated from Firestore metadata alone — no Vision API needed. Clarify per-report-type OCR dependency to get accurate cost estimate. *(Blocks: 7.1–7.4 cost model)*
-- What is the **minimum screenshot set required** to generate a complete GTM Configuration Table? If a user captures only 3 of the 12 GTM panels, the report will be incomplete. Should the API block report generation with an "insufficient coverage" warning, or generate a partial report with gaps flagged? *(Blocks: 7.2 report logic)*
-- Should reports be **versioned**? If the analyst regenerates a report after new captures are added, should both versions be retained in GCS and Firestore, or only the latest? *(Blocks: 7.5 GCS path schema and Firestore `reports` doc structure)*
+- **Vision API / OCR scope**: Which report types require OCR? Only GTM Configuration, GA4 Configuration, and Google Ads Setup reports need it. User Efficiency and Project Progress can be generated from Firestore metadata alone. Clarify per-report-type OCR dependency for accurate cost estimate. *(Blocks: 7.1–7.4 cost model)*
+- What is the **minimum screenshot set required** to generate a complete GTM Configuration Table? Should the API block generation with an "insufficient coverage" warning, or generate a partial report with gaps flagged? *(Blocks: 7.2 report logic)*
+- Should reports be **versioned**? Both versions retained in GCS and Firestore, or only the latest? *(Blocks: 7.5 GCS path schema and Firestore `reports` doc structure)*
 - Who can **trigger** a report — only the analyst role, or can an admin also trigger one? *(Blocks: 7.1 IAM / role guard on `POST /reports`)*
 
 ---
 
 ## Sprint 8 — Open (Instructional Designer)
 
-- What is the **maximum storyboard size** in terms of slides and total GCS screenshot size? FFmpeg render time at 50 slides × 500 KB/screenshot = 25 MB input — is that the ceiling, or should it be higher? *(Blocks: 8.4 worker Job timeout, 8.5 cost estimate)*
-- Should the MP4 output include **voiceover audio** (text-to-speech of the annotation text), or video-only with subtitle burn-in? Cloud Text-to-Speech adds ~$0.004/character — on a 50-slide storyboard this is ~$0.50/export. *(Blocks: 8.5 FFmpeg pipeline design)*
-- Is the **"Import from Report" feature** in Sprint 8.6 a one-time import (seeding the Executive Summary text into slide 1), or a live binding (changes to the report auto-update the storyboard)? The live binding model is significantly more complex. *(Blocks: 8.6 implementation scope)*
-- Who can **view exported videos** — all project members, or only the instructional designer and admin? *(Blocks: 8.7 signed URL IAM scoping)*
+- What is the **maximum storyboard size**? FFmpeg at 50 slides × 500 KB = 25 MB input — is that the ceiling? *(Blocks: 8.4 worker Job timeout, 8.5 cost estimate)*
+- Should the MP4 include **voiceover audio** (Cloud TTS ~$0.50/export) or video-only with subtitle burn-in? *(Blocks: 8.5 FFmpeg pipeline design)*
+- Is **"Import from Report"** a one-time seed or a live binding? Live binding is significantly more complex. *(Blocks: 8.6 implementation scope)*
+- Who can **view exported videos** — all project members, or only instructional designer and admin? *(Blocks: 8.7 signed URL IAM scoping)*
 
 ---
 
 ## Sprint 9 — Open (Hardening)
 
-- **Binary Authorization**: Should `hammer-dev` also enforce Binary Authorization, or only `hammer-prod`? Enforcing in dev slows iteration; not enforcing means dev builds are a different security posture than prod. *(Blocks: 9.6 security hardening)*
-- What are the **rate limits** per role per endpoint? The sprint plan says "role-scoped rate limits" but does not specify values. Suggested starting point: `user` role → 60 req/min on `/capture`; `analyst` → 10 req/min on `/reports`; `instructional_designer` → 5 req/min on `/export/video`. *(Blocks: 9.3)*
-- Should the **consolidated admin dashboard** (Sprint 9.9) use Firestore `onSnapshot` real-time listeners, or polling? Real-time listeners add WebSocket connection cost; polling every 30 s is simpler and sufficient for an admin dashboard. *(Blocks: 9.9)*
-- Is there a **user-facing status page** (e.g., via Freshstatus or a simple GCS-hosted HTML page) so users can check platform health without contacting admin? *(Blocks: 9.8 monitoring scope)*
+- **Binary Authorization**: enforce in `hammer-dev` too, or only `hammer-prod`? *(Blocks: 9.6)*
+- **Rate limits** per role: suggested `user` → 60 req/min capture; `analyst` → 10 req/hr reports; `instructional_designer` → 5 req/hr export. Confirm or adjust. *(Blocks: 9.3)*
+- **Admin dashboard**: Firestore `onSnapshot` real-time listeners or 30 s polling? *(Blocks: 9.9)*
+- **User-facing status page**: GCS-hosted HTML or third-party (Freshstatus)? *(Blocks: 9.8)*
 
 ---
 
-## Persistent / Cross-Sprint Questions
+## Persistent / Cross-Sprint Items
 
-| Question | Sprint gate | Owner |
-|---|---|---|
-| PII/GDPR data classification policy signed off | Before Sprint 5 code ships to prod | Product owner |
-| DPA with GCP for EU users (if applicable) | Before first EU user onboards | Legal/PO |
-| Vision API cost benchmark (per-screenshot price at expected volume) | Before Sprint 7 ships | Engineering |
-| GCP Billing budget alert configured on both projects | Before Sprint 5 deploys to prod | DevOps |
-| `firestore.indexes.json` checked into repo with all composite indexes | Sprint 5 | Engineering |
-| Firestore PITR enabled on `hammer-prod` | Sprint 5 deploy | DevOps |
-| Uniform bucket-level access enabled on all 4 GCS buckets | Sprint 5 deploy | DevOps |
-| Enterprise sideloading vs Web Store decision for extension | Before Sprint 5 (affects CRX key process) | PO |
+| Question | Sprint gate | Owner | Status |
+|---|---|---|---|
+| ~~PII/GDPR data classification policy~~ | ~~Before Sprint 5 ships to prod~~ | ~~PO~~ | ✅ **Closed** — not confidential, no EU users, DLP deferred |
+| ~~DPA with GCP for EU users~~ | ~~Before first EU user onboards~~ | ~~Legal/PO~~ | ✅ **Closed** — no EU users in initial cohort; revisit on EU expansion |
+| Cloud DLP scanning | Trigger: > 50 users OR first EU user onboards | PO + Engineering | 🔵 Backlog |
+| Vision API cost benchmark | Before Sprint 7 ships | Engineering | ⏳ Open |
+| GCP Billing budget alert on both projects | Before Sprint 5 deploys to prod | DevOps | ⏳ Open |
+| `firestore.indexes.json` in repo | Sprint 5 | Engineering | ⏳ Open |
+| Firestore PITR enabled on `hammer-prod` | Sprint 5 deploy | DevOps | ⏳ Open |
+| Uniform bucket-level access on all 4 GCS buckets | Sprint 5 deploy | DevOps | ⏳ Open |
+| Enterprise sideloading vs Web Store decision | Before Sprint 5 (affects CRX key) | PO | ⏳ Open |
