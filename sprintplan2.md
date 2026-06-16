@@ -6,7 +6,16 @@ This plan extends The Hammer beyond its original screenshot-capture-and-upload c
 
 Four new roles are introduced: **Admin**, **Analyst**, **Instructional Designer**, and **User**. Sprints 5–9 deliver these capabilities incrementally on the existing GCP infrastructure (Cloud Run, Firestore, GCS), using the Firestore `uploads` collection already established in Sprint 4 as the foundation.
 
-Every task has a **measurable pass/fail condition**. A sprint is only complete when every condition is verified.
+Every task has a **measurable pass/fail condition** and a **probability of successful first-attempt completion** (P%). Probabilities are based on technical complexity, dependency depth, known MV3/GCP gotchas, and the team's demonstrated competence through Sprints 0–4.
+
+### Probability Legend
+
+| Symbol | Range | Meaning |
+|---|---|---|
+| 🟢 | 90–100% | Straightforward; well-trodden pattern on this stack |
+| 🟡 | 70–89% | Moderate complexity or one known gotcha |
+| 🟠 | 50–69% | Significant complexity, external dependency, or first-time pattern |
+| 🔴 | < 50% | High risk; novel integration, MV3 edge case, or OCR/AI accuracy dependency |
 
 ---
 
@@ -54,121 +63,149 @@ New in Sprint Plan 2
 
 **Goal:** A cloud-hosted Admin Portal where an admin can create projects, admit users into them, assign roles, and see what each user is doing per tool per project.
 
+**Sprint-level probability of full completion: 🟡 78%**  
+All backend tasks are standard Express + Firestore CRUD — high confidence. The main risk is the extension-to-backend migration (5.15), which touches the popup dropdown and requires careful backwards compatibility.
+
 ### Pre-flight (carry over from Sprint 4)
 
 All Sprint 4 pre-flight items (M.1–M.4, I.1–I.4, A.1–A.2, C.1–C.4, F.1–F.3) must be verified before Sprint 5 development starts.
 
 ### Deliverables
 
-| # | Task | Done when | Status |
-|---|---|---|---|
-| 5.1 | Design Admin Portal data model in Firestore | Collections `projects`, `users`, `project_memberships` documented in `projectplan.md`; 3 example documents written | ⏳ |
-| 5.2 | Extend Cloud Run backend: `POST /admin/projects` | Returns 201 with `{ projectId, name, createdAt }` | ⏳ |
-| 5.3 | Extend Cloud Run backend: `GET /admin/projects` | Returns array of all projects with member count | ⏳ |
-| 5.4 | Extend Cloud Run backend: `PATCH /admin/projects/:id` | Updated doc visible in Firestore within 2 s | ⏳ |
-| 5.5 | Extend Cloud Run backend: `DELETE /admin/projects/:id` | Project and all memberships removed; returns 204 | ⏳ |
-| 5.6 | Extend Cloud Run backend: `POST /admin/projects/:id/members` | Member doc written to `project_memberships`; role field present | ⏳ |
-| 5.7 | Extend Cloud Run backend: `DELETE /admin/projects/:id/members/:userId` | Membership doc deleted; user no longer in project | ⏳ |
-| 5.8 | Extend Cloud Run backend: `GET /admin/projects/:id/activity` | Returns last 100 uploads for project; supports `?tool=` filter | ⏳ |
-| 5.9 | Admin Portal SPA: Project list view | Table shows all projects, member count, last activity timestamp | ⏳ |
-| 5.10 | Admin Portal SPA: Project detail view — user roster | All admitted users shown with role badge; admit/remove buttons functional | ⏳ |
-| 5.11 | Admin Portal SPA: Activity feed per tool | Clicking a tool name filters the activity table; screenshots thumbnail previews load via signed URL | ⏳ |
-| 5.12 | Admin Portal SPA: Report viewer tab | Placeholder panel reads from `reports` Firestore collection; shows "No reports yet" on empty | ⏳ |
-| 5.13 | Admin Portal: Auth guard | Portal is unreachable without valid `X-Api-Key`; 401 returned for missing/invalid key | ⏳ |
-| 5.14 | Admin Portal: Deploy to Cloud Run | `curl $ADMIN_URL/health` → 200 `{"status":"ok"}`; portal loads in browser | ⏳ |
-| 5.15 | Extension admin view reads from backend (not local storage) | Creating a project in the portal makes it appear in the extension popup dropdown within 5 s | ⏳ |
+| # | Task | Done when | P% | Risk note | Status |
+|---|---|---|---|---|---|
+| 5.1 | Design Admin Portal data model in Firestore | Collections `projects`, `users`, `project_memberships` documented; 3 example docs written | 🟢 95% | Pure design/doc task; no code risk | ⏳ |
+| 5.2 | `POST /admin/projects` | Returns 201 with `{ projectId, name, createdAt }` | 🟢 95% | Identical pattern to existing `/capture` route | ⏳ |
+| 5.3 | `GET /admin/projects` | Returns array with member count | 🟢 93% | Firestore aggregation query; use `collectionGroup` count — well-documented | ⏳ |
+| 5.4 | `PATCH /admin/projects/:id` | Updated doc in Firestore within 2 s | 🟢 92% | Standard Firestore `.update()` call | ⏳ |
+| 5.5 | `DELETE /admin/projects/:id` | Project + memberships removed; returns 204 | 🟡 85% | Cascading delete of `project_memberships` subcollection requires batched writes — easy to miss | ⏳ |
+| 5.6 | `POST /admin/projects/:id/members` | Member doc written with role field | 🟢 93% | Single Firestore write; role is a string field | ⏳ |
+| 5.7 | `DELETE /admin/projects/:id/members/:userId` | Membership doc deleted | 🟢 95% | Single Firestore `.delete()` | ⏳ |
+| 5.8 | `GET /admin/projects/:id/activity` | Last 100 uploads; `?tool=` filter works | 🟡 88% | Composite Firestore index required on `projectId + tool + uploadedAt`; index build takes 2–5 min | ⏳ |
+| 5.9 | Admin Portal SPA: Project list view | Table with projects, member count, last activity | 🟢 90% | Standard HTML table + `fetch()` — team has proven this pattern | ⏳ |
+| 5.10 | Admin Portal SPA: Project detail — user roster | Role badges + admit/remove buttons functional | 🟡 85% | Role badge UI is new; remove-then-reflect in DOM requires optimistic update pattern | ⏳ |
+| 5.11 | Admin Portal SPA: Activity feed per tool | Filter works; thumbnail signed URLs load | 🟡 80% | Signed URL refresh on thumbnail hover adds complexity; CORS on `<img>` src needs verification | ⏳ |
+| 5.12 | Admin Portal SPA: Report viewer tab | Reads `reports` collection; shows empty state | 🟢 92% | Placeholder only; full render deferred to Sprint 7 | ⏳ |
+| 5.13 | Admin Portal: Auth guard | 401 on missing/invalid `X-Api-Key` | 🟢 95% | Copy of existing backend middleware | ⏳ |
+| 5.14 | Admin Portal: Deploy to Cloud Run | `/health` → 200; portal loads | 🟢 93% | Existing `deploy.ps1` script handles this; minor config change | ⏳ |
+| 5.15 | Extension admin view reads from backend | Project appears in popup dropdown within 5 s | 🟠 68% | Breaking change to `chrome.storage.local` flow; popup must fall back gracefully if backend unreachable; first-time fetch-in-extension pattern | ⏳ |
 
 ---
 
 ## Sprint 6 — User Inactivity Tracking & Timestamp Logging
 
-**Goal:** Capture precise timestamps for user activity—especially **first and last screenshot per session**—and prompt the user with an inactivity dialogue after **45 seconds** of no interaction.
+**Goal:** Capture precise timestamps for first/last screenshot per session and prompt the user after **45 seconds** of inactivity.
+
+**Sprint-level probability of full completion: 🟠 65%**  
+The `chrome.alarms` minimum 1-minute floor in MV3 is the highest-risk item. Sub-minute timing requires a hybrid alarms + in-memory Date approach that is easy to get wrong. The session flush on Chrome shutdown is also a known fragility in MV3.
 
 ### Deliverables
 
-| # | Task | Done when | Status |
-|---|---|---|---|
-| 6.1 | Log `sessionStart` timestamp on first capture of each session | Firestore doc for first capture has `isFirstInSession: true` and `sessionStart` ISO timestamp | ⏳ |
-| 6.2 | Log `sessionEnd` timestamp on last capture before session close | On popup close / Chrome shutdown, service worker writes a `session_events` doc with `sessionEnd`, `totalCaptures`, `sessionDurationMs` | ⏳ |
-| 6.3 | Session summary doc in Firestore | `session_events` collection doc contains `sessionId`, `projectId`, `userId`, `sessionStart`, `sessionEnd`, `totalCaptures`, `firstCapturePath`, `lastCapturePath` | ⏳ |
-| 6.4 | Inactivity timer in service worker — 45 s | After 45 s with no capture event, service worker fires `chrome.runtime.sendMessage` with `type: "inactivity_warning"` | ⏳ |
-| 6.5 | Inactivity dialogue in popup | Popup receives `inactivity_warning` and displays a modal: "You've been inactive for 45 seconds. Ready to capture?" with **Capture Now** and **Dismiss** buttons | ⏳ |
-| 6.6 | Inactivity dialogue auto-dismisses after 30 s | If no user action, dialogue closes; another `inactivity_warning` fires after the next 45 s cycle | ⏳ |
-| 6.7 | Timer resets on any capture event | After a capture (keyboard, toolbar, floating button), the 45 s countdown resets to 0 | ⏳ |
-| 6.8 | Inactivity events logged to Firestore | Each inactivity prompt logs a `inactivity_events` doc with `triggeredAt`, `userId`, `projectId`, `acknowledged` (bool) | ⏳ |
-| 6.9 | Activity feed in Admin Portal shows inactivity gaps | Activity timeline highlights gaps > 45 s between captures in amber | ⏳ |
-| 6.10 | `chrome.alarms` used for inactivity timer (not `setTimeout`) | Timer survives service worker suspension; verified by locking screen for 60 s and confirming dialogue fires on resume | ⏳ |
+| # | Task | Done when | P% | Risk note | Status |
+|---|---|---|---|---|---|
+| 6.1 | Log `sessionStart` on first capture | First capture doc has `isFirstInSession: true` + `sessionStart` | 🟢 92% | Small flag check before Firestore write; builds on 4.9 | ⏳ |
+| 6.2 | Log `sessionEnd` on session close | `session_events` doc written with `sessionEnd` + `sessionDurationMs` | 🟠 60% | `chrome.runtime.onSuspend` is not guaranteed to fire before process kill; race condition risk | ⏳ |
+| 6.3 | Session summary doc in Firestore | Doc has all 8 fields non-null | 🟡 72% | Depends on 6.2 completing; `firstCapturePath` + `lastCapturePath` require per-session state in service worker memory | ⏳ |
+| 6.4 | Inactivity timer — 45 s trigger | `inactivity_warning` message fires after 45 s idle | 🔴 48% | `chrome.alarms` minimum is ~1 min in background contexts; sub-minute timing via in-memory `Date` only works while service worker is awake — can miss the window | ⏳ |
+| 6.5 | Inactivity dialogue in popup | Modal shows with Capture Now + Dismiss | 🟡 78% | Popup must be open to receive the message; if popup is closed, notification fallback is needed | ⏳ |
+| 6.6 | Dialogue auto-dismisses after 30 s | Closes without user action; next cycle restarts | 🟡 75% | `setTimeout` inside popup works while popup is open; dismissed state must not bleed into next cycle | ⏳ |
+| 6.7 | Timer resets on any capture event | 45 s countdown resets to 0 after capture | 🟢 90% | Simple: cancel alarm + restart on each capture event | ⏳ |
+| 6.8 | Inactivity events logged to Firestore | `inactivity_events` doc written with `acknowledged` bool | 🟡 82% | Straightforward write; `acknowledged` must be updated when user clicks Capture Now or Dismiss | ⏳ |
+| 6.9 | Admin Portal highlights inactivity gaps > 45 s | Activity timeline shows amber gap markers | 🟡 75% | Requires timeline UI component (new); gap detection is a simple timestamp diff; amber colour styling is easy | ⏳ |
+| 6.10 | `chrome.alarms` used (not `setTimeout`) | Timer fires after screen lock for 60 s | 🔴 45% | `chrome.alarms` cannot fire more frequently than once per minute per Chrome policy; 45 s target is below this floor — mitigation requires hybrid approach with documented trade-offs | ⏳ |
 
 ---
 
 ## Sprint 7 — Analyst Engine: Efficiency & Progress Reports
 
-**Goal:** An Analyst can generate structured reports from Firestore data. Reports are stored in GCS and indexed in Firestore. The Admin Portal's Report Viewer tab becomes functional.
+**Goal:** An Analyst can generate structured reports from Firestore data, stored in GCS and viewable in the Admin Portal.
+
+**Sprint-level probability of full completion: 🟠 55%**  
+The Firestore-aggregation reports (7.2, 7.3) are straightforward. The GTM/GA4/Ads reports (7.5–7.8) depend on an OCR/vision pipeline against screenshots — accuracy is inherently probabilistic and the pipeline design is first-of-kind on this stack.
 
 ### Deliverables
 
-| # | Task | Done when | Status |
-|---|---|---|---|
-| 7.1 | `POST /reports/generate` endpoint (authenticated, analyst role) | Accepts `{ projectId, reportType, dateRange }` — returns `{ reportId, status: "queued" }` within 200 ms | ⏳ |
-| 7.2 | Report type: **User Efficiency** | Computes captures/hour, inactivity rate, median session length per user per project; saves as JSON + HTML to GCS `reports/` prefix | ⏳ |
-| 7.3 | Report type: **Project Progress** | Computes total captures, daily trend (sparkline data), active users, tools used; saves to GCS | ⏳ |
-| 7.4 | Report type: **Executive Summary** | Narrative text block: "Before state" (baseline date range) vs "After state" (post-implementation date range); saved as Markdown + HTML | ⏳ |
-| 7.5 | Report type: **GTM Configuration Table** | Accepts a set of screenshot GCS paths; pipeline extracts Tags, Triggers, Variables with names, types, and firing rules; output is a Markdown table | ⏳ |
-| 7.6 | Report type: **GA4 Configuration** | Extracts Data Stream Measurement ID, custom events, cross-domain tracking settings from annotated screenshots; output is structured JSON + HTML | ⏳ |
-| 7.7 | Report type: **Google Ads Setup** | Identifies Conversion Linker status, Conversion Tracking IDs, imported conversion actions from screenshots; output is structured JSON + HTML | ⏳ |
-| 7.8 | Report type: **Audit & Conflicts** | Flags missing consent mode settings, poorly named tags, unlinked properties; severity levels: `error`, `warning`, `info`; output is a table | ⏳ |
-| 7.9 | Report metadata written to Firestore `reports` collection | Each report doc: `reportId`, `type`, `projectId`, `generatedBy`, `generatedAt`, `gcsPath`, `status` | ⏳ |
-| 7.10 | Admin Portal Report Viewer renders all report types | HTML reports load in an iframe; Markdown reports rendered as styled HTML; table reports sortable | ⏳ |
-| 7.11 | Analyst role enforced on `/reports/*` routes | Non-analyst API key → 403; analyst key → 200 | ⏳ |
-| 7.12 | Report generation async with status polling | `GET /reports/:id/status` returns `{ status: "queued" | "processing" | "done" | "error" }` | ⏳ |
+| # | Task | Done when | P% | Risk note | Status |
+|---|---|---|---|---|---|
+| 7.1 | `POST /reports/generate` endpoint | Returns `{ reportId, status: "queued" }` within 200 ms | 🟢 93% | Async queue pattern is identical to video export pattern; well understood | ⏳ |
+| 7.2 | Report: User Efficiency | captures/hour, inactivity rate, median session length → GCS JSON + HTML | 🟢 90% | Pure Firestore aggregation; no external dependencies | ⏳ |
+| 7.3 | Report: Project Progress | Total captures, daily trend, active users, tools → GCS | 🟢 90% | Same pattern as 7.2; sparkline data is a simple array | ⏳ |
+| 7.4 | Report: Executive Summary | Before/After narrative → Markdown + HTML | 🟡 72% | Narrative generation requires either manual template fill or an LLM call; LLM cost + latency must be defined before coding | ⏳ |
+| 7.5 | Report: GTM Configuration Table | Tags/Triggers/Variables extracted from screenshots → Markdown table | 🔴 42% | Depends on OCR or vision-LLM accuracy against GTM UI screenshots; UI layout changes between GTM versions; high false-negative rate likely on first attempt | ⏳ |
+| 7.6 | Report: GA4 Configuration | Measurement ID, custom events, cross-domain settings extracted | 🔴 45% | Same OCR/vision risk as 7.5; GA4 UI is dense and frequently updated | ⏳ |
+| 7.7 | Report: Google Ads Setup | Conversion Linker, Tracking IDs, imported actions extracted | 🔴 45% | Same risk as 7.5/7.6; Google Ads UI has more visual noise than GTM | ⏳ |
+| 7.8 | Report: Audit & Conflicts | Missing consent mode, poorly named tags, unlinked properties flagged with severity | 🟠 58% | Depends on 7.5–7.7 extraction quality; severity classification logic adds additional failure surface | ⏳ |
+| 7.9 | Report metadata in Firestore `reports` collection | All 7 fields non-null per report doc | 🟢 92% | Simple write after report generation completes | ⏳ |
+| 7.10 | Admin Portal Report Viewer renders all types | HTML in iframe; Markdown rendered; tables sortable | 🟡 78% | iframe sandbox CSP may block inline styles in generated HTML; table sort is a small JS utility | ⏳ |
+| 7.11 | Analyst role enforced on `/reports/*` | Non-analyst → 403 | 🟢 93% | Middleware pattern from 5.13; straightforward role check | ⏳ |
+| 7.12 | Async status polling | `GET /reports/:id/status` returns correct status enum | 🟡 85% | Firestore listener or polling on a status field; well-understood pattern | ⏳ |
 
 ---
 
 ## Sprint 8 — Instructional Designer Workspace
 
-**Goal:** An Instructional Designer can browse screenshots per project, annotate them, sequence them into a narrative, and export a cloud-rendered video with voiceover-style captions.
+**Goal:** Cloud-based screenshot-to-video pipeline with storyboard sequencing, annotations, and PDF export.
 
-> All work is done in the cloud — no local video editing software required.
+**Sprint-level probability of full completion: 🟠 60%**  
+The screenshot browser and annotation editor are high-confidence. The FFmpeg Cloud Run job (8.6) is a new pattern with burn-in subtitle complexity, and the drag-and-drop storyboard (8.2) has known touch/mobile edge cases.
 
 ### Deliverables
 
-| # | Task | Done when | Status |
-|---|---|---|---|
-| 8.1 | Instructional Designer Portal: Screenshot browser | Grid view of all GCS screenshots for a project; thumbnails load via signed URLs; sortable by timestamp | ⏳ |
-| 8.2 | Screenshot selection & sequencing | Drag-and-drop reorder of selected screenshots into a storyboard strip; sequence saved as JSON in Firestore `storyboards` collection | ⏳ |
-| 8.3 | Per-slide annotation editor | Click a screenshot → text editor opens → save annotation; annotations stored in storyboard doc | ⏳ |
-| 8.4 | Import Analyst report as narrative seed | "Import from Report" button — analyst's Executive Summary text is pre-loaded into the annotation editor per relevant slide | ⏳ |
-| 8.5 | Cloud video export: `POST /export/video` | Accepts `{ storyboardId, fps, transitionMs }`; queues FFmpeg Cloud Run job; returns `{ jobId }` | ⏳ |
-| 8.6 | FFmpeg job: screenshots → MP4 | Each screenshot held for `durationMs` (default 3000 ms); annotation text overlaid as subtitle burn-in; output is H.264 MP4 at 1280×720 | ⏳ |
-| 8.7 | Video stored in GCS `exports/` prefix | GCS path: `exports/{projectId}/{storyboardId}/{timestamp}.mp4`; signed URL returned on job completion | ⏳ |
-| 8.8 | Export status polling | `GET /export/video/:jobId/status` returns `{ status, progressPercent, gcsPath? }` | ⏳ |
-| 8.9 | Portal: Video preview & download | Completed export shows an HTML5 `<video>` player; "Download" button fetches MP4 via signed URL | ⏳ |
-| 8.10 | Instruction document export | "Export as PDF" button renders annotations + screenshot thumbnails as a paginated HTML doc → `window.print()` PDF | ⏳ |
-| 8.11 | Instructional Designer role enforced | Non-ID API key cannot access `/export/*` or storyboard write routes | ⏳ |
-| 8.12 | Admin can view completed exports | Admin Portal → Project detail → "Exports" tab lists all completed videos with timestamp and author | ⏳ |
+| # | Task | Done when | P% | Risk note | Status |
+|---|---|---|---|---|---|
+| 8.1 | Screenshot browser: grid view | Thumbnails load via signed URLs; sortable by timestamp | 🟡 85% | Signed URL batch-generation for 50+ thumbnails may hit GCS rate limits; paginate to 20/page | ⏳ |
+| 8.2 | Screenshot sequencing: drag-and-drop storyboard | Sequence saved to Firestore `storyboards` | 🟠 65% | Drag-and-drop via Pointer Events is reliable on desktop; touch reorder on mobile is fragile; SortableJS CDN can de-risk | ⏳ |
+| 8.3 | Per-slide annotation editor | Click → text editor → save; stored in storyboard doc | 🟡 85% | `<textarea>` debounce save; straightforward Firestore patch | ⏳ |
+| 8.4 | Import Analyst report as narrative seed | Executive Summary pre-loaded into annotation editor | 🟡 78% | Requires 7.4 report to exist; text-to-slide mapping heuristic (by timestamp proximity) may mis-assign slides | ⏳ |
+| 8.5 | `POST /export/video` endpoint | Returns `{ jobId }` within 200 ms | 🟢 92% | Async queue pattern established in 7.1 | ⏳ |
+| 8.6 | FFmpeg job: screenshots → H.264 MP4 with subtitle burn-in | MP4 at 1280×720 with visible text overlays | 🟠 62% | FFmpeg `drawtext` filter with Unicode font in Docker image is achievable but first-time on this infra; cold start on large storyboards may exceed 30 s | ⏳ |
+| 8.7 | Video stored in GCS `exports/` | Signed URL returned on completion | 🟢 90% | Identical to existing GCS upload pattern | ⏳ |
+| 8.8 | Export status polling | `GET /export/video/:jobId/status` returns `progressPercent` | 🟡 80% | Progress from FFmpeg requires piping stderr output; parsing `time=` tokens adds complexity | ⏳ |
+| 8.9 | Video preview + download | HTML5 `<video>` player + signed URL download | 🟡 82% | CORS header on GCS signed URL needed for `<video>` src; set `AllowedOrigins` on bucket CORS config | ⏳ |
+| 8.10 | PDF export via `window.print()` | Paginated HTML doc with thumbnails + annotations | 🟡 75% | `window.print()` CSS (`@page`, `break-inside`) is fiddly across browsers; Chrome prints cleanly but Safari may reflow | ⏳ |
+| 8.11 | Instructional Designer role enforced | Non-ID key → 403 on `/export/*` and storyboard writes | 🟢 93% | Same middleware as 5.13 / 7.11 | ⏳ |
+| 8.12 | Admin views completed exports | Exports tab lists videos with timestamp + author | 🟡 83% | Reads `exports/` Firestore index; requires 8.7 to populate metadata | ⏳ |
 
 ---
 
 ## Sprint 9 — Hardening, Roles, & Integration Polish
 
-**Goal:** Unify all four roles under a consistent auth model, harden the new endpoints, add end-to-end integration tests, and ensure the full platform is production-ready.
+**Goal:** Unified auth, integration tests, monitoring, and mobile-responsive portal.
+
+**Sprint-level probability of full completion: 🟡 70%**  
+Most tasks are consolidation and testing work — high confidence individually. The end-to-end smoke test (9.5) and integration suite (9.4) will surface failures from Sprints 5–8, so sprint-level completion depends on all prior work being clean.
 
 ### Deliverables
 
-| # | Task | Done when | Status |
+| # | Task | Done when | P% | Risk note | Status |
+|---|---|---|---|---|---|
+| 9.1 | Role-based API key system | `role` claim in Secret Manager; middleware enforces per-route | 🟡 80% | Storing structured metadata in Secret Manager is non-standard; alternative is a Firestore `api_keys` collection — pick one pattern and commit | ⏳ |
+| 9.2 | Role assignment in Admin Portal | Role change reflects in Secret Manager within 10 s | 🟠 65% | Secret Manager has no native key-value metadata API; role storage strategy from 9.1 must be settled first | ⏳ |
+| 9.3 | Rate limiting per role | Analyst: 10 req/hr; export: 5 req/hr; capture: 60 req/min | 🟡 82% | `express-rate-limit` with per-key store; `keyGenerator` by API key is straightforward | ⏳ |
+| 9.4 | Integration test suite | `npm run test:integration` covers all 6 scenarios | 🟡 75% | Mock FFmpeg and LLM dependencies add setup complexity; requires Sprint 7–8 interfaces to be stable | ⏳ |
+| 9.5 | End-to-end smoke test script | `smoke-test.ps1` exits 0; runs in CI | 🟡 72% | CI integration on Cloud Run deployment requires `gcloud` auth in CI env; secrets management for test keys | ⏳ |
+| 9.6 | Cloud Monitoring: report failure alert | Fires when > 2 jobs fail in 10 min | 🟡 80% | Identical process to Sprint 4's 4.8 error rate alert; well understood | ⏳ |
+| 9.7 | Cloud Monitoring: export queue depth alert | Fires when > 10 jobs queued > 5 min | 🟡 78% | Custom metric on Firestore `status == queued` count; requires a Cloud Function or log-based metric | ⏳ |
+| 9.8 | GCS lifecycle rule for `exports/` | MP4s auto-deleted after 90 days | 🟢 95% | `gcloud storage buckets update` with lifecycle config JSON; same pattern as Sprint 0 bucket setup | ⏳ |
+| 9.9 | Firestore security rules | Direct writes to protected collections blocked | 🟡 78% | Firestore rules are straightforward; testing them requires Firebase emulator — first-time setup | ⏳ |
+| 9.10 | Admin Portal: consolidated dashboard | Live Firestore counts for 5 metrics | 🟡 75% | Live Firestore listeners (`onSnapshot`) are efficient but require WebSocket keep-alive handling on Cloud Run | ⏳ |
+| 9.11 | Mobile-responsive Admin Portal | Usable at 375px; touch targets ≥ 44px | 🟡 80% | CSS Grid + media queries; tables-to-cards pattern is well-documented; requires manual test on real device | ⏳ |
+| 9.12 | `lessons_learned.md` updated | ≥ 3 new lessons documented | 🟢 97% | Documentation task; no technical risk | ⏳ |
+
+---
+
+## Sprint-Level Probability Summary
+
+| Sprint | Focus | Completion P% | Biggest risk |
 |---|---|---|---|
-| 9.1 | Role-based API key system | Each API key in Secret Manager carries a `role` claim (`admin`, `analyst`, `instructional_designer`, `user`); middleware enforces per-route role requirements | ⏳ |
-| 9.2 | Role assignment in Admin Portal | Admin can assign/change a user's role; change reflects in Secret Manager within 10 s | ⏳ |
-| 9.3 | Rate limiting scoped per role | Analyst report generation: 10 req/hour; video export: 5 req/hour; standard capture: 60 req/min (existing) | ⏳ |
-| 9.4 | Integration test suite | `npm run test:integration` covers: project CRUD, user admission, capture → Firestore write, report generation (mock), video export (mock FFmpeg), inactivity logging | ⏳ |
-| 9.5 | End-to-end smoke test script | `scripts/smoke-test.ps1` covers all 4 roles; exits 0 on success; runs in CI on every push to `main` | ⏳ |
-| 9.6 | Cloud Monitoring: new alert for report generation failures | Alert fires when > 2 report jobs fail within 10 minutes | ⏳ |
-| 9.7 | Cloud Monitoring: video export queue depth alert | Alert fires when > 10 jobs in `queued` state for > 5 minutes | ⏳ |
-| 9.8 | GCS lifecycle rule for exports | MP4 files in `exports/` prefix auto-deleted after 90 days; verified with `gcloud storage buckets describe` | ⏳ |
-| 9.9 | Firestore security rules | Non-admin service accounts cannot write to `projects`, `users`, or `reports` collections directly; all writes go through the backend API | ⏳ |
-| 9.10 | Admin Portal: consolidated dashboard | Single landing page shows: active projects count, active users today, screenshots today, pending reports, pending exports — all with live Firestore listeners | ⏳ |
-| 9.11 | Mobile-responsive Admin Portal | Portal is usable on 375px viewport; all tables collapse to card lists; touch targets ≥ 44px | ⏳ |
-| 9.12 | `lessons_learned.md` updated | Document includes at least 3 new lessons from Sprints 5–9 | ⏳ |
+| 5 | Admin Portal + Project/User CRUD | 🟡 78% | Extension migration off local storage (5.15) |
+| 6 | Inactivity tracking + timestamps | 🟠 65% | `chrome.alarms` 45 s floor (6.4, 6.10) |
+| 7 | Analyst reports (Firestore + OCR) | 🟠 55% | GTM/GA4/Ads OCR accuracy (7.5–7.7) |
+| 8 | Instructional Designer workspace | 🟠 60% | FFmpeg subtitle burn-in + drag-and-drop (8.2, 8.6) |
+| 9 | Hardening + integration tests | 🟡 70% | Smoke test CI auth + role storage strategy (9.1, 9.5) |
+| **All sprints sequential** | Full platform | **🟠 ~17%** | Compounded — all five sprint gates must pass |
+
+> **Note on sequential probability:** The ~17% full-platform figure assumes each sprint is a hard dependency gate. In practice, partial delivery of Sprints 6–8 (excluding the red-rated tasks) is a realistic and valuable outcome. Decoupling the 🔴 tasks (6.4, 6.10, 7.5–7.7) into a separate research spike sprint reduces compounded risk significantly.
 
 ---
 
@@ -192,9 +229,9 @@ A sprint is **not done** until all of the following are true:
 |---|---|---|
 | Firestore `session_events` writes race on Chrome shutdown | High | Use `chrome.runtime.onSuspend` + `keepAlive` port trick; flush session data synchronously before service worker dies |
 | `chrome.alarms` minimum interval is 1 minute in MV3 (some contexts) | High | Use `chrome.alarms` with 1-minute granularity; supplement with an in-memory `Date` check on wake to determine if 45 s has elapsed |
-| FFmpeg Cloud Run job cold start > 30 s for large storyboards | Medium | Pre-warm with a `--min-instances 1` on the export service; set job timeout to 10 minutes |
+| FFmpeg Cloud Run job cold start > 30 s for large storyboards | Medium | Pre-warm with `--min-instances 1` on the export service; set job timeout to 10 minutes |
 | Signed URLs for screenshot thumbnails expire during long portal sessions | Medium | Admin Portal refreshes thumbnail signed URLs on visibility change or after 9 minutes |
-| GTM/GA4 report accuracy depends on screenshot legibility | High | Require screenshots at ≥ 1280px viewport width; document screenshot quality guidelines for users in the extension popup |
+| GTM/GA4 report accuracy depends on screenshot legibility | High | Require screenshots at ≥ 1280px viewport width; document screenshot quality guidelines in the extension popup |
 | Analyst engine LLM/OCR costs exceed estimate | Medium | Process screenshots in batches; cache extracted text in Firestore to avoid re-processing the same image twice |
 | Role-based API key leakage | High | Rotate keys quarterly; log all 401/403 events to Cloud Logging; alert on > 5 failed auth attempts per IP per minute |
 | Storyboard drag-and-drop broken on touch devices | Low | Use Pointer Events API instead of Mouse Events; test on iPad Safari and Chrome Android |
@@ -216,3 +253,4 @@ The following items from the original backlog are superseded or promoted:
 | Per-project GCS bucket isolation | Remains in backlog; evaluate after Sprint 5 data model is stable |
 | Slack / Teams webhook on upload | Remains in backlog |
 | Cloud Run `--min-instances 1` | **Promote for export service in Sprint 8** |
+| OCR/Vision pipeline for GTM/GA4 screenshots | **Consider as standalone research spike before Sprint 7** |
