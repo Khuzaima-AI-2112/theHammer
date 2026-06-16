@@ -1,0 +1,47 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "uploads",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "projectId",  "order": "ASCENDING" },
+        { "fieldPath": "tool",       "order": "ASCENDING" },
+        { "fieldPath": "uploadedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "uploads",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "projectId",  "order": "ASCENDING" },
+        { "fieldPath": "userId",     "order": "ASCENDING" },
+        { "fieldPath": "uploadedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "session_events",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "projectId",   "order": "ASCENDING" },
+        { "fieldPath": "sessionStart", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "reports",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "projectId",   "order": "ASCENDING" },
+        { "fieldPath": "generatedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "project_memberships",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "projectId",  "order": "ASCENDING" },
+        { "fieldPath": "admittedAt", "order": "DESCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}
