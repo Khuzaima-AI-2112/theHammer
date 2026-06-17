@@ -29,6 +29,8 @@
       --color-error-bg:         rgba(239,68,68,0.10);
       --color-warning:          #f59e0b;
       --color-warning-bg:       rgba(245,158,11,0.10);
+      --color-blue:             #60a5fa;
+      --color-blue-bg:          rgba(96,165,250,0.10);
 
       --font-body:    'Inter', system-ui, sans-serif;
       --font-mono:    'JetBrains Mono', 'Courier New', monospace;
@@ -75,6 +77,8 @@
       --color-primary-hover:    #d45f00;
       --color-primary-active:   #b85200;
       --color-primary-bg:       rgba(234,108,10,0.08);
+      --color-blue:             #2563eb;
+      --color-blue-bg:          rgba(37,99,235,0.08);
       --shadow-sm: 0 1px 3px rgba(0,0,0,0.08);
       --shadow-md: 0 4px 16px rgba(0,0,0,0.10);
       --shadow-lg: 0 12px 40px rgba(0,0,0,0.14);
@@ -115,6 +119,76 @@
       }
     }
 
+    /* ── Auth Gate ────────────────────────────────────────────── */
+    /* Covers the entire viewport until /me resolves. */
+    #authGate {
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      background: var(--color-bg);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: var(--space-4);
+    }
+    #authGate.hidden { display: none; }
+    .gate-logo {
+      display: flex;
+      align-items: center;
+      gap: var(--space-3);
+      margin-bottom: var(--space-2);
+    }
+    .gate-logo-name {
+      font-size: var(--text-base);
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      color: var(--color-text);
+    }
+    .gate-spinner {
+      width: 20px;
+      height: 20px;
+      border: 2px solid var(--color-surface-offset);
+      border-top-color: var(--color-primary);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .gate-status {
+      font-size: var(--text-xs);
+      color: var(--color-text-muted);
+    }
+    .gate-error-block {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: var(--space-3);
+      padding: var(--space-6) var(--space-8);
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-lg);
+      max-width: 380px;
+      text-align: center;
+    }
+    .gate-error-block h2 {
+      font-size: var(--text-base);
+      font-weight: 600;
+      color: var(--color-text);
+    }
+    .gate-error-block p {
+      font-size: var(--text-xs);
+      color: var(--color-text-muted);
+      line-height: 1.6;
+    }
+    .gate-error-block .gate-email {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--color-primary);
+      background: var(--color-primary-bg);
+      padding: var(--space-1) var(--space-2);
+      border-radius: var(--radius-sm);
+    }
+
     /* ── Layout ───────────────────────────────────────────────── */
     .app-layout {
       display: grid;
@@ -122,6 +196,9 @@
       grid-template-rows: auto 1fr;
       min-height: 100dvh;
     }
+    /* Hide app until auth resolves */
+    .app-layout { opacity: 0; transition: opacity 220ms ease; }
+    .app-layout.ready { opacity: 1; }
 
     /* ── Top Bar ──────────────────────────────────────────────── */
     .topbar {
@@ -136,11 +213,7 @@
       top: 0;
       z-index: 100;
     }
-    .topbar-left {
-      display: flex;
-      align-items: center;
-      gap: var(--space-3);
-    }
+    .topbar-left { display: flex; align-items: center; gap: var(--space-3); }
     .topbar-logo {
       display: flex;
       align-items: center;
@@ -165,11 +238,7 @@
       border-radius: var(--radius-full);
       line-height: 1.5;
     }
-    .topbar-right {
-      display: flex;
-      align-items: center;
-      gap: var(--space-4);
-    }
+    .topbar-right { display: flex; align-items: center; gap: var(--space-4); }
     .topbar-user {
       display: flex;
       align-items: center;
@@ -238,34 +307,21 @@
       position: relative;
     }
     .sidebar-item svg { flex-shrink: 0; opacity: 0.6; }
-    .sidebar-item:hover {
-      color: var(--color-text);
-      background: var(--color-surface-offset);
-    }
+    .sidebar-item:hover { color: var(--color-text); background: var(--color-surface-offset); }
     .sidebar-item:hover svg { opacity: 1; }
-    .sidebar-item.active {
-      color: var(--color-primary);
-      background: var(--color-primary-bg);
-    }
+    .sidebar-item.active { color: var(--color-primary); background: var(--color-primary-bg); }
     .sidebar-item.active svg { opacity: 1; }
     .sidebar-item.active::before {
       content: '';
       position: absolute;
-      left: 0;
-      top: 4px;
-      bottom: 4px;
+      left: 0; top: 4px; bottom: 4px;
       width: 2px;
       background: var(--color-primary);
       border-radius: 0 var(--radius-full) var(--radius-full) 0;
     }
 
     /* ── Main Content ─────────────────────────────────────────── */
-    .main {
-      overflow-y: auto;
-      background: var(--color-bg);
-      display: flex;
-      flex-direction: column;
-    }
+    .main { overflow-y: auto; background: var(--color-bg); display: flex; flex-direction: column; }
 
     /* ── Views ────────────────────────────────────────────────── */
     .view { display: none; flex-direction: column; flex: 1; }
@@ -308,39 +364,24 @@
       white-space: nowrap;
       border: 1px solid transparent;
     }
-    .btn-primary {
-      background: var(--color-primary);
-      color: #fff;
-      border-color: var(--color-primary);
-    }
+    .btn-primary { background: var(--color-primary); color: #fff; border-color: var(--color-primary); }
     .btn-primary:hover { background: var(--color-primary-hover); border-color: var(--color-primary-hover); }
     .btn-primary:active { background: var(--color-primary-active); }
-    .btn-ghost {
-      background: transparent;
-      color: var(--color-text-muted);
-      border-color: var(--color-border);
-    }
+    .btn-ghost { background: transparent; color: var(--color-text-muted); border-color: var(--color-border); }
     .btn-ghost:hover { color: var(--color-text); background: var(--color-surface-offset); border-color: rgba(255,255,255,0.12); }
-    .btn-danger {
-      background: var(--color-error-bg);
-      color: var(--color-error);
-      border-color: rgba(239,68,68,0.2);
-    }
+    .btn-danger { background: var(--color-error-bg); color: var(--color-error); border-color: rgba(239,68,68,0.2); }
     .btn-danger:hover { background: rgba(239,68,68,0.2); }
     .btn:disabled { opacity: 0.4; cursor: not-allowed; pointer-events: none; }
     .btn-icon {
-      width: 30px;
-      height: 30px;
-      padding: 0;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
+      width: 30px; height: 30px; padding: 0;
+      display: inline-flex; align-items: center; justify-content: center;
       border-radius: var(--radius-md);
       border: 1px solid var(--color-border);
       color: var(--color-text-muted);
       background: transparent;
     }
     .btn-icon:hover { color: var(--color-error); border-color: rgba(239,68,68,0.3); background: var(--color-error-bg); }
+    .btn-icon.add:hover { color: var(--color-success); border-color: rgba(34,197,94,0.3); background: var(--color-success-bg); }
 
     /* ── Stats Bar ────────────────────────────────────────────── */
     .stats-bar {
@@ -359,11 +400,7 @@
       border-radius: var(--radius-md);
       font-size: var(--text-xs);
     }
-    .stat-chip-value {
-      font-weight: 700;
-      font-variant-numeric: tabular-nums;
-      color: var(--color-text);
-    }
+    .stat-chip-value { font-weight: 700; font-variant-numeric: tabular-nums; color: var(--color-text); }
     .stat-chip-label { color: var(--color-text-muted); }
 
     /* ── Toolbar ──────────────────────────────────────────────── */
@@ -380,8 +417,7 @@
     .search-input-wrap { position: relative; }
     .search-input-wrap svg {
       position: absolute;
-      left: var(--space-3);
-      top: 50%;
+      left: var(--space-3); top: 50%;
       transform: translateY(-50%);
       color: var(--color-text-faint);
       pointer-events: none;
@@ -398,20 +434,22 @@
     }
     .search-input::placeholder { color: var(--color-text-faint); }
     .search-input:focus { outline: none; border-color: var(--color-primary); }
+    .filter-select {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-md);
+      padding: var(--space-2) var(--space-3);
+      font-size: var(--text-xs);
+      color: var(--color-text-muted);
+      transition: border-color var(--transition);
+      cursor: pointer;
+    }
+    .filter-select:focus { outline: none; border-color: var(--color-primary); color: var(--color-text); }
 
     /* ── Table ────────────────────────────────────────────────── */
-    .table-wrap {
-      flex: 1;
-      overflow-x: auto;
-    }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: var(--text-xs);
-    }
-    thead tr {
-      border-bottom: 1px solid var(--color-border);
-    }
+    .table-wrap { flex: 1; overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: var(--text-xs); }
+    thead tr { border-bottom: 1px solid var(--color-border); }
     th {
       padding: var(--space-3) var(--space-4);
       text-align: left;
@@ -427,58 +465,90 @@
     th.sortable:hover { color: var(--color-text-muted); }
     th.sort-asc .sort-icon::after  { content: ' ↑'; }
     th.sort-desc .sort-icon::after { content: ' ↓'; }
-    tbody tr {
-      border-bottom: 1px solid var(--color-divider);
-      transition: background var(--transition);
-    }
+    tbody tr { border-bottom: 1px solid var(--color-divider); transition: background var(--transition); }
     tbody tr:hover { background: var(--color-surface); }
     tbody tr:last-child { border-bottom: none; }
-    td {
-      padding: var(--space-4);
-      color: var(--color-text);
-      vertical-align: middle;
-    }
+    td { padding: var(--space-4); color: var(--color-text); vertical-align: middle; }
     td.muted { color: var(--color-text-muted); }
-    td.mono {
-      font-family: var(--font-mono);
-      font-size: 11px;
-      color: var(--color-text-muted);
-    }
-    .project-name-cell {
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-    }
-    .project-name {
-      font-weight: 500;
-      color: var(--color-text);
-      cursor: pointer;
-    }
+    td.mono { font-family: var(--font-mono); font-size: 11px; color: var(--color-text-muted); }
+    .project-name-cell { display: flex; flex-direction: column; gap: 2px; }
+    .project-name { font-weight: 500; color: var(--color-text); cursor: pointer; }
     .project-name:hover { color: var(--color-primary); }
-    .project-id {
-      font-family: var(--font-mono);
-      font-size: 10px;
-      color: var(--color-text-faint);
-    }
+    .project-id { font-family: var(--font-mono); font-size: 10px; color: var(--color-text-faint); }
     .member-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: var(--space-1);
+      display: inline-flex; align-items: center; gap: var(--space-1);
       background: var(--color-surface-offset);
       border: 1px solid var(--color-border);
       border-radius: var(--radius-full);
       padding: 2px var(--space-2);
-      font-size: 11px;
-      font-weight: 600;
+      font-size: 11px; font-weight: 600;
       font-variant-numeric: tabular-nums;
       color: var(--color-text-muted);
     }
     .member-badge.has-members { color: var(--color-text); border-color: rgba(255,255,255,0.12); }
-    .actions-cell {
-      display: flex;
+    .actions-cell { display: flex; align-items: center; gap: var(--space-2); justify-content: flex-end; }
+
+    /* ── Role Badge ───────────────────────────────────────────── */
+    .role-badge {
+      display: inline-flex;
       align-items: center;
-      gap: var(--space-2);
-      justify-content: flex-end;
+      padding: 2px var(--space-2);
+      border-radius: var(--radius-full);
+      font-size: 11px;
+      font-weight: 600;
+      white-space: nowrap;
+      border: 1px solid transparent;
+    }
+    .role-badge.admin   { color: var(--color-primary); background: var(--color-primary-bg); border-color: rgba(249,115,22,0.25); }
+    .role-badge.analyst { color: var(--color-blue);    background: var(--color-blue-bg);    border-color: rgba(96,165,250,0.25); }
+    .role-badge.instructional_designer { color: var(--color-warning); background: var(--color-warning-bg); border-color: rgba(245,158,11,0.25); }
+    .role-badge.user    { color: var(--color-text-muted); background: var(--color-surface-offset); border-color: var(--color-border); }
+
+    /* ── Tool Badge (Activity) ────────────────────────────────── */
+    .tool-badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px var(--space-2);
+      background: var(--color-surface-offset);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-sm);
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--color-text-muted);
+      white-space: nowrap;
+    }
+
+    /* ── User cell ────────────────────────────────────────────── */
+    .user-cell { display: flex; align-items: center; gap: var(--space-3); }
+    .user-cell-avatar {
+      width: 28px; height: 28px;
+      border-radius: var(--radius-full);
+      background: var(--color-surface-offset);
+      border: 1px solid var(--color-border);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 11px; font-weight: 700;
+      color: var(--color-text-muted);
+      flex-shrink: 0;
+    }
+    .user-cell-info { display: flex; flex-direction: column; gap: 1px; }
+    .user-cell-name { font-weight: 500; color: var(--color-text); }
+    .user-cell-email { font-size: 10px; font-family: var(--font-mono); color: var(--color-text-faint); }
+
+    /* ── Activity path cell ───────────────────────────────────── */
+    .path-cell {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--color-text-faint);
+      max-width: 260px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .path-cell:hover { color: var(--color-text-muted); cursor: default; }
+    .size-badge {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--color-text-faint);
     }
 
     /* ── Empty State ──────────────────────────────────────────── */
@@ -492,21 +562,9 @@
       flex: 1;
       gap: var(--space-4);
     }
-    .empty-icon {
-      width: 48px;
-      height: 48px;
-      color: var(--color-text-faint);
-    }
-    .empty-state h3 {
-      font-size: var(--text-base);
-      font-weight: 600;
-      color: var(--color-text);
-    }
-    .empty-state p {
-      font-size: var(--text-xs);
-      color: var(--color-text-muted);
-      max-width: 32ch;
-    }
+    .empty-icon { width: 48px; height: 48px; color: var(--color-text-faint); }
+    .empty-state h3 { font-size: var(--text-base); font-weight: 600; color: var(--color-text); }
+    .empty-state p { font-size: var(--text-xs); color: var(--color-text-muted); max-width: 32ch; }
 
     /* ── Skeleton ─────────────────────────────────────────────── */
     @keyframes shimmer {
@@ -528,54 +586,30 @@
 
     /* ── Modal ────────────────────────────────────────────────── */
     .modal-backdrop {
-      position: fixed;
-      inset: 0;
+      position: fixed; inset: 0;
       background: rgba(0,0,0,0.6);
       backdrop-filter: blur(4px);
-      display: flex;
-      align-items: center;
-      justify-content: center;
+      display: flex; align-items: center; justify-content: center;
       z-index: 1000;
       padding: var(--space-4);
-      opacity: 0;
-      pointer-events: none;
+      opacity: 0; pointer-events: none;
       transition: opacity var(--transition);
     }
-    .modal-backdrop.open {
-      opacity: 1;
-      pointer-events: all;
-    }
+    .modal-backdrop.open { opacity: 1; pointer-events: all; }
     .modal {
       background: var(--color-surface);
       border: 1px solid var(--color-border);
       border-radius: var(--radius-lg);
       padding: var(--space-6);
-      width: 100%;
-      max-width: 420px;
+      width: 100%; max-width: 420px;
       box-shadow: var(--shadow-lg);
       transform: translateY(12px);
       transition: transform var(--transition);
     }
     .modal-backdrop.open .modal { transform: translateY(0); }
-    .modal-title {
-      font-size: var(--text-base);
-      font-weight: 600;
-      color: var(--color-text);
-      margin-bottom: var(--space-2);
-    }
-    .modal-desc {
-      font-size: var(--text-xs);
-      color: var(--color-text-muted);
-      margin-bottom: var(--space-6);
-      line-height: 1.5;
-    }
-    .form-label {
-      display: block;
-      font-size: var(--text-xs);
-      font-weight: 500;
-      color: var(--color-text-muted);
-      margin-bottom: var(--space-2);
-    }
+    .modal-title { font-size: var(--text-base); font-weight: 600; color: var(--color-text); margin-bottom: var(--space-2); }
+    .modal-desc { font-size: var(--text-xs); color: var(--color-text-muted); margin-bottom: var(--space-6); line-height: 1.5; }
+    .form-label { display: block; font-size: var(--text-xs); font-weight: 500; color: var(--color-text-muted); margin-bottom: var(--space-2); }
     .form-input {
       width: 100%;
       background: var(--color-bg);
@@ -588,34 +622,21 @@
     }
     .form-input::placeholder { color: var(--color-text-faint); }
     .form-input:focus { outline: none; border-color: var(--color-primary); box-shadow: 0 0 0 3px rgba(249,115,22,0.12); }
-    .form-error {
-      font-size: var(--text-xs);
-      color: var(--color-error);
-      margin-top: var(--space-2);
-      min-height: 1.2em;
-    }
-    .modal-actions {
-      display: flex;
-      justify-content: flex-end;
-      gap: var(--space-3);
-      margin-top: var(--space-6);
-    }
+    .form-error { font-size: var(--text-xs); color: var(--color-error); margin-top: var(--space-2); min-height: 1.2em; }
+    .form-group { margin-bottom: var(--space-4); }
+    .form-group:last-of-type { margin-bottom: 0; }
+    .modal-actions { display: flex; justify-content: flex-end; gap: var(--space-3); margin-top: var(--space-6); }
 
     /* ── Toast ────────────────────────────────────────────────── */
     .toast-container {
       position: fixed;
-      bottom: var(--space-6);
-      right: var(--space-6);
+      bottom: var(--space-6); right: var(--space-6);
       z-index: 2000;
-      display: flex;
-      flex-direction: column;
-      gap: var(--space-2);
+      display: flex; flex-direction: column; gap: var(--space-2);
       pointer-events: none;
     }
     .toast {
-      display: flex;
-      align-items: center;
-      gap: var(--space-3);
+      display: flex; align-items: center; gap: var(--space-3);
       padding: var(--space-3) var(--space-4);
       background: var(--color-surface-2);
       border: 1px solid var(--color-border);
@@ -629,12 +650,7 @@
     }
     .toast.toast-success { border-color: rgba(34,197,94,0.3); }
     .toast.toast-error   { border-color: rgba(239,68,68,0.3); }
-    .toast-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: var(--radius-full);
-      flex-shrink: 0;
-    }
+    .toast-dot { width: 8px; height: 8px; border-radius: var(--radius-full); flex-shrink: 0; }
     .toast-success .toast-dot { background: var(--color-success); }
     .toast-error   .toast-dot { background: var(--color-error); }
     @keyframes toast-in {
@@ -643,38 +659,17 @@
     }
 
     /* ── Confirm Dialog ───────────────────────────────────────── */
-    .confirm-text {
-      font-size: var(--text-sm);
-      color: var(--color-text-muted);
-      line-height: 1.6;
-    }
+    .confirm-text { font-size: var(--text-sm); color: var(--color-text-muted); line-height: 1.6; }
     .confirm-text strong { color: var(--color-text); }
 
-    /* ── Placeholder Views ────────────────────────────────────── */
-    .placeholder-view {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      flex: 1;
-      gap: var(--space-3);
-      color: var(--color-text-muted);
-      font-size: var(--text-sm);
-    }
-    .placeholder-view svg { color: var(--color-text-faint); }
-    .placeholder-view p { color: var(--color-text-faint); font-size: var(--text-xs); }
+    /* ── Add Member Modal ─────────────────────────────────────── */
+    .modal.wide { max-width: 460px; }
 
     /* ── Responsive ───────────────────────────────────────────── */
     @media (max-width: 768px) {
       .app-layout { grid-template-columns: 1fr; grid-template-rows: auto auto 1fr; }
       .sidebar { display: none; }
-      .sidebar.mobile-open {
-        display: flex;
-        position: fixed;
-        inset: 0;
-        z-index: 200;
-        width: 260px;
-      }
+      .sidebar.mobile-open { display: flex; position: fixed; inset: 0; z-index: 200; width: 260px; }
       .topbar { padding: var(--space-3) var(--space-4); }
       .page-header { padding: var(--space-5) var(--space-4) var(--space-4); }
       .page-body { padding: var(--space-4); }
@@ -686,6 +681,26 @@
 </head>
 <body>
 
+<!-- ══════════════════════════════════════════════════════════════
+     AUTH GATE  (5.13)
+     Shown while /me is in-flight. Transitions to error block if:
+       – 401: IAP not tunnelled (dev: expected, show helpful hint)
+       – 403 / provisioned:false: authenticated but not in Firestore
+     Hides and reveals .app-layout on success.
+     ══════════════════════════════════════════════════════════════ -->
+<div id="authGate" role="status" aria-live="polite">
+  <div class="gate-logo">
+    <svg width="32" height="32" viewBox="0 0 28 28" fill="none" aria-hidden="true">
+      <rect width="28" height="28" rx="6" fill="var(--color-primary)" opacity="0.12"/>
+      <path d="M7 10.5L11 7h6l4 4-2 2-1.5-1.5v7.5h-3v-7.5L13 13l-2-2.5" fill="none" stroke="var(--color-primary)" stroke-width="1.5" stroke-linejoin="round"/>
+      <rect x="10" y="18" width="8" height="2.5" rx="1.25" fill="var(--color-primary)"/>
+    </svg>
+    <span class="gate-logo-name">The Hammer</span>
+  </div>
+  <div class="gate-spinner" id="gateSpinner" aria-hidden="true"></div>
+  <span class="gate-status" id="gateStatus">Verifying identity…</span>
+</div>
+
 <!-- ── Toast Container ─────────────────────────────────────── -->
 <div class="toast-container" id="toastContainer" aria-live="polite"></div>
 
@@ -695,14 +710,7 @@
     <div class="modal-title" id="createModalTitle">New Project</div>
     <div class="modal-desc">Create a project to start organizing uploads and admitting users.</div>
     <label class="form-label" for="projectNameInput">Project name</label>
-    <input
-      class="form-input"
-      id="projectNameInput"
-      type="text"
-      placeholder="e.g. ACME Corp GTM Audit Q3"
-      maxlength="128"
-      autocomplete="off"
-    />
+    <input class="form-input" id="projectNameInput" type="text" placeholder="e.g. ACME Corp GTM Audit Q3" maxlength="128" autocomplete="off"/>
     <div class="form-error" id="createError" aria-live="polite"></div>
     <div class="modal-actions">
       <button class="btn btn-ghost" id="createCancelBtn" type="button">Cancel</button>
@@ -711,7 +719,7 @@
   </div>
 </div>
 
-<!-- ── Delete Confirm Modal ─────────────────────────────────── -->
+<!-- ── Delete Project Confirm Modal ─────────────────────────── -->
 <div class="modal-backdrop" id="deleteModal" role="dialog" aria-modal="true" aria-labelledby="deleteModalTitle">
   <div class="modal">
     <div class="modal-title" id="deleteModalTitle">Delete project?</div>
@@ -727,13 +735,53 @@
   </div>
 </div>
 
+<!-- ── Add Member Modal ──────────────────────────────────────── -->
+<div class="modal-backdrop" id="addMemberModal" role="dialog" aria-modal="true" aria-labelledby="addMemberModalTitle">
+  <div class="modal wide">
+    <div class="modal-title" id="addMemberModalTitle">Add member</div>
+    <div class="modal-desc" id="addMemberModalDesc">Admit a user to this project.</div>
+    <div class="form-group">
+      <label class="form-label" for="addMemberUserId">User ID</label>
+      <input class="form-input" id="addMemberUserId" type="text" placeholder="usr_xxxxxxxxxx" autocomplete="off" maxlength="64"/>
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="addMemberRole">Role</label>
+      <select class="form-input filter-select" id="addMemberRole" style="width:100%">
+        <option value="user">user</option>
+        <option value="analyst">analyst</option>
+        <option value="instructional_designer">instructional_designer</option>
+        <option value="admin">admin</option>
+      </select>
+    </div>
+    <div class="form-error" id="addMemberError" aria-live="polite"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="addMemberCancelBtn" type="button">Cancel</button>
+      <button class="btn btn-primary" id="addMemberSubmitBtn" type="button">Add member</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Remove Member Confirm Modal ──────────────────────────── -->
+<div class="modal-backdrop" id="removeMemberModal" role="dialog" aria-modal="true" aria-labelledby="removeMemberModalTitle">
+  <div class="modal">
+    <div class="modal-title" id="removeMemberModalTitle">Remove member?</div>
+    <div class="confirm-text">
+      Remove <strong id="removeMemberName"></strong> from <strong id="removeMemberProject"></strong>?
+      The user account is not deleted.
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="removeMemberCancelBtn" type="button">Cancel</button>
+      <button class="btn btn-danger" id="removeMemberConfirmBtn" type="button">Remove</button>
+    </div>
+  </div>
+</div>
+
 <!-- ── App Layout ──────────────────────────────────────────── -->
-<div class="app-layout">
+<div class="app-layout" id="appLayout">
 
   <!-- Topbar -->
   <header class="topbar">
     <div class="topbar-left">
-      <!-- Inline SVG logo: Hammer mark -->
       <a href="#" class="topbar-logo" aria-label="The Hammer">
         <svg width="28" height="28" viewBox="0 0 28 28" fill="none" aria-hidden="true">
           <rect width="28" height="28" rx="6" fill="var(--color-primary)" opacity="0.12"/>
@@ -747,10 +795,9 @@
     <div class="topbar-right">
       <div class="topbar-user">
         <div class="user-avatar" id="userAvatar">A</div>
-        <span id="userEmail">Loading...</span>
+        <span id="userEmail">Loading…</span>
       </div>
       <button class="theme-toggle" data-theme-toggle aria-label="Switch to light mode" title="Toggle theme">
-        <!-- sun icon -->
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <circle cx="12" cy="12" r="5"/>
           <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
@@ -788,7 +835,9 @@
   <!-- Main -->
   <main class="main" id="main">
 
-    <!-- ── Projects View (5.9) ─────────────────────────────── -->
+    <!-- ═══════════════════════════════════════════════════════════
+         PROJECTS VIEW  (5.9 — already implemented)
+         ═══════════════════════════════════════════════════════════ -->
     <section class="view active" id="view-projects" aria-label="Projects">
       <div class="page-header">
         <div class="page-header-left">
@@ -820,14 +869,7 @@
         <div class="toolbar-left">
           <div class="search-input-wrap">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-            <input
-              class="search-input"
-              id="searchInput"
-              type="search"
-              placeholder="Search projects…"
-              aria-label="Search projects"
-              oninput="filterProjects(this.value)"
-            />
+            <input class="search-input" id="searchInput" type="search" placeholder="Search projects…" aria-label="Search projects" oninput="filterProjects(this.value)"/>
           </div>
         </div>
         <button class="btn btn-ghost" id="refreshBtn" onclick="loadProjects()" aria-label="Refresh projects">
@@ -837,24 +879,17 @@
       </div>
 
       <div class="table-wrap" id="projectsTableWrap">
-        <!-- Skeleton on first load -->
         <table aria-label="Projects table" id="projectsTable">
           <thead>
             <tr>
-              <th class="sortable" onclick="sortTable('name')" title="Sort by name">
-                <span class="sort-icon">Project</span>
-              </th>
+              <th class="sortable" onclick="sortTable('name')" title="Sort by name"><span class="sort-icon">Project</span></th>
               <th>Members</th>
-              <th class="sortable" onclick="sortTable('createdAt')" title="Sort by created">
-                <span class="sort-icon">Created</span>
-              </th>
+              <th class="sortable" onclick="sortTable('createdAt')" title="Sort by created"><span class="sort-icon">Created</span></th>
               <th>Last capture</th>
               <th></th>
             </tr>
           </thead>
-          <tbody id="projectsBody">
-            <!-- skeleton rows injected by JS -->
-          </tbody>
+          <tbody id="projectsBody"></tbody>
         </table>
         <div id="emptyState" class="empty-state" style="display:none" aria-live="polite">
           <svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/><line x1="12" y1="12" x2="12" y2="16"/><line x1="10" y1="14" x2="14" y2="14"/></svg>
@@ -868,38 +903,165 @@
       </div>
     </section>
 
-    <!-- ── Users View (5.10 placeholder) ────────────────────── -->
+    <!-- ═══════════════════════════════════════════════════════════
+         USERS VIEW  (5.11)
+         – Full user roster table
+         – Filter by role dropdown
+         – Filter by project dropdown (populated from allProjects)
+         – Search by name / email
+         – Per-row "Add to project" and "Remove from project" actions
+           (only when a project filter is active)
+         ═══════════════════════════════════════════════════════════ -->
     <section class="view" id="view-users" aria-label="Users">
       <div class="page-header">
-        <div class="page-header-left"><h1>Users</h1><p>Sprint 5.10 — User roster per project.</p></div>
+        <div class="page-header-left">
+          <h1>Users</h1>
+          <p>All provisioned users. Filter by role or project membership.</p>
+        </div>
+        <button class="btn btn-ghost" id="refreshUsersBtn" onclick="loadUsers()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+          Refresh
+        </button>
       </div>
-      <div class="placeholder-view">
-        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
-        <strong>User Roster</strong>
-        <p>Arriving in Task 5.10</p>
+
+      <div class="stats-bar" id="usersStatsBar">
+        <div class="stat-chip">
+          <span class="stat-chip-value" id="statUserTotal">—</span>
+          <span class="stat-chip-label">users</span>
+        </div>
+        <div class="stat-chip">
+          <span class="stat-chip-value" id="statUserAdmins">—</span>
+          <span class="stat-chip-label">admins</span>
+        </div>
+        <div class="stat-chip">
+          <span class="stat-chip-value" id="statUserAnalysts">—</span>
+          <span class="stat-chip-label">analysts</span>
+        </div>
+      </div>
+
+      <div class="toolbar">
+        <div class="toolbar-left">
+          <div class="search-input-wrap">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input class="search-input" id="userSearchInput" type="search" placeholder="Search users…" aria-label="Search users" oninput="filterUsers()"/>
+          </div>
+          <select class="filter-select" id="roleFilter" aria-label="Filter by role" onchange="filterUsers()">
+            <option value="">All roles</option>
+            <option value="admin">admin</option>
+            <option value="analyst">analyst</option>
+            <option value="instructional_designer">instructional_designer</option>
+            <option value="user">user</option>
+          </select>
+          <select class="filter-select" id="projectFilter" aria-label="Filter by project" onchange="onProjectFilterChange()">
+            <option value="">All projects</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="table-wrap">
+        <table aria-label="Users table" id="usersTable">
+          <thead>
+            <tr>
+              <th>User</th>
+              <th>Role</th>
+              <th id="membershipHeader">Admitted</th>
+              <th>Last active</th>
+              <th id="usersActionHeader"></th>
+            </tr>
+          </thead>
+          <tbody id="usersBody"></tbody>
+        </table>
+        <div id="usersEmptyState" class="empty-state" style="display:none" aria-live="polite">
+          <svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+          <h3>No users found</h3>
+          <p>Try adjusting your filters.</p>
+        </div>
       </div>
     </section>
 
-    <!-- ── Activity View (5.11 placeholder) ─────────────────── -->
+    <!-- ═══════════════════════════════════════════════════════════
+         ACTIVITY VIEW  (5.12)
+         – Project selector at the top (required; defaults to first project)
+         – Tool filter dropdown
+         – Last 100 uploads table: tool · user · path · size · time
+         – Auto-refresh toggle (30 s)
+         ═══════════════════════════════════════════════════════════ -->
     <section class="view" id="view-activity" aria-label="Activity">
       <div class="page-header">
-        <div class="page-header-left"><h1>Activity</h1><p>Sprint 5.11 — Per-tool activity feed.</p></div>
+        <div class="page-header-left">
+          <h1>Activity</h1>
+          <p>Per-tool capture feed. Select a project to begin.</p>
+        </div>
+        <div style="display:flex;align-items:center;gap:var(--space-3)">
+          <label style="display:flex;align-items:center;gap:var(--space-2);font-size:var(--text-xs);color:var(--color-text-muted);cursor:pointer">
+            <input type="checkbox" id="autoRefreshToggle" style="accent-color:var(--color-primary)" onchange="toggleAutoRefresh(this.checked)"/>
+            Auto-refresh 30s
+          </label>
+          <button class="btn btn-ghost" id="refreshActivityBtn" onclick="loadActivity()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+            Refresh
+          </button>
+        </div>
       </div>
-      <div class="placeholder-view">
-        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-        <strong>Activity Feed</strong>
-        <p>Arriving in Task 5.11</p>
+
+      <div class="stats-bar" id="activityStatsBar">
+        <div class="stat-chip">
+          <span class="stat-chip-value" id="statCaptureTotal">—</span>
+          <span class="stat-chip-label">captures shown</span>
+        </div>
+        <div class="stat-chip">
+          <span class="stat-chip-value" id="statCaptureUsers">—</span>
+          <span class="stat-chip-label">unique users</span>
+        </div>
+        <div class="stat-chip">
+          <span class="stat-chip-value" id="statCaptureTools">—</span>
+          <span class="stat-chip-label">tools</span>
+        </div>
+      </div>
+
+      <div class="toolbar">
+        <div class="toolbar-left">
+          <select class="filter-select" id="activityProjectSelect" aria-label="Select project" onchange="loadActivity()" style="min-width:200px">
+            <option value="">— Select a project —</option>
+          </select>
+          <select class="filter-select" id="activityToolFilter" aria-label="Filter by tool" onchange="loadActivity()">
+            <option value="">All tools</option>
+          </select>
+        </div>
+        <span id="activityLastRefresh" style="font-size:var(--text-xs);color:var(--color-text-faint)"></span>
+      </div>
+
+      <div class="table-wrap">
+        <table aria-label="Activity table" id="activityTable">
+          <thead>
+            <tr>
+              <th>Tool</th>
+              <th>User / ID</th>
+              <th>Path</th>
+              <th>Size</th>
+              <th>Time</th>
+            </tr>
+          </thead>
+          <tbody id="activityBody"></tbody>
+        </table>
+        <div id="activityEmptyState" class="empty-state" style="display:none" aria-live="polite">
+          <svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+          <h3 id="activityEmptyTitle">Select a project</h3>
+          <p id="activityEmptyDesc">Choose a project above to see its capture feed.</p>
+        </div>
       </div>
     </section>
 
-    <!-- ── Reports View (5.12 placeholder) ──────────────────── -->
+    <!-- ═══════════════════════════════════════════════════════════
+         REPORTS VIEW  (placeholder — Sprint 7)
+         ═══════════════════════════════════════════════════════════ -->
     <section class="view" id="view-reports" aria-label="Reports">
       <div class="page-header">
-        <div class="page-header-left"><h1>Reports</h1><p>Sprint 5.12 — Report viewer placeholder.</p></div>
+        <div class="page-header-left"><h1>Reports</h1><p>Report generation arrives in Sprint 7.</p></div>
       </div>
-      <div class="placeholder-view">
-        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-        <strong>No reports yet</strong>
+      <div class="empty-state" style="flex:1">
+        <svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        <h3>No reports yet</h3>
         <p>Report generation arrives in Sprint 7.</p>
       </div>
     </section>
@@ -910,13 +1072,13 @@
 <script>
 'use strict';
 
-// ── Config ───────────────────────────────────────────────────
-// API_BASE: during dev, point to your Cloud Run URL.
-// In production (post Sprint 21), this becomes relative ('').
+// ── Config ─────────────────────────────────────────────────────
+// HAMMER_API_BASE: set by Cloud Run env injection or leave '' for same-origin.
+// Dev: window.HAMMER_API_BASE = 'https://hammer-api-xxxx-uc.a.run.app'
 const API_BASE = window.HAMMER_API_BASE
   || (location.hostname === 'localhost' ? 'http://localhost:8080' : '');
 
-// ── Theme Toggle ─────────────────────────────────────────────
+// ── Theme Toggle ───────────────────────────────────────────────
 (function() {
   const btn  = document.querySelector('[data-theme-toggle]');
   const root = document.documentElement;
@@ -929,27 +1091,111 @@ const API_BASE = window.HAMMER_API_BASE
   });
 })();
 
-// ── Identity: read IAP header via /me shim (dev: mock) ───────
-async function loadIdentity() {
-  const emailEl  = document.getElementById('userEmail');
-  const avatarEl = document.getElementById('userAvatar');
+// ═══════════════════════════════════════════════════════════════
+// AUTH GUARD  (5.13)
+//
+// Flow:
+//   1. Show gate overlay immediately (prevents flash of unauthenticated UI)
+//   2. GET /me — reads X-Goog-Authenticated-User-Email via IAP
+//   3a. 200 + provisioned:true  → hide gate, reveal app, populate topbar
+//   3b. 200 + provisioned:false → show "contact admin" error block
+//   3c. 401                     → IAP not active (dev *.run.app direct hit);
+//       show dev-mode hint but still reveal the app so local dev works.
+//   3d. network error           → show retry block
+//
+// Sprint 21 note: when HTTPS LB + IAP are live, 401 from /me should never
+// happen in production because IAP rejects the request before it reaches
+// hammer-api. In dev, we get 401 because we hit *.run.app directly.
+// ═══════════════════════════════════════════════════════════════
+
+let currentUser = null;  // { email, role, userId, provisioned }
+
+async function runAuthGuard() {
+  const gate     = document.getElementById('authGate');
+  const spinner  = document.getElementById('gateSpinner');
+  const status   = document.getElementById('gateStatus');
+  const appLayout = document.getElementById('appLayout');
+
+  function showGateError(html) {
+    spinner.style.display = 'none';
+    status.style.display  = 'none';
+    const block = document.createElement('div');
+    block.className = 'gate-error-block';
+    block.innerHTML = html;
+    gate.appendChild(block);
+  }
+
+  function revealApp(user) {
+    currentUser = user;
+    gate.classList.add('hidden');
+    appLayout.classList.add('ready');
+    // Populate topbar identity chip
+    const emailEl  = document.getElementById('userEmail');
+    const avatarEl = document.getElementById('userAvatar');
+    if (user && user.email) {
+      emailEl.textContent  = user.email;
+      avatarEl.textContent = user.email.charAt(0).toUpperCase();
+    }
+  }
+
   try {
     const res = await fetch(`${API_BASE}/me`, { credentials: 'include' });
-    if (res.ok) {
-      const { email } = await res.json();
-      emailEl.textContent = email || 'admin';
-      avatarEl.textContent = (email || 'A').charAt(0).toUpperCase();
+
+    if (res.status === 401) {
+      // Dev mode: IAP not tunnelled. Allow access but show a dev banner.
+      console.warn('[hammer-portal] /me → 401: IAP not active on this URL. Dev mode — revealing app.');
+      revealApp({ email: 'dev@local', role: 'admin', provisioned: false });
+      showToast('Dev mode: IAP not active. Auth is bypassed.', 'error');
       return;
     }
-  } catch (_) {}
-  // Dev fallback: show X-Goog header if available (Cloud Run exposes it)
-  const devEmail = document.cookie.match(/hammer_user=([^;]+)/);
-  const label    = devEmail ? decodeURIComponent(devEmail[1]) : 'admin (dev)';
-  emailEl.textContent  = label;
-  avatarEl.textContent = label.charAt(0).toUpperCase();
+
+    const body = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      showGateError(`
+        <h2>Access denied</h2>
+        <p>The server returned an unexpected error (HTTP ${res.status}).<br>
+           Check that <code>hammer-api</code> is reachable and try again.</p>
+        <button class="btn btn-ghost" onclick="location.reload()">Retry</button>
+      `);
+      return;
+    }
+
+    if (!body.provisioned) {
+      showGateError(`
+        <h2>Account not provisioned</h2>
+        <p>You're signed in as</p>
+        <span class="gate-email">${esc(body.email || 'unknown')}</span>
+        <p>but this account hasn't been added to The Hammer yet.<br>
+           Ask your administrator to provision your account.</p>
+      `);
+      return;
+    }
+
+    if (body.role !== 'admin') {
+      showGateError(`
+        <h2>Insufficient role</h2>
+        <p>The Admin Portal requires the <strong>admin</strong> role.<br>
+           Your current role is <strong>${esc(body.role)}</strong>.<br>
+           Contact your administrator.</p>
+      `);
+      return;
+    }
+
+    revealApp(body);
+
+  } catch (err) {
+    console.error('[hammer-portal] /me fetch failed:', err);
+    showGateError(`
+      <h2>Cannot reach API</h2>
+      <p>Could not connect to <code>${esc(API_BASE || '(same origin)')}</code>.<br>
+         Check your network and that <code>hammer-api</code> is deployed.</p>
+      <button class="btn btn-ghost" onclick="location.reload()">Retry</button>
+    `);
+  }
 }
 
-// ── View Routing ──────────────────────────────────────────────
+// ── View Routing ───────────────────────────────────────────────
 function showView(name) {
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
   document.querySelectorAll('.sidebar-item').forEach(b => b.classList.remove('active'));
@@ -957,15 +1203,28 @@ function showView(name) {
   const btn  = document.querySelector(`[data-view="${name}"]`);
   if (view) view.classList.add('active');
   if (btn)  btn.classList.add('active');
+  // Lazy-load data on first navigation to each view
+  if (name === 'users'    && allUsers.length === 0)    loadUsers();
+  if (name === 'activity' && activityProjectsLoaded === false) populateActivityProjectSelect();
 }
 
-// ── State ─────────────────────────────────────────────────────
-let allProjects   = [];  // raw from API
+// ── State ──────────────────────────────────────────────────────
+let allProjects   = [];
 let sortKey       = 'createdAt';
 let sortDir       = 'desc';
 let pendingDelete = null;
 
-// ── API ───────────────────────────────────────────────────────
+let allUsers      = [];
+let usersLoaded   = false;
+let addMemberCtx  = null;   // { projectId, projectName }
+let removeMemberCtx = null; // { projectId, projectName, userId, displayName }
+
+let activityFeed  = [];
+let autoRefreshTimer = null;
+let activityProjectsLoaded = false;
+let knownTools    = new Set();
+
+// ── API ────────────────────────────────────────────────────────
 async function apiFetch(path, options = {}) {
   const res = await fetch(`${API_BASE}${path}`, {
     credentials: 'include',
@@ -980,7 +1239,10 @@ async function apiFetch(path, options = {}) {
   return res.json();
 }
 
-// ── Load Projects ─────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════
+// PROJECTS  (5.9 — kept from previous sprint, extended)
+// ═══════════════════════════════════════════════════════════════
+
 async function loadProjects() {
   const btn = document.getElementById('refreshBtn');
   btn.disabled = true;
@@ -990,6 +1252,8 @@ async function loadProjects() {
     allProjects = data;
     renderProjects(filtered(allProjects));
     updateStats(allProjects);
+    populateProjectFilter();       // populate users view project dropdown
+    populateActivityProjectSelect(); // populate activity view project select
   } catch (err) {
     showToast(`Failed to load projects: ${err.message}`, 'error');
     renderError();
@@ -998,7 +1262,6 @@ async function loadProjects() {
   }
 }
 
-// ── Filter & Sort ─────────────────────────────────────────────
 function filtered(list) {
   const q = (document.getElementById('searchInput').value || '').toLowerCase().trim();
   if (!q) return [...list];
@@ -1006,18 +1269,11 @@ function filtered(list) {
                           (p.projectId || '').toLowerCase().includes(q));
 }
 
-function filterProjects(q) {
-  renderProjects(filtered(allProjects));
-}
+function filterProjects(q) { renderProjects(filtered(allProjects)); }
 
 function sortTable(key) {
-  if (sortKey === key) {
-    sortDir = sortDir === 'asc' ? 'desc' : 'asc';
-  } else {
-    sortKey = key;
-    sortDir = 'desc';
-  }
-  // Update header classes
+  if (sortKey === key) { sortDir = sortDir === 'asc' ? 'desc' : 'asc'; }
+  else { sortKey = key; sortDir = 'desc'; }
   document.querySelectorAll('th.sortable').forEach(th => {
     th.classList.remove('sort-asc', 'sort-desc');
     const k = th.getAttribute('onclick').match(/'(\w+)'/);
@@ -1028,8 +1284,7 @@ function sortTable(key) {
 
 function sorted(list) {
   return [...list].sort((a, b) => {
-    let av = a[sortKey] ?? '';
-    let bv = b[sortKey] ?? '';
+    let av = a[sortKey] ?? '', bv = b[sortKey] ?? '';
     if (typeof av === 'string') av = av.toLowerCase();
     if (typeof bv === 'string') bv = bv.toLowerCase();
     if (av < bv) return sortDir === 'asc' ? -1 : 1;
@@ -1038,11 +1293,10 @@ function sorted(list) {
   });
 }
 
-// ── Render ────────────────────────────────────────────────────
 function renderSkeleton() {
-  const tbody  = document.getElementById('projectsBody');
-  const empty  = document.getElementById('emptyState');
-  const table  = document.getElementById('projectsTable');
+  const tbody = document.getElementById('projectsBody');
+  const empty = document.getElementById('emptyState');
+  const table = document.getElementById('projectsTable');
   empty.style.display = 'none';
   table.style.display = '';
   tbody.innerHTML = Array.from({ length: 5 }, () => `
@@ -1056,10 +1310,10 @@ function renderSkeleton() {
 }
 
 function renderError() {
-  const tbody = document.getElementById('projectsBody');
-  tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:var(--space-8);color:var(--color-error)">
-    Failed to load — check API connectivity and try refreshing.
-  </td></tr>`;
+  document.getElementById('projectsBody').innerHTML =
+    `<tr><td colspan="5" style="text-align:center;padding:var(--space-8);color:var(--color-error)">
+      Failed to load — check API connectivity and try refreshing.
+    </td></tr>`;
 }
 
 function renderProjects(list) {
@@ -1069,13 +1323,9 @@ function renderProjects(list) {
   const rows  = sorted(list);
 
   if (rows.length === 0 && allProjects.length === 0) {
-    table.style.display = 'none';
-    empty.style.display = 'flex';
-    return;
+    table.style.display = 'none'; empty.style.display = 'flex'; return;
   }
-
-  table.style.display = '';
-  empty.style.display = 'none';
+  table.style.display = ''; empty.style.display = 'none';
 
   if (rows.length === 0) {
     tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:var(--space-8);color:var(--color-text-muted)">No projects match your search.</td></tr>`;
@@ -1090,23 +1340,21 @@ function renderProjects(list) {
     <tr data-project-id="${esc(p.projectId)}">
       <td>
         <div class="project-name-cell">
-          <span class="project-name" onclick="showView('activity')" title="View activity">${esc(p.name)}</span>
+          <span class="project-name" onclick="jumpToActivity('${esc(p.projectId)}')" title="View activity">${esc(p.name)}</span>
           <span class="project-id">${esc(p.projectId)}</span>
         </div>
       </td>
-      <td>
-        <span class="member-badge ${members > 0 ? 'has-members' : ''}">${members}</span>
-      </td>
+      <td><span class="member-badge ${members > 0 ? 'has-members' : ''}">${members}</span></td>
       <td class="muted">${created}</td>
       <td class="muted">${lastCapture}</td>
       <td>
         <div class="actions-cell">
-          <button
-            class="btn-icon"
-            onclick="openDeleteModal('${esc(p.projectId)}', '${esc(p.name)}')"
-            aria-label="Delete project ${esc(p.name)}"
-            title="Delete project"
-          >
+          <button class="btn-icon add" onclick="openAddMemberModal('${esc(p.projectId)}','${esc(p.name)}')"
+            aria-label="Add member to ${esc(p.name)}" title="Add member">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M16 11c1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3 1.34 3 3 3zm-8 0c1.66 0 3-1.34 3-3S9.66 5 8 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg>
+          </button>
+          <button class="btn-icon" onclick="openDeleteModal('${esc(p.projectId)}','${esc(p.name)}')"
+            aria-label="Delete project ${esc(p.name)}" title="Delete project">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
           </button>
         </div>
@@ -1115,17 +1363,21 @@ function renderProjects(list) {
   }).join('');
 }
 
-// ── Stats ─────────────────────────────────────────────────────
+function jumpToActivity(projectId) {
+  document.getElementById('activityProjectSelect').value = projectId;
+  showView('activity');
+  loadActivity();
+}
+
 function updateStats(list) {
   document.getElementById('statTotal').textContent   = list.length;
   const totalMembers = list.reduce((s, p) => s + (p.memberCount || 0), 0);
   document.getElementById('statMembers').textContent = totalMembers;
   const captures = list.map(p => p.lastCaptureAt).filter(Boolean).sort().reverse();
-  document.getElementById('statLastCapture').textContent = captures.length
-    ? fmtRelative(captures[0]) : '—';
+  document.getElementById('statLastCapture').textContent = captures.length ? fmtRelative(captures[0]) : '—';
 }
 
-// ── Create Modal ──────────────────────────────────────────────
+// ── Create Modal ───────────────────────────────────────────────
 function openCreateModal() {
   document.getElementById('projectNameInput').value = '';
   document.getElementById('createError').textContent = '';
@@ -1141,28 +1393,24 @@ async function submitCreate() {
   const name = nameInput.value.trim();
   if (!name) { errorEl.textContent = 'Project name is required.'; return; }
   if (name.length < 2) { errorEl.textContent = 'Name must be at least 2 characters.'; return; }
-  errorEl.textContent = '';
-  submitBtn.disabled  = true;
-  submitBtn.textContent = 'Creating…';
+  errorEl.textContent = ''; submitBtn.disabled = true; submitBtn.textContent = 'Creating…';
   try {
-    const project = await apiFetch('/admin/projects', {
-      method: 'POST',
-      body: JSON.stringify({ name })
-    });
+    const project = await apiFetch('/admin/projects', { method: 'POST', body: JSON.stringify({ name }) });
     closeModal('createModal');
     showToast(`Project "${name}" created.`, 'success');
     allProjects.unshift({ ...project, memberCount: 0 });
     renderProjects(filtered(allProjects));
     updateStats(allProjects);
+    populateProjectFilter();
+    populateActivityProjectSelect();
   } catch (err) {
     errorEl.textContent = err.message || 'Failed to create project.';
   } finally {
-    submitBtn.disabled  = false;
-    submitBtn.textContent = 'Create project';
+    submitBtn.disabled = false; submitBtn.textContent = 'Create project';
   }
 }
 
-// ── Delete Modal ──────────────────────────────────────────────
+// ── Delete Project Modal ───────────────────────────────────────
 function openDeleteModal(projectId, name) {
   pendingDelete = { projectId, name };
   document.getElementById('deleteProjectName').textContent = `"${name}"`;
@@ -1174,55 +1422,382 @@ async function confirmDelete() {
   if (!pendingDelete) return;
   const { projectId, name } = pendingDelete;
   const btn = document.getElementById('deleteConfirmBtn');
-  btn.disabled  = true;
-  btn.textContent = 'Deleting…';
+  btn.disabled = true; btn.textContent = 'Deleting…';
   try {
     await apiFetch(`/admin/projects/${encodeURIComponent(projectId)}`, { method: 'DELETE' });
     closeModal('deleteModal');
     allProjects = allProjects.filter(p => p.projectId !== projectId);
     renderProjects(filtered(allProjects));
     updateStats(allProjects);
+    populateProjectFilter();
+    populateActivityProjectSelect();
     showToast(`Project "${name}" deleted.`, 'success');
   } catch (err) {
     showToast(`Delete failed: ${err.message}`, 'error');
   } finally {
-    btn.disabled  = false;
-    btn.textContent = 'Delete';
-    pendingDelete = null;
+    btn.disabled = false; btn.textContent = 'Delete'; pendingDelete = null;
   }
 }
 
-// ── Modal helpers ─────────────────────────────────────────────
+// ── Add Member Modal ───────────────────────────────────────────
+function openAddMemberModal(projectId, projectName) {
+  addMemberCtx = { projectId, projectName };
+  document.getElementById('addMemberModalDesc').textContent = `Admit a user to "${projectName}".`;
+  document.getElementById('addMemberUserId').value = '';
+  document.getElementById('addMemberRole').value   = 'user';
+  document.getElementById('addMemberError').textContent = '';
+  document.getElementById('addMemberSubmitBtn').disabled = false;
+  openModal('addMemberModal');
+  setTimeout(() => document.getElementById('addMemberUserId').focus(), 60);
+}
+
+async function submitAddMember() {
+  if (!addMemberCtx) return;
+  const { projectId, projectName } = addMemberCtx;
+  const userId  = document.getElementById('addMemberUserId').value.trim();
+  const role    = document.getElementById('addMemberRole').value;
+  const errorEl = document.getElementById('addMemberError');
+  const btn     = document.getElementById('addMemberSubmitBtn');
+  if (!userId) { errorEl.textContent = 'User ID is required.'; return; }
+  errorEl.textContent = ''; btn.disabled = true; btn.textContent = 'Adding…';
+  try {
+    await apiFetch(`/admin/projects/${encodeURIComponent(projectId)}/members`, {
+      method: 'POST', body: JSON.stringify({ userId, role })
+    });
+    closeModal('addMemberModal');
+    showToast(`User added to "${projectName}".`, 'success');
+    // Optimistic memberCount bump
+    const proj = allProjects.find(p => p.projectId === projectId);
+    if (proj) { proj.memberCount = (proj.memberCount || 0) + 1; }
+    renderProjects(filtered(allProjects));
+    updateStats(allProjects);
+    if (usersLoaded) loadUsers(); // refresh users view if it was already loaded
+  } catch (err) {
+    errorEl.textContent = err.message || 'Failed to add member.';
+  } finally {
+    btn.disabled = false; btn.textContent = 'Add member';
+  }
+}
+
+// ── Remove Member Modal ────────────────────────────────────────
+function openRemoveMemberModal(projectId, projectName, userId, displayName) {
+  removeMemberCtx = { projectId, projectName, userId, displayName };
+  document.getElementById('removeMemberName').textContent    = displayName || userId;
+  document.getElementById('removeMemberProject').textContent = projectName;
+  document.getElementById('removeMemberConfirmBtn').disabled = false;
+  openModal('removeMemberModal');
+}
+
+async function confirmRemoveMember() {
+  if (!removeMemberCtx) return;
+  const { projectId, projectName, userId, displayName } = removeMemberCtx;
+  const btn = document.getElementById('removeMemberConfirmBtn');
+  btn.disabled = true; btn.textContent = 'Removing…';
+  try {
+    await apiFetch(`/admin/projects/${encodeURIComponent(projectId)}/members/${encodeURIComponent(userId)}`, { method: 'DELETE' });
+    closeModal('removeMemberModal');
+    showToast(`${displayName || userId} removed from "${projectName}".`, 'success');
+    // Optimistic memberCount decrement
+    const proj = allProjects.find(p => p.projectId === projectId);
+    if (proj) { proj.memberCount = Math.max(0, (proj.memberCount || 1) - 1); }
+    renderProjects(filtered(allProjects));
+    updateStats(allProjects);
+    loadUsers(); // reload users to reflect membership change
+  } catch (err) {
+    showToast(`Remove failed: ${err.message}`, 'error');
+  } finally {
+    btn.disabled = false; btn.textContent = 'Remove'; removeMemberCtx = null;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// USERS VIEW  (5.11)
+// ═══════════════════════════════════════════════════════════════
+
+function populateProjectFilter() {
+  const sel = document.getElementById('projectFilter');
+  const cur = sel.value;
+  // Keep first "All projects" option
+  while (sel.options.length > 1) sel.remove(1);
+  allProjects.forEach(p => {
+    const opt = document.createElement('option');
+    opt.value       = p.projectId;
+    opt.textContent = p.name.length > 36 ? p.name.slice(0, 36) + '…' : p.name;
+    sel.appendChild(opt);
+  });
+  if (cur) sel.value = cur;
+}
+
+function onProjectFilterChange() {
+  const projectId = document.getElementById('projectFilter').value;
+  const header    = document.getElementById('membershipHeader');
+  const actHeader = document.getElementById('usersActionHeader');
+  header.textContent  = projectId ? 'Admitted' : 'Created';
+  actHeader.textContent = projectId ? '' : '';
+  loadUsers();
+}
+
+async function loadUsers() {
+  const projectId = document.getElementById('projectFilter').value;
+  const tbody     = document.getElementById('usersBody');
+  const empty     = document.getElementById('usersEmptyState');
+  const table     = document.getElementById('usersTable');
+
+  empty.style.display = 'none';
+  table.style.display = '';
+  tbody.innerHTML = Array.from({ length: 5 }, () => `
+    <tr class="skeleton-row">
+      <td><div class="skel-block skeleton" style="width:65%"></div></td>
+      <td><div class="skel-block skeleton" style="width:60px"></div></td>
+      <td><div class="skel-block skeleton" style="width:80px"></div></td>
+      <td><div class="skel-block skeleton" style="width:60px"></div></td>
+      <td></td>
+    </tr>`).join('');
+
+  try {
+    const url = projectId
+      ? `/admin/users?projectId=${encodeURIComponent(projectId)}`
+      : '/admin/users';
+    allUsers    = await apiFetch(url);
+    usersLoaded = true;
+    updateUserStats(allUsers);
+    filterUsers();
+  } catch (err) {
+    showToast(`Failed to load users: ${err.message}`, 'error');
+    tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:var(--space-8);color:var(--color-error)">
+      Failed to load users. Check API connectivity.
+    </td></tr>`;
+  }
+}
+
+function filterUsers() {
+  const q          = (document.getElementById('userSearchInput').value || '').toLowerCase().trim();
+  const roleFilter = document.getElementById('roleFilter').value;
+  const projectId  = document.getElementById('projectFilter').value;
+
+  let list = allUsers;
+  if (q) {
+    list = list.filter(u =>
+      (u.email        || '').toLowerCase().includes(q) ||
+      (u.displayName  || '').toLowerCase().includes(q) ||
+      (u.userId       || '').toLowerCase().includes(q)
+    );
+  }
+  if (roleFilter) list = list.filter(u => u.role === roleFilter);
+
+  renderUsers(list, projectId);
+}
+
+function renderUsers(list, activeProjectId) {
+  const tbody = document.getElementById('usersBody');
+  const empty = document.getElementById('usersEmptyState');
+  const table = document.getElementById('usersTable');
+
+  if (list.length === 0) {
+    table.style.display = 'none';
+    empty.style.display = 'flex';
+    return;
+  }
+  table.style.display = ''; empty.style.display = 'none';
+
+  // Find project name for action buttons
+  const proj = allProjects.find(p => p.projectId === activeProjectId);
+  const projName = proj ? proj.name : '';
+
+  tbody.innerHTML = list.map(u => {
+    const initials = (u.displayName || u.email || '?').charAt(0).toUpperCase();
+    const name     = esc(u.displayName || u.email || u.userId);
+    const email    = esc(u.email || '');
+    const roleCls  = (u.role || 'user').replace(/\s+/g, '_');
+    const admitted = u.membership ? fmtDate(u.membership.admittedAt) : (u.createdAt ? fmtDate(u.createdAt) : '—');
+    const lastActive = u.lastActiveAt ? fmtRelative(u.lastActiveAt) : '—';
+
+    // Action: if project filter active, show "Remove from project" button
+    const actionBtn = activeProjectId ? `
+      <button class="btn-icon"
+        onclick="openRemoveMemberModal('${esc(activeProjectId)}','${esc(projName)}','${esc(u.userId)}','${esc(u.displayName || u.email)}')"
+        aria-label="Remove ${name} from project" title="Remove from project">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      </button>` : '';
+
+    return `
+    <tr>
+      <td>
+        <div class="user-cell">
+          <div class="user-cell-avatar">${initials}</div>
+          <div class="user-cell-info">
+            <span class="user-cell-name">${name}</span>
+            <span class="user-cell-email">${email}</span>
+          </div>
+        </div>
+      </td>
+      <td><span class="role-badge ${roleCls}">${esc(u.role || 'user')}</span></td>
+      <td class="muted">${admitted}</td>
+      <td class="muted">${lastActive}</td>
+      <td><div class="actions-cell">${actionBtn}</div></td>
+    </tr>`;
+  }).join('');
+}
+
+function updateUserStats(list) {
+  document.getElementById('statUserTotal').textContent   = list.length;
+  document.getElementById('statUserAdmins').textContent  = list.filter(u => u.role === 'admin').length;
+  document.getElementById('statUserAnalysts').textContent = list.filter(u => u.role === 'analyst').length;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ACTIVITY VIEW  (5.12)
+// ═══════════════════════════════════════════════════════════════
+
+function populateActivityProjectSelect() {
+  const sel = document.getElementById('activityProjectSelect');
+  const cur = sel.value;
+  while (sel.options.length > 1) sel.remove(1);
+  allProjects.forEach(p => {
+    const opt = document.createElement('option');
+    opt.value       = p.projectId;
+    opt.textContent = p.name.length > 44 ? p.name.slice(0, 44) + '…' : p.name;
+    sel.appendChild(opt);
+  });
+  if (cur) sel.value = cur;
+  activityProjectsLoaded = true;
+  // Auto-select first project if none selected
+  if (!sel.value && allProjects.length > 0) {
+    sel.value = allProjects[0].projectId;
+    loadActivity();
+  }
+}
+
+async function loadActivity() {
+  const projectId  = document.getElementById('activityProjectSelect').value;
+  const toolFilter = document.getElementById('activityToolFilter').value;
+  const tbody      = document.getElementById('activityBody');
+  const empty      = document.getElementById('activityEmptyState');
+  const table      = document.getElementById('activityTable');
+  const lastRefEl  = document.getElementById('activityLastRefresh');
+
+  if (!projectId) {
+    table.style.display = 'none';
+    empty.style.display = 'flex';
+    document.getElementById('activityEmptyTitle').textContent = 'Select a project';
+    document.getElementById('activityEmptyDesc').textContent  = 'Choose a project above to see its capture feed.';
+    return;
+  }
+
+  empty.style.display = 'none';
+  table.style.display = '';
+  tbody.innerHTML = Array.from({ length: 6 }, () => `
+    <tr class="skeleton-row">
+      <td><div class="skel-block skeleton" style="width:80px"></div></td>
+      <td><div class="skel-block skeleton" style="width:100px"></div></td>
+      <td><div class="skel-block skeleton" style="width:75%"></div></td>
+      <td><div class="skel-block skeleton" style="width:50px"></div></td>
+      <td><div class="skel-block skeleton" style="width:60px"></div></td>
+    </tr>`).join('');
+
+  try {
+    const qs  = toolFilter ? `?tool=${encodeURIComponent(toolFilter)}` : '';
+    activityFeed = await apiFetch(`/admin/projects/${encodeURIComponent(projectId)}/activity${qs}`);
+    lastRefEl.textContent = `Last refresh: ${new Date().toLocaleTimeString()}`;
+
+    // Collect unique tools for the filter dropdown
+    activityFeed.forEach(u => { if (u.tool) knownTools.add(u.tool); });
+    populateToolFilter();
+
+    renderActivity(activityFeed);
+    updateActivityStats(activityFeed);
+  } catch (err) {
+    showToast(`Failed to load activity: ${err.message}`, 'error');
+    tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:var(--space-8);color:var(--color-error)">
+      Failed to load activity. Check API connectivity.
+    </td></tr>`;
+  }
+}
+
+function populateToolFilter() {
+  const sel = document.getElementById('activityToolFilter');
+  const cur = sel.value;
+  while (sel.options.length > 1) sel.remove(1);
+  [...knownTools].sort().forEach(t => {
+    const opt = document.createElement('option');
+    opt.value = t; opt.textContent = t;
+    sel.appendChild(opt);
+  });
+  if (cur) sel.value = cur;
+}
+
+function renderActivity(list) {
+  const tbody = document.getElementById('activityBody');
+  const empty = document.getElementById('activityEmptyState');
+  const table = document.getElementById('activityTable');
+
+  if (list.length === 0) {
+    table.style.display = 'none';
+    empty.style.display = 'flex';
+    document.getElementById('activityEmptyTitle').textContent = 'No captures yet';
+    document.getElementById('activityEmptyDesc').textContent  = 'Uploads will appear here once users start capturing.';
+    return;
+  }
+  table.style.display = ''; empty.style.display = 'none';
+
+  tbody.innerHTML = list.map(u => {
+    const tool    = u.tool ? `<span class="tool-badge">${esc(u.tool)}</span>` : '<span class="tool-badge">—</span>';
+    const user    = esc(u.userId || '—');
+    const path    = u.path || '—';
+    const size    = u.size ? fmtBytes(u.size) : '—';
+    const time    = u.uploadedAt ? fmtRelative(u.uploadedAt) : '—';
+    const fullTime = u.uploadedAt ? new Date(u.uploadedAt).toLocaleString() : '';
+    return `
+    <tr>
+      <td>${tool}</td>
+      <td class="mono" title="${user}">${user.length > 22 ? user.slice(0, 22) + '…' : user}</td>
+      <td><span class="path-cell" title="${esc(path)}">${esc(path)}</span></td>
+      <td><span class="size-badge">${size}</span></td>
+      <td class="muted" title="${fullTime}">${time}</td>
+    </tr>`;
+  }).join('');
+}
+
+function updateActivityStats(list) {
+  document.getElementById('statCaptureTotal').textContent = list.length;
+  document.getElementById('statCaptureUsers').textContent = new Set(list.map(u => u.userId).filter(Boolean)).size;
+  document.getElementById('statCaptureTools').textContent = new Set(list.map(u => u.tool).filter(Boolean)).size;
+}
+
+function toggleAutoRefresh(enabled) {
+  if (autoRefreshTimer) { clearInterval(autoRefreshTimer); autoRefreshTimer = null; }
+  if (enabled) {
+    autoRefreshTimer = setInterval(() => {
+      if (document.getElementById('view-activity').classList.contains('active')) {
+        loadActivity();
+      }
+    }, 30_000);
+  }
+}
+
+// ── Modal helpers ──────────────────────────────────────────────
 function openModal(id)  { document.getElementById(id).classList.add('open'); }
 function closeModal(id) { document.getElementById(id).classList.remove('open'); }
 
-// Close modal on backdrop click
 document.querySelectorAll('.modal-backdrop').forEach(bd => {
-  bd.addEventListener('click', e => {
-    if (e.target === bd) closeModal(bd.id);
-  });
+  bd.addEventListener('click', e => { if (e.target === bd) closeModal(bd.id); });
 });
-
-// Close modal on Escape
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') {
-    document.querySelectorAll('.modal-backdrop.open')
-      .forEach(m => closeModal(m.id));
-  }
+  if (e.key === 'Escape') document.querySelectorAll('.modal-backdrop.open').forEach(m => closeModal(m.id));
 });
+document.getElementById('projectNameInput').addEventListener('keydown', e => { if (e.key === 'Enter') submitCreate(); });
+document.getElementById('addMemberUserId').addEventListener('keydown', e => { if (e.key === 'Enter') submitAddMember(); });
 
-// Enter submits create form
-document.getElementById('projectNameInput').addEventListener('keydown', e => {
-  if (e.key === 'Enter') submitCreate();
-});
+document.getElementById('createCancelBtn').addEventListener('click',       () => closeModal('createModal'));
+document.getElementById('createSubmitBtn').addEventListener('click',       submitCreate);
+document.getElementById('deleteCancelBtn').addEventListener('click',       () => closeModal('deleteModal'));
+document.getElementById('deleteConfirmBtn').addEventListener('click',      confirmDelete);
+document.getElementById('addMemberCancelBtn').addEventListener('click',    () => closeModal('addMemberModal'));
+document.getElementById('addMemberSubmitBtn').addEventListener('click',    submitAddMember);
+document.getElementById('removeMemberCancelBtn').addEventListener('click', () => closeModal('removeMemberModal'));
+document.getElementById('removeMemberConfirmBtn').addEventListener('click',confirmRemoveMember);
 
-// Wire modal buttons
-document.getElementById('createCancelBtn').addEventListener('click',  () => closeModal('createModal'));
-document.getElementById('createSubmitBtn').addEventListener('click',  submitCreate);
-document.getElementById('deleteCancelBtn').addEventListener('click',  () => closeModal('deleteModal'));
-document.getElementById('deleteConfirmBtn').addEventListener('click', confirmDelete);
-
-// ── Toast ─────────────────────────────────────────────────────
+// ── Toast ──────────────────────────────────────────────────────
 function showToast(msg, type = 'success') {
   const container = document.getElementById('toastContainer');
   const toast = document.createElement('div');
@@ -1232,34 +1807,39 @@ function showToast(msg, type = 'success') {
   setTimeout(() => toast.remove(), 4000);
 }
 
-// ── Formatters ────────────────────────────────────────────────
+// ── Formatters ─────────────────────────────────────────────────
 function fmtDate(iso) {
-  try {
-    return new Intl.DateTimeFormat('en-CA', {
-      year: 'numeric', month: 'short', day: 'numeric'
-    }).format(new Date(iso));
-  } catch (_) { return iso; }
+  try { return new Intl.DateTimeFormat('en-CA', { year:'numeric', month:'short', day:'numeric' }).format(new Date(iso)); }
+  catch (_) { return iso; }
 }
-
 function fmtRelative(iso) {
   try {
     const diff = Date.now() - new Date(iso).getTime();
-    if (diff < 60_000)    return 'just now';
-    if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
+    if (diff < 60_000)     return 'just now';
+    if (diff < 3_600_000)  return `${Math.floor(diff / 60_000)}m ago`;
     if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
     return `${Math.floor(diff / 86_400_000)}d ago`;
   } catch (_) { return iso; }
 }
-
+function fmtBytes(n) {
+  if (n < 1024)       return `${n} B`;
+  if (n < 1048576)    return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1048576).toFixed(1)} MB`;
+}
 function esc(str) {
   return String(str ?? '')
     .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
     .replace(/"/g,'&quot;').replace(/'/g,'&#x27;');
 }
 
-// ── Boot ──────────────────────────────────────────────────────
-loadIdentity();
-loadProjects();
+// ── Boot ───────────────────────────────────────────────────────
+// Auth guard runs first; on success it reveals the app layout
+// and then we boot the default data load (projects).
+runAuthGuard().then(() => {
+  if (document.getElementById('appLayout').classList.contains('ready')) {
+    loadProjects();
+  }
+});
 </script>
 </body>
 </html>
