@@ -81,6 +81,7 @@ All Sprint 4 console items (M.1–M.4, I.1–I.4, A.1–A.2, C.1–C.4, F.1–F.
 Additional pre-flight for Sprint 5:
 - [ ] CRX key generated; `EXTENSION_ID` stored in Secret Manager — required before CORS is configured
 - [ ] `gcloud firestore databases describe` confirms `type: FIRESTORE_NATIVE`
+- [ ] IAP OAuth consent screen created in `hammer-prod` — **HARD BLOCKER**; without it, IAP will not inject `X-Goog-Authenticated-User-Email` and Sprint 5.13 auth guard cannot function
 - [ ] Artifact Registry repo `us-central1-docker.pkg.dev/{PROJECT_ID}/hammer/` created
 - [ ] GitHub Actions WIF pool + `hammer-cicd-sa` configured (replaces `deploy.ps1` for service deploys)
 
@@ -123,6 +124,8 @@ Additional pre-flight for Sprint 5:
 **Goal:** Log first/last capture timestamps per session; prompt user after 45 s of inactivity using a reliable timer strategy.
 
 **Sprint P%: 🟡 74%** — Timestamp logging is high-confidence. Inactivity timer delivery depends on the findings of Sprint 6S (research spike). If 6S validates the hybrid `chrome.alarms` + `Date` approach, tasks 6.4 and 6.10 execute cleanly. If not, the fallback (1-minute alarm with UX copy adjusted to "about a minute") is the accepted done-when condition.
+
+> **Architectural constraint:** The inactivity timer must use `chrome.alarms`, not `setTimeout` / `setInterval`. Manifest V3 service workers are suspended aggressively when idle, so standard JS timers are not reliable after suspension.
 
 ### Session Timestamps
 
@@ -177,6 +180,8 @@ Additional pre-flight for Sprint 5:
 
 > **Auth decision resolved:** `/reports/*` routes check the SHA-256 hash of the `X-Api-Key` header against the Firestore `api_keys` collection and assert `role == 'analyst'`.
 
+> **OCR scope confirmed:** Only GTM Configuration, GA4 Configuration, and Google Ads Setup require OCR. User Efficiency and Project Progress reports are generated from Firestore metadata alone. A Vision API cost benchmark is required before Sprint 7 ships.
+
 ### Report Infrastructure
 
 | # | Task | Done when | P% |
@@ -219,7 +224,7 @@ Additional pre-flight for Sprint 5:
 
 **Sprint P%: 🟠 63%** — Screenshot browser and annotation editor are high-confidence. FFmpeg subtitle burn-in (8.6) and drag-and-drop sequencing (8.2) are the primary risk items.
 
-> **FFmpeg decision resolved:** `hammer-export` is a **Cloud Run Job** (not a Service), triggered via Cloud Tasks. `--task-timeout 1800s`. 50-slide hard ceiling enforced before FFmpeg starts. Job SA is `hammer-export-sa` with `roles/storage.objectAdmin` on `hammer-exports-{PROJECT_ID}` bucket only.
+> **FFmpeg decision resolved:** `hammer-export` is a **Cloud Run Job** (not a Service), triggered via Cloud Tasks. `--task-timeout 1800s`. 50-slide hard ceiling is non-negotiable and must be enforced before FFmpeg starts; requests above the limit should be rejected with HTTP 400 before enqueue. Job SA is `hammer-export-sa` with `roles/storage.objectAdmin` on `hammer-exports-{PROJECT_ID}` bucket only.
 
 ### Screenshot Browser & Storyboard
 
@@ -234,7 +239,7 @@ Additional pre-flight for Sprint 5:
 
 | # | Task | Done when | P% |
 |---|---|---|---|
-| 8.5 | `POST /export/video` | Accepts `{ storyboardId, durationPerSlideMs, transitionMs }`; storyboard capped at 50 slides (enforced here before enqueue); enqueues Cloud Tasks task targeting `hammer-export` Cloud Run Job; returns `{ jobId }` within 200 ms | 🟢 93% |
+| 8.5 | `POST /export/video` | Accepts `{ storyboardId, durationPerSlideMs, transitionMs }`; storyboard capped at 50 slides (enforced here before enqueue, reject > 50 with HTTP 400); enqueues Cloud Tasks task targeting `hammer-export` Cloud Run Job; returns `{ jobId }` within 200 ms | 🟢 93% |
 | 8.6 | FFmpeg job: screenshots → H.264 MP4 with subtitle burn-in | Cloud Run Job (`hammer-export`); 1280×720 MP4; each slide held for `durationPerSlideMs` (default 3 s); annotation text via `drawtext` filter + bundled Noto Sans font; `--task-timeout 1800s` | 🟠 63% |
 | 8.7 | FFmpeg progress reporting | `GET /export/video/:jobId/status` returns `{ status, progressPercent }` parsed from FFmpeg stderr `time=` tokens; job state persisted in Firestore | 🟡 79% |
 | 8.8 | Video stored in GCS `hammer-exports-{PROJECT_ID}` | Path: `exports/{projectId}/{storyboardId}/{timestamp}.mp4`; 24-hour V4 signed URL returned in status response; bucket lifecycle: Day 30 → NEARLINE, Day 90 → delete | 🟢 91% |
@@ -341,7 +346,7 @@ The full 8-alert set from `arch_decisions.md` §6.3 is implemented here. Alerts 
 | Risk | Severity | Sprint | Mitigation |
 |---|---|---|---|
 | `sessionEnd` write races Chrome process kill | High | 6 | Double-flush: `chrome.runtime.onSuspend` + `chrome.windows.onRemoved`; state in `chrome.storage.session` survives SW restart |
-| `chrome.alarms` fires no faster than 1 min in background | High | 6 | Sprint 6S S.1–S.2 gates this; fallback is 60 s timer + UX copy "about a minute" |
+| `chrome.alarms` fires no faster than 1 min in background; standard JS timers are unreliable after MV3 service worker suspension | High | 6 | Treat `chrome.alarms` as the required platform primitive; Sprint 6S S.1–S.2 measures real behavior; fallback is 60 s timer + UX copy "about a minute" if sub-minute delivery is infeasible |
 | OCR/vision accuracy < 70% on real GTM screenshots | High | 6S / 7 | Sprint 6S S.4 is the gate; if accuracy < 70%, OCR reports replaced with CSV-import workflow |
 | FFmpeg cold start > 30 s on large storyboards | Medium | 8 | Cloud Run Job — no cold start concept; each Job execution starts fresh; 50-slide ceiling + 1800 s timeout |
 | Signed URLs expire mid-session in portal | Medium | 5 / 8 | V4 signed URLs; refresh on `visibilitychange` + proactive refresh after 9 min (screenshots: 15 min lifetime) |
