@@ -6,6 +6,7 @@
 //   POST /upload-url
 //   POST /admin/projects
 //   GET  /admin/projects
+//   GET  /admin/projects/:id
 //   PATCH /admin/projects/:id
 //   DELETE /admin/projects/:id
 //   POST /admin/projects/:id/members
@@ -27,10 +28,12 @@ const PORT = process.env.PORT || 8080;
 // ── Trust proxy — required for Cloud Run rate-limit correctness ──
 app.set('trust proxy', 1);
 
-// ── CORS — arch decision: https://app.thehammer.io + chrome-extension only; never * ──
+// ── CORS — arch decision: *.run.app for now; app.thehammer.io deferred to Sprint 21 ──
+// Sprint 21 will replace the first origin with https://app.thehammer.io
 const EXTENSION_ID = process.env.EXTENSION_ID || '';
 const ALLOWED_ORIGINS = [
-  'https://app.thehammer.io',
+  // Sprint 21: swap to https://app.thehammer.io once HTTPS LB is live
+  ...(process.env.ADMIN_ORIGIN ? [process.env.ADMIN_ORIGIN] : []),
   ...(EXTENSION_ID ? [`chrome-extension://${EXTENSION_ID}`] : []),
 ];
 
@@ -134,6 +137,10 @@ function requireApiKey(req, res, next) {
  * requireRole — reads IAP header, looks up user in Firestore, enforces ROLE_HIERARCHY.
  * arch_decisions.md Final Call 3A: Cloud IAP injects X-Goog-Authenticated-User-Email.
  * No custom session code; no Firebase Auth.
+ *
+ * Sprint 21 note: when HTTPS LB + IAP are live, this header is guaranteed present on
+ * all non-health requests. During Sprint 5 dev on *.run.app, tests inject the header
+ * directly via supertest or curl.
  */
 function requireRole(minRole) {
   return async (req, res, next) => {
@@ -289,7 +296,7 @@ app.post('/admin/projects', requireRole('admin'), async (req, res) => {
   }
   if (!db) return res.status(503).json({ error: 'Firestore not available' });
 
-  const now       = new Date().toISOString();
+  const now        = new Date().toISOString();
   const projectRef = db.collection('projects').doc();
   const projectId  = projectRef.id;
 
@@ -306,29 +313,42 @@ app.post('/admin/projects', requireRole('admin'), async (req, res) => {
 });
 
 // 5.3 — GET /admin/projects
+// Ordered by createdAt desc so newest projects appear first in the portal list.
 app.get('/admin/projects', requireRole('admin'), async (req, res) => {
   if (!db) return res.status(503).json({ error: 'Firestore not available' });
 
-  const snap = await db.collection('projects').get();
-  const projects = snap.docs.map(doc => ({
-    projectId:   doc.id,
-    ...doc.data()
-  }));
+  const snap = await db.collection('projects')
+    .orderBy('createdAt', 'desc')
+    .get();
+
+  const projects = snap.docs.map(doc => ({ projectId: doc.id, ...doc.data() }));
   return res.json(projects);
 });
 
-// 5.4 — PATCH /admin/projects/:id
+// 5.4 — GET /admin/projects/:id
+// Single-project fetch; used by portal detail view (task 5.11).
+app.get('/admin/projects/:id', requireRole('admin'), async (req, res) => {
+  const { id } = req.params;
+  if (!db) return res.status(503).json({ error: 'Firestore not available' });
+
+  const snap = await db.collection('projects').doc(id).get();
+  if (!snap.exists) return res.status(404).json({ error: 'Project not found' });
+
+  return res.json({ projectId: snap.id, ...snap.data() });
+});
+
+// 5.5 — PATCH /admin/projects/:id
 app.patch('/admin/projects/:id', requireRole('admin'), async (req, res) => {
   const { id } = req.params;
   if (!db) return res.status(503).json({ error: 'Firestore not available' });
 
-  const ref = db.collection('projects').doc(id);
+  const ref  = db.collection('projects').doc(id);
   const snap = await ref.get();
   if (!snap.exists) return res.status(404).json({ error: 'Project not found' });
 
-  // Additive-only: only allow whitelisted fields; no renames, no deletes
-  const allowed  = ['name'];
-  const updates  = {};
+  // Allowlist: only name is mutable via PATCH. All other fields are server-controlled.
+  const allowed = ['name'];
+  const updates = {};
   for (const key of allowed) {
     if (req.body[key] !== undefined) {
       if (key === 'name') {
@@ -348,33 +368,31 @@ app.patch('/admin/projects/:id', requireRole('admin'), async (req, res) => {
   return res.json({ projectId: id, ...updates });
 });
 
-// 5.5 — DELETE /admin/projects/:id
-// Batched write: project doc + all project_memberships where projectId == id
+// 5.6 — DELETE /admin/projects/:id
+// Batched write: project doc + all project_memberships where projectId == id.
+// Batch limit is 500 ops; membership count per project is expected << 500.
 app.delete('/admin/projects/:id', requireRole('admin'), async (req, res) => {
   const { id } = req.params;
   if (!db) return res.status(503).json({ error: 'Firestore not available' });
 
-  const projectRef = db.collection('projects').doc(id);
+  const projectRef  = db.collection('projects').doc(id);
   const projectSnap = await projectRef.get();
   if (!projectSnap.exists) return res.status(404).json({ error: 'Project not found' });
 
-  // Firestore batch: 500-op limit per batch; memberships per project are expected << 500
   const memberships = await db.collection('project_memberships')
     .where('projectId', '==', id)
     .get();
 
   const batch = db.batch();
   batch.delete(projectRef);
-  for (const doc of memberships.docs) {
-    batch.delete(doc.ref);
-  }
+  for (const doc of memberships.docs) batch.delete(doc.ref);
   await batch.commit();
 
   return res.sendStatus(204);
 });
 
-// 5.6 — POST /admin/projects/:id/members
-// Firestore transaction: atomically write membership doc + increment project.memberCount
+// 5.7 — POST /admin/projects/:id/members
+// Firestore transaction: atomically write membership doc + increment project.memberCount.
 app.post('/admin/projects/:id/members', requireRole('admin'), async (req, res) => {
   const { id } = req.params;
   const { userId, role } = req.body || {};
@@ -390,7 +408,7 @@ app.post('/admin/projects/:id/members', requireRole('admin'), async (req, res) =
 
   try {
     await db.runTransaction(async (tx) => {
-      const projectSnap    = await tx.get(projectRef);
+      const projectSnap = await tx.get(projectRef);
       if (!projectSnap.exists) throw Object.assign(new Error('Project not found'), { status: 404 });
 
       const userSnap = await tx.get(db.collection('users').doc(userId));
@@ -411,15 +429,14 @@ app.post('/admin/projects/:id/members', requireRole('admin'), async (req, res) =
       tx.update(projectRef, { memberCount: FieldValue.increment(1), updatedAt: now });
     });
   } catch (err) {
-    const status = err.status || 500;
-    return res.status(status).json({ error: err.message });
+    return res.status(err.status || 500).json({ error: err.message });
   }
 
   return res.status(201).json({ projectId: id, userId, role });
 });
 
-// 5.7 — DELETE /admin/projects/:id/members/:userId
-// Transaction: delete membership doc + decrement project.memberCount
+// 5.8 — DELETE /admin/projects/:id/members/:userId
+// Transaction: delete membership doc + decrement project.memberCount.
 app.delete('/admin/projects/:id/members/:userId', requireRole('admin'), async (req, res) => {
   const { id, userId } = req.params;
   if (!db) return res.status(503).json({ error: 'Firestore not available' });
@@ -437,21 +454,17 @@ app.delete('/admin/projects/:id/members/:userId', requireRole('admin'), async (r
 
       const now = new Date().toISOString();
       tx.delete(membershipRef);
-      tx.update(projectRef, {
-        memberCount: FieldValue.increment(-1),
-        updatedAt: now
-      });
+      tx.update(projectRef, { memberCount: FieldValue.increment(-1), updatedAt: now });
     });
   } catch (err) {
-    const status = err.status || 500;
-    return res.status(status).json({ error: err.message });
+    return res.status(err.status || 500).json({ error: err.message });
   }
 
   return res.sendStatus(204);
 });
 
-// 5.8 — GET /admin/projects/:id/activity
-// Returns last 100 uploads for the project; ?tool= filter uses composite index
+// 5.9 — GET /admin/projects/:id/activity
+// Returns last 100 uploads for the project; ?tool= filter uses composite index.
 // Index: (projectId ASC, tool ASC, uploadedAt DESC) declared in firestore.indexes.json
 app.get('/admin/projects/:id/activity', requireRole('admin'), async (req, res) => {
   const { id }   = req.params;
@@ -472,7 +485,7 @@ app.get('/admin/projects/:id/activity', requireRole('admin'), async (req, res) =
       .limit(100);
   }
 
-  const snap = await query.get();
+  const snap    = await query.get();
   const uploads = snap.docs.map(doc => ({ uploadId: doc.id, ...doc.data() }));
   return res.json(uploads);
 });
