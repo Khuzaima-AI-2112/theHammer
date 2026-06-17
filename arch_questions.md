@@ -36,9 +36,9 @@ All P1–P10 decisions are recorded. Sprint 5 coding may begin.
 - [x] **P10** — Screenshots: not confidential; no EU users; Cloud DLP deferred ✅ *PO decision 2026-06-16*
 
 > **Remaining Sprint 5 pre-flight (console/infra steps — not decisions):**
-> - [ ] CRX key generated; `EXTENSION_ID` stored in Secret Manager
-> - [ ] `gcloud firestore databases describe` confirms `type: FIRESTORE_NATIVE`
-> - [ ] IAP OAuth consent screen created (internal, Google Workspace) in `hammer-prod`
+> - [ ] CRX key generated; `EXTENSION_ID` stored in Secret Manager — **HARD BLOCKER**: without a stable extension ID, the `chrome-extension://${EXTENSION_ID}` CORS origin cannot be locked down; writing CORS config before this is done risks needing a redeploy
+> - [ ] `gcloud firestore databases describe` confirms `type: FIRESTORE_NATIVE` — **HARD BLOCKER**: all Sprint 5.1 schema work must not begin until Native mode is verified; Datastore mode is incompatible with the chosen schema
+> - [ ] IAP OAuth consent screen created (internal, Google Workspace) in `hammer-prod` — **HARD BLOCKER**: the `X-Goog-Authenticated-User-Email` header injected by IAP will not be present without this; the Sprint 5.13 auth guard will not function
 > - [ ] DNS zone confirmed in Cloud DNS or provisioned in Terraform
 
 ---
@@ -54,8 +54,10 @@ All P1–P10 decisions are recorded. Sprint 5 coding may begin.
 
 ## Sprint 6 — Open (Timestamps & Inactivity)
 
+> **Architectural constraint confirmed (2026-06-16):** The 45-second inactivity timer **must** use `chrome.alarms`, not `setTimeout` or `setInterval`. MV3 service workers are aggressively suspended by Chrome when idle; standard JS timers will not fire after suspension. `chrome.alarms` is required to keep the extension alive. This is a hard platform constraint, not a preference.
+
 - What is the **session definition boundary**? Does a session end when: (a) the extension popup is closed, (b) the tab changes, (c) the browser window loses focus, or (d) only when the user explicitly stops? This determines `sessionEnd` write timing. *(Blocks: 6.1–6.4)*
-- Is the **45-second inactivity timer global** (any interaction on any tab) or **scoped to the active capture tab**? The MV3 service worker receives `chrome.tabs.onActivated` and `chrome.webNavigation` events for all tabs. *(Blocks: 6.5–6.7)*
+- Is the **45-second inactivity timer global** (any interaction on any tab) or **scoped to the active capture tab**? Must be resolved to prevent spurious prompts. The MV3 service worker receives `chrome.tabs.onActivated` and `chrome.webNavigation` events for all tabs. *(Blocks: 6.5–6.7)*
 - Should `inactivity_events` store a **screenshot of what the user was looking at** when the inactivity triggered? This would make the 45-second prompt more useful in analyst reports. *(Blocks: 6.5 schema, GCS path)*
 - What happens if the user **dismisses the inactivity prompt and remains inactive**? Does the timer reset and fire again at 90 s, or does it only fire once per session? *(Blocks: 6.6 extension logic)*
 
@@ -63,7 +65,8 @@ All P1–P10 decisions are recorded. Sprint 5 coding may begin.
 
 ## Sprint 7 — Open (Analyst Engine)
 
-- **Vision API / OCR scope**: Which report types require OCR? Only GTM Configuration, GA4 Configuration, and Google Ads Setup reports need it. User Efficiency and Project Progress can be generated from Firestore metadata alone. Clarify per-report-type OCR dependency for accurate cost estimate. *(Blocks: 7.1–7.4 cost model)*
+> **OCR scope resolved (2026-06-16):** Only **GTM Configuration**, **GA4 Configuration**, and **Google Ads Setup** reports require OCR. **User Efficiency** and **Project Progress** reports can be generated from Firestore metadata alone without Vision API. This narrows the cost surface for unbounded image processing. A Vision API cost benchmark before Sprint 7 ships is **non-negotiable**.
+
 - What is the **minimum screenshot set required** to generate a complete GTM Configuration Table? Should the API block generation with an "insufficient coverage" warning, or generate a partial report with gaps flagged? *(Blocks: 7.2 report logic)*
 - Should reports be **versioned**? Both versions retained in GCS and Firestore, or only the latest? *(Blocks: 7.5 GCS path schema and Firestore `reports` doc structure)*
 - Who can **trigger** a report — only the analyst role, or can an admin also trigger one? *(Blocks: 7.1 IAM / role guard on `POST /reports`)*
@@ -72,7 +75,8 @@ All P1–P10 decisions are recorded. Sprint 5 coding may begin.
 
 ## Sprint 8 — Open (Instructional Designer)
 
-- What is the **maximum storyboard size**? FFmpeg at 50 slides × 500 KB = 25 MB input — is that the ceiling? *(Blocks: 8.4 worker Job timeout, 8.5 cost estimate)*
+> **Maximum storyboard size resolved (2026-06-16):** Hard ceiling is **50 slides**, aligned with the planned 1800-second Cloud Run Job timeout and compute cost targets. This ceiling is enforced before FFmpeg starts (see `sprintplan2.md` task 8.5).
+
 - Should the MP4 include **voiceover audio** (Cloud TTS ~$0.50/export) or video-only with subtitle burn-in? *(Blocks: 8.5 FFmpeg pipeline design)*
 - Is **"Import from Report"** a one-time seed or a live binding? Live binding is significantly more complex. *(Blocks: 8.6 implementation scope)*
 - Who can **view exported videos** — all project members, or only instructional designer and admin? *(Blocks: 8.7 signed URL IAM scoping)*
@@ -95,9 +99,9 @@ All P1–P10 decisions are recorded. Sprint 5 coding may begin.
 | ~~PII/GDPR data classification policy~~ | ~~Before Sprint 5 ships to prod~~ | ~~PO~~ | ✅ **Closed** — not confidential, no EU users, DLP deferred |
 | ~~DPA with GCP for EU users~~ | ~~Before first EU user onboards~~ | ~~Legal/PO~~ | ✅ **Closed** — no EU users in initial cohort; revisit on EU expansion |
 | Cloud DLP scanning | Trigger: > 50 users OR first EU user onboards | PO + Engineering | 🔵 Backlog |
-| Vision API cost benchmark | Before Sprint 7 ships | Engineering | ⏳ Open |
-| GCP Billing budget alert on both projects | Before Sprint 5 deploys to prod | DevOps | ⏳ Open |
-| `firestore.indexes.json` in repo | Sprint 5 | Engineering | ⏳ Open |
-| Firestore PITR enabled on `hammer-prod` | Sprint 5 deploy | DevOps | ⏳ Open |
-| Uniform bucket-level access on all 4 GCS buckets | Sprint 5 deploy | DevOps | ⏳ Open |
+| Vision API cost benchmark | Before Sprint 7 ships — **non-negotiable; unbounded image processing will spike GCP billing** | Engineering | ⏳ Open |
+| GCP Billing budget alert on both projects | **Immediately — before Sprint 5 deploys to prod** | DevOps | 🚨 Urgent |
+| `firestore.indexes.json` deployed | Sprint 5 | Engineering | ⏳ Open |
+| Firestore PITR enabled on `hammer-prod` | Sprint 5 deploy — **required to meet 1-hour RPO** | DevOps | 🚨 Urgent |
+| Uniform bucket-level access on all 4 GCS buckets | Sprint 5 deploy — **enforce IAM-only; no ACLs** | DevOps | 🚨 Urgent |
 | Enterprise sideloading vs Web Store decision | Before Sprint 5 (affects CRX key) | PO | ⏳ Open |
