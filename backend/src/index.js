@@ -1,7 +1,8 @@
 // ─────────────────────────────────────────────────────────────────
-// The Hammer — hammer-api  (Sprint 5: tasks 5.2–5.8 + Sprint 4 routes)
+// The Hammer — hammer-api
 // Routes:
 //   GET  /health
+//   GET  /me                                   ← Sprint 5 SPA identity shim
 //   POST /capture
 //   POST /upload-url
 //   POST /admin/projects
@@ -12,6 +13,8 @@
 //   POST /admin/projects/:id/members
 //   DELETE /admin/projects/:id/members/:userId
 //   GET  /admin/projects/:id/activity
+//   GET  /admin/users                          ← Sprint 5 task 5.10
+//   GET  /admin/users/:id                      ← Sprint 5 task 5.10
 // ─────────────────────────────────────────────────────────────────
 'use strict';
 
@@ -29,7 +32,6 @@ const PORT = process.env.PORT || 8080;
 app.set('trust proxy', 1);
 
 // ── CORS — arch decision: *.run.app for now; app.thehammer.io deferred to Sprint 21 ──
-// Sprint 21 will replace the first origin with https://app.thehammer.io
 const EXTENSION_ID = process.env.EXTENSION_ID || '';
 const ALLOWED_ORIGINS = [
   // Sprint 21: swap to https://app.thehammer.io once HTTPS LB is live
@@ -110,7 +112,6 @@ function sha256(str) {
   return crypto.createHash('sha256').update(str).digest('hex');
 }
 
-// HMAC constant-time key comparison for legacy API_KEY env var
 function keysEqual(provided, expected) {
   const h = (s) => crypto.createHmac('sha256', 'hammer-key-check').update(s).digest();
   try { return crypto.timingSafeEqual(h(provided), h(expected)); }
@@ -121,10 +122,6 @@ function keysEqual(provided, expected) {
 // Auth middleware
 // ─────────────────────────────────────────────────────────────────
 
-/**
- * requireApiKey — for legacy capture routes (X-Api-Key vs API_KEY env var).
- * Sprint 9 will replace this with the Firestore api_keys SHA-256 lookup.
- */
 function requireApiKey(req, res, next) {
   const expected = process.env.API_KEY;
   const provided = req.headers['x-api-key'];
@@ -138,9 +135,8 @@ function requireApiKey(req, res, next) {
  * arch_decisions.md Final Call 3A: Cloud IAP injects X-Goog-Authenticated-User-Email.
  * No custom session code; no Firebase Auth.
  *
- * Sprint 21 note: when HTTPS LB + IAP are live, this header is guaranteed present on
- * all non-health requests. During Sprint 5 dev on *.run.app, tests inject the header
- * directly via supertest or curl.
+ * Sprint 21: when HTTPS LB + IAP are live this header is guaranteed on all non-health
+ * requests. During Sprint 5 dev on *.run.app, tests inject the header via supertest.
  */
 function requireRole(minRole) {
   return async (req, res, next) => {
@@ -217,10 +213,51 @@ async function firestoreWrite(objectPath, fields) {
 // Routes
 // ─────────────────────────────────────────────────────────────────
 
-// ─ Health ─────────────────────────────────────────────────────────────
+// ─ Health ─────────────────────────────────────────────────────────
 app.get('/health', (_req, res) => res.json({ status: 'ok' }));
 
-// ─ POST /upload-url (Sprint 4) ──────────────────────────────────────────
+// ─ GET /me ────────────────────────────────────────────────────────
+// Identity shim for the Admin Portal SPA.
+// Reads the IAP header and returns the resolved email + Firestore role.
+// The SPA calls this once on boot to populate the topbar user chip.
+// No role gate: any valid IAP identity can call /me; the role is returned
+// in the payload so the SPA can conditionally render admin-only UI.
+// 401 when IAP header is absent (direct *.run.app call without IAP tunnel).
+app.get('/me', async (req, res) => {
+  const rawEmail = req.headers['x-goog-authenticated-user-email'] || '';
+  const email = rawEmail.replace('accounts.google.com:', '').trim();
+  if (!email) return res.status(401).json({ error: 'IAP identity required' });
+  if (!db)    return res.json({ email, role: null }); // Firestore disabled: return bare identity
+
+  try {
+    const snap = await db.collection('users')
+      .where('email', '==', email)
+      .limit(1)
+      .get();
+
+    if (snap.empty) {
+      // User authenticated by IAP but not yet provisioned in Firestore.
+      // Return 200 with role:null so the SPA can show a "not yet provisioned" state
+      // rather than crashing. The admin can provision them via POST /admin/users
+      // (Sprint 6).
+      return res.json({ email, role: null, provisioned: false });
+    }
+
+    const user = snap.docs[0].data();
+    return res.json({
+      email,
+      role:        user.role,
+      displayName: user.displayName || null,
+      userId:      snap.docs[0].id,
+      provisioned: true
+    });
+  } catch (err) {
+    console.error('[hammer-api] /me error:', err.message);
+    return res.status(500).json({ error: 'Identity lookup failed' });
+  }
+});
+
+// ─ POST /upload-url (Sprint 4) ────────────────────────────────────
 app.post('/upload-url', requireApiKey, async (req, res) => {
   const { project, tool, name } = req.body || {};
   const missing = [];
@@ -243,7 +280,7 @@ app.post('/upload-url', requireApiKey, async (req, res) => {
   }
 });
 
-// ─ POST /capture (Sprint 4) ───────────────────────────────────────────
+// ─ POST /capture (Sprint 4) ───────────────────────────────────────
 app.post('/capture', requireApiKey, requireMultipart, upload.single('file'), async (req, res) => {
   const { projectId, userId, tool, tabUrl } = req.body || {};
   const missing = [];
@@ -313,7 +350,6 @@ app.post('/admin/projects', requireRole('admin'), async (req, res) => {
 });
 
 // 5.3 — GET /admin/projects
-// Ordered by createdAt desc so newest projects appear first in the portal list.
 app.get('/admin/projects', requireRole('admin'), async (req, res) => {
   if (!db) return res.status(503).json({ error: 'Firestore not available' });
 
@@ -326,7 +362,6 @@ app.get('/admin/projects', requireRole('admin'), async (req, res) => {
 });
 
 // 5.4 — GET /admin/projects/:id
-// Single-project fetch; used by portal detail view (task 5.11).
 app.get('/admin/projects/:id', requireRole('admin'), async (req, res) => {
   const { id } = req.params;
   if (!db) return res.status(503).json({ error: 'Firestore not available' });
@@ -346,7 +381,6 @@ app.patch('/admin/projects/:id', requireRole('admin'), async (req, res) => {
   const snap = await ref.get();
   if (!snap.exists) return res.status(404).json({ error: 'Project not found' });
 
-  // Allowlist: only name is mutable via PATCH. All other fields are server-controlled.
   const allowed = ['name'];
   const updates = {};
   for (const key of allowed) {
@@ -370,7 +404,6 @@ app.patch('/admin/projects/:id', requireRole('admin'), async (req, res) => {
 
 // 5.6 — DELETE /admin/projects/:id
 // Batched write: project doc + all project_memberships where projectId == id.
-// Batch limit is 500 ops; membership count per project is expected << 500.
 app.delete('/admin/projects/:id', requireRole('admin'), async (req, res) => {
   const { id } = req.params;
   if (!db) return res.status(503).json({ error: 'Firestore not available' });
@@ -392,7 +425,7 @@ app.delete('/admin/projects/:id', requireRole('admin'), async (req, res) => {
 });
 
 // 5.7 — POST /admin/projects/:id/members
-// Firestore transaction: atomically write membership doc + increment project.memberCount.
+// Transaction: atomically write membership doc + increment project.memberCount.
 app.post('/admin/projects/:id/members', requireRole('admin'), async (req, res) => {
   const { id } = req.params;
   const { userId, role } = req.body || {};
@@ -465,7 +498,6 @@ app.delete('/admin/projects/:id/members/:userId', requireRole('admin'), async (r
 
 // 5.9 — GET /admin/projects/:id/activity
 // Returns last 100 uploads for the project; ?tool= filter uses composite index.
-// Index: (projectId ASC, tool ASC, uploadedAt DESC) declared in firestore.indexes.json
 app.get('/admin/projects/:id/activity', requireRole('admin'), async (req, res) => {
   const { id }   = req.params;
   const { tool } = req.query;
@@ -477,7 +509,6 @@ app.get('/admin/projects/:id/activity', requireRole('admin'), async (req, res) =
     .limit(100);
 
   if (tool && typeof tool === 'string' && tool.trim()) {
-    // Uses composite index (projectId ASC, tool ASC, uploadedAt DESC)
     query = db.collection('uploads')
       .where('projectId', '==', id)
       .where('tool', '==', tool.trim())
@@ -490,10 +521,75 @@ app.get('/admin/projects/:id/activity', requireRole('admin'), async (req, res) =
   return res.json(uploads);
 });
 
-// ─ 404 fallback ───────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────
+// Admin Users routes (Sprint 5: 5.10)
+// ─────────────────────────────────────────────────────────────────
+
+// GET /admin/users
+// Returns all users ordered by createdAt desc.
+// Optional ?role= filter narrows to a specific role.
+// Optional ?projectId= filter returns only users who are members of that project
+// by joining project_memberships (two Firestore reads, no composite index needed).
+app.get('/admin/users', requireRole('admin'), async (req, res) => {
+  if (!db) return res.status(503).json({ error: 'Firestore not available' });
+
+  const { role, projectId } = req.query;
+
+  // projectId filter: fetch memberships first, then fetch each user by ID.
+  if (projectId && typeof projectId === 'string' && projectId.trim()) {
+    const memberSnap = await db.collection('project_memberships')
+      .where('projectId', '==', projectId.trim())
+      .orderBy('admittedAt', 'desc')
+      .get();
+
+    const users = await Promise.all(
+      memberSnap.docs.map(async (m) => {
+        const mData = m.data();
+        const userSnap = await db.collection('users').doc(mData.userId).get();
+        if (!userSnap.exists) return null;
+        return {
+          userId:     mData.userId,
+          ...userSnap.data(),
+          membership: {
+            role:       mData.role,
+            admittedAt: mData.admittedAt,
+            admittedBy: mData.admittedBy
+          }
+        };
+      })
+    );
+
+    return res.json(users.filter(Boolean));
+  }
+
+  // No projectId: list all users, optional role filter.
+  let query = db.collection('users').orderBy('createdAt', 'desc');
+  // Note: role filter requires a single-field index on (role, createdAt).
+  // For Sprint 5, we filter in memory to avoid an index deploy gate.
+  const snap  = await query.get();
+  let users   = snap.docs.map(doc => ({ userId: doc.id, ...doc.data() }));
+  if (role && ROLE_HIERARCHY[role]) {
+    users = users.filter(u => u.role === role);
+  }
+  return res.json(users);
+});
+
+// GET /admin/users/:id
+// Fetch a single user by Firestore document ID.
+app.get('/admin/users/:id', requireRole('admin'), async (req, res) => {
+  const { id } = req.params;
+  if (!db) return res.status(503).json({ error: 'Firestore not available' });
+
+  const snap = await db.collection('users').doc(id).get();
+  if (!snap.exists) return res.status(404).json({ error: 'User not found' });
+
+  return res.json({ userId: snap.id, ...snap.data() });
+});
+
+// ─ 404 fallback ───────────────────────────────────────────────────
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
 
-// ─ Start ───────────────────────────────────────────────────────────────
+// ─ Start ──────────────────────────────────────────────────────────
 app.listen(PORT, () => {
   console.log(`[hammer-api] listening on :${PORT}`);
   console.log(`[hammer-api] GCS_BUCKET=${BUCKET_NAME || '(not set)'}`);
