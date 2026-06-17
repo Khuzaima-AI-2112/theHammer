@@ -1,0 +1,35 @@
+# Define the source and destination directories
+$baseSourceDir = "C:\Users\ChrisFro\Desktop\EmoGini\theHammer\zipsforexport"
+$destinationDir = "C:\Users\ChrisFro\Desktop\EmoGini\theHammer\exportzips"
+
+# Create the destination folder if it doesn't exist
+if (-not (Test-Path -Path $destinationDir)) {
+    New-Item -ItemType Directory -Path $destinationDir | Out-Null
+    Write-Host "Created new export folder: $destinationDir" -ForegroundColor Cyan
+}
+
+# Find the 3 main folders inside 'zipsforexport'
+$sourceFolders = Get-ChildItem -Path $baseSourceDir -Directory
+
+if ($sourceFolders.Count -eq 0) {
+    Write-Host "No folders found in $baseSourceDir" -ForegroundColor Red
+}
+
+# Loop through each of the main folders
+foreach ($folder in $sourceFolders) {
+    
+    $zipPath = Join-Path -Path $destinationDir -ChildPath "$($folder.Name).zip"
+
+    # Grab ONLY files (-File), but dig through EVERY subfolder (-Recurse)
+    $filesToZip = Get-ChildItem -Path $folder.FullName -File -Recurse
+
+    if ($filesToZip) {
+        # Pass the absolute paths to Compress-Archive. 
+        # This completely flattens the hierarchy, dropping all files in the root of the zip.
+        Compress-Archive -Path $filesToZip.FullName -DestinationPath $zipPath -Force
+        Write-Host "Successfully flattened and zipped $($folder.Name).zip" -ForegroundColor Green
+    }
+    else {
+        Write-Host "Skipped $($folder.Name) - No files found anywhere inside." -ForegroundColor Yellow
+    }
+}
