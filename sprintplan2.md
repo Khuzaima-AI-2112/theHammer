@@ -8,6 +8,8 @@ Sprints 5–9 extend The Hammer from a screenshot-capture tool into a **multi-ro
 
 > **All architecture decisions referenced below are resolved in [`arch_decisions.md`](./arch_decisions.md).** Open questions in earlier drafts are closed — this document reflects the agreed decisions.
 
+> **All development work must adhere strictly to [`dev_guiderails.md`](./dev_guiderails.md).** Failure to meet the explicit "Done when" conditions, introducing phantom dependencies, or adding unauthorized scope will result in an immediate rejected Pull Request.
+
 ---
 
 ## Architecture Decisions Baked In
@@ -79,6 +81,7 @@ Probabilities reflect **first-attempt completion** without rework. A 🔴 task i
 All Sprint 4 console items (M.1–M.4, I.1–I.4, A.1–A.2, C.1–C.4, F.1–F.3) verified ✅ before any Sprint 5 code is written.
 
 Additional pre-flight for Sprint 5:
+- [ ] Developer executed `./verify-gcp-env.ps1` to assert configuration context locally
 - [ ] CRX key generated; `EXTENSION_ID` stored in Secret Manager — required before CORS is configured
 - [ ] `gcloud firestore databases describe` confirms `type: FIRESTORE_NATIVE`
 - [ ] IAP OAuth consent screen created in `hammer-prod` — **HARD BLOCKER**; without it, IAP will not inject `X-Goog-Authenticated-User-Email` and Sprint 5.13 auth guard cannot function
@@ -361,6 +364,7 @@ The full 8-alert set from `arch_decisions.md` §6.3 is implemented here. Alerts 
 | `firestore.indexes.json` updated + deployed | — | ⏳ | ⏳ | — | ⏳ | ⏳ | — | — |
 | `infra/` Terraform zero-drift verified | ⏳ | ⏳ | — | — | — | — | ⏳ | — |
 | `lessons_learned.md` current | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
+| `dev_guiderails.md` rules strictly followed | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
 
 ---
 
