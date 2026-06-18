@@ -1,0 +1,29 @@
+steps:
+  # 1. Build the container image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'northamerica-northeast1-docker.pkg.dev/$PROJECT_ID/hammer/hammer-api:$COMMIT_SHA'
+      - 'backend/'
+      
+  # 2. Push the container image to Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - 'northamerica-northeast1-docker.pkg.dev/$PROJECT_ID/hammer/hammer-api:$COMMIT_SHA'
+      
+  # 3. Deploy the container to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'hammer-api'
+      - '--image'
+      - 'northamerica-northeast1-docker.pkg.dev/$PROJECT_ID/hammer/hammer-api:$COMMIT_SHA'
+      - '--region'
+      - 'northamerica-northeast1'
+
+images:
+  - 'northamerica-northeast1-docker.pkg.dev/$PROJECT_ID/hammer/hammer-api:$COMMIT_SHA'
