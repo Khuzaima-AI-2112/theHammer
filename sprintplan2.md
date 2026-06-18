@@ -315,6 +315,22 @@ The full 8-alert set from `arch_decisions.md` §6.3 is implemented here. Alerts 
 
 ---
 
+## Sprint 10 — Extension Superpowers (Growth & Friction)
+
+**Goal:** Zero-friction data quality (auto-tagging, right-click capture) and admin-gated enterprise features (Blur, Clipboard links).
+
+**Sprint P%: 🟡 71%** — Content scripts and DOM parsing are inherently fragile across different websites; rigorous cross-site testing required.
+
+| # | Task | Done when | P% |
+|---|---|---|---|
+| 10.1 | Context Engine Auto-tagging | Content script scrapes page title and URL; auto-fills `tool` (e.g., matching `figma.com` -> Figma, or extracting Jira `PROJ-123` ID) | 🟡 75% |
+| 10.2 | Right-Click Element Capture | Injects Chrome Context Menu "Hammer: Capture this element"; intercepts click, isolates DOM element bounding box, crops PNG before upload | 🟠 65% |
+| 10.3 | Admin Feature Entitlements | Admin User Detail API/View adds toggles for "Allow Pre-Upload Blur" and "Instant Clipboard Links"; saved as boolean properties on `users` doc | 🟢 95% |
+| 10.4 | Pre-Upload Privacy Blur | Guarded by entitlement check in 10.3. If enabled, capture opens a 3-second overlay canvas where user can drag rects to irreversibly blur pixels before GCS PUT | 🟠 62% |
+| 10.5 | Instant Clipboard Links | Guarded by entitlement check. If enabled, the `signedUrl` (or Portal View URL) generated to view the image is automatically injected into `navigator.clipboard` immediately after 200 OK | 🟢 88% |
+
+---
+
 ## Sprint-Level Summary
 
 | Sprint | Focus | P% | Biggest single risk |
@@ -326,7 +342,8 @@ The full 8-alert set from `arch_decisions.md` §6.3 is implemented here. Alerts 
 | 7 | Analyst report engine | 🟡 71% | 7.8–7.11 — OCR extraction accuracy (conditional on 6S) |
 | 8 | Instructional Designer workspace | 🟠 63% | 8.6 — FFmpeg `drawtext` subtitle burn-in in Docker |
 | 9 | Auth hardening + integration tests | 🟡 73% | 9.5/9.6 — integration + smoke tests expose upstream bugs |
-| **All sprints (sequential gates)** | Full platform | **🟠 ~15%** | Compounded — every gate must pass |
+| 10 | Extension Superpowers | 🟡 71% | 10.2 — Cross-domain CSS layout quirks with DOM element bounding boxes |
+| **All sprints (sequential gates)** | Full platform | **🟠 ~12%** | Compounded — every gate must pass |
 
 > **On the ~15% figure:** Sprint 21 + Sprints 5 + 6 + 7 (Firestore reports only, no OCR) is a 🟡 ~33% outcome and delivers immediate Admin and Analyst value. Treat Sprint 21 and 6S as mandatory gates before portal go-live and Sprint 7 OCR tasks respectively.
 
@@ -334,16 +351,16 @@ The full 8-alert set from `arch_decisions.md` §6.3 is implemented here. Alerts 
 
 ## Sprint Completion Gates
 
-| Gate | S21 | S5 | S6 | S6S | S7 | S8 | S9 |
-|---|---|---|---|---|---|---|---|
-| All tasks verified against Done When | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
-| No open TODO comments in committed code | ⏳ | ⏳ | ⏳ | — | ⏳ | ⏳ | ⏳ |
-| Previous sprint acceptance criteria still pass | — | ⏳ | ⏳ | — | ⏳ | ⏳ | ⏳ |
-| Role enforcement verified for new routes | — | — | — | — | ⏳ | ⏳ | ⏳ |
-| Sprint 6S go/no-go decision recorded | — | — | — | ⏳ | — | — | — |
-| `firestore.indexes.json` updated + deployed | — | ⏳ | ⏳ | — | ⏳ | ⏳ | — |
-| `infra/` Terraform zero-drift verified | ⏳ | ⏳ | — | — | — | — | ⏳ |
-| `lessons_learned.md` current | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
+| Gate | S21 | S5 | S6 | S6S | S7 | S8 | S9 | S10 |
+|---|---|---|---|---|---|---|---|---|
+| All tasks verified against Done When | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
+| No open TODO comments in committed code | ⏳ | ⏳ | ⏳ | — | ⏳ | ⏳ | ⏳ | ⏳ |
+| Previous sprint acceptance criteria still pass | — | ⏳ | ⏳ | — | ⏳ | ⏳ | ⏳ | ⏳ |
+| Role/Entitlement enforcement verified | — | — | — | — | ⏳ | ⏳ | ⏳ | ⏳ |
+| Sprint 6S go/no-go decision recorded | — | — | — | ⏳ | — | — | — | — |
+| `firestore.indexes.json` updated + deployed | — | ⏳ | ⏳ | — | ⏳ | ⏳ | — | — |
+| `infra/` Terraform zero-drift verified | ⏳ | ⏳ | — | — | — | — | ⏳ | — |
+| `lessons_learned.md` current | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
 
 ---
 
