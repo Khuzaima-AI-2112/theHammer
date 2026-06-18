@@ -18,14 +18,14 @@
 // ─────────────────────────────────────────────────────────────────
 'use strict';
 
-const express   = require('express');
-const multer    = require('multer');
-const crypto    = require('crypto');
+const express = require('express');
+const multer = require('multer');
+const crypto = require('crypto');
 const rateLimit = require('express-rate-limit');
-const { Storage }   = require('@google-cloud/storage');
+const { Storage } = require('@google-cloud/storage');
 const { Firestore, FieldValue } = require('@google-cloud/firestore');
 
-const app  = express();
+const app = express();
 const PORT = process.env.PORT || 8080;
 
 // ── Trust proxy — required for Cloud Run rate-limit correctness ──
@@ -53,13 +53,13 @@ app.use((req, res, next) => {
 
 // ── Rate limiter: 60 req/IP/min; /health exempt ──
 const limiter = rateLimit({
-  windowMs:        60 * 1000,
-  max:             60,
+  windowMs: 60 * 1000,
+  max: 60,
   standardHeaders: true,
-  legacyHeaders:   false,
+  legacyHeaders: false,
   handler: (_req, res, _next, options) => {
     res.status(options.statusCode).json({
-      error:      'Too many requests',
+      error: 'Too many requests',
       retryAfter: Math.ceil(options.windowMs / 1000)
     });
   }
@@ -102,7 +102,7 @@ function sanitize(value, maxLen = 64) {
 }
 
 function buildObjectPath(projectId, userId, tool, now = new Date()) {
-  const ts   = now.toISOString().replace(/:/g, '-').replace(/\./g, '-');
+  const ts = now.toISOString().replace(/:/g, '-').replace(/\./g, '-');
   const rand = crypto.randomBytes(2).toString('hex');
   const toolPart = tool ? `_${sanitize(tool, 32)}` : '';
   return `${sanitize(projectId)}/${sanitize(userId)}/${ts}${toolPart}_${rand}.png`;
@@ -143,7 +143,7 @@ function requireRole(minRole) {
     const rawEmail = req.headers['x-goog-authenticated-user-email'] || '';
     const email = rawEmail.replace('accounts.google.com:', '').trim();
     if (!email) return res.status(401).json({ error: 'IAP identity required' });
-    if (!db)    return res.status(503).json({ error: 'Firestore not available' });
+    if (!db) return res.status(503).json({ error: 'Firestore not available' });
 
     try {
       const snap = await db.collection('users')
@@ -152,10 +152,10 @@ function requireRole(minRole) {
         .get();
       if (snap.empty) return res.status(403).json({ error: 'User not provisioned' });
 
-      const doc  = snap.docs[0];
+      const doc = snap.docs[0];
       const user = doc.data();
       const userLevel = ROLE_HIERARCHY[user.role] ?? 0;
-      const minLevel  = ROLE_HIERARCHY[minRole]  ?? 99;
+      const minLevel = ROLE_HIERARCHY[minRole] ?? 99;
 
       if (userLevel < minLevel) {
         return res.status(403).json({ error: 'Insufficient role', required: minRole, actual: user.role });
@@ -174,7 +174,7 @@ function requireMultipart(req, res, next) {
   const ct = req.headers['content-type'] || '';
   if (!ct.startsWith('multipart/form-data')) {
     return res.status(400).json({
-      error:    'Content-Type must be multipart/form-data',
+      error: 'Content-Type must be multipart/form-data',
       received: ct.slice(0, 120) || '(none)'
     });
   }
@@ -191,14 +191,14 @@ async function firestoreWrite(objectPath, fields) {
     const docId = encodeURIComponent(objectPath);
     await db.collection('uploads').doc(docId).set(
       {
-        path:          fields.path,
-        bucket:        fields.bucket,
-        size:          fields.size,
-        projectId:     fields.projectId,
-        userId:        fields.userId,
-        tool:          fields.tool,
-        tabUrl:        fields.tabUrl,
-        uploadedAt:    fields.uploadedAt,
+        path: fields.path,
+        bucket: fields.bucket,
+        size: fields.size,
+        projectId: fields.projectId,
+        userId: fields.userId,
+        tool: fields.tool,
+        tabUrl: fields.tabUrl,
+        uploadedAt: fields.uploadedAt,
         schemaVersion: 1
       },
       { merge: false }
@@ -227,7 +227,7 @@ app.get('/me', async (req, res) => {
   const rawEmail = req.headers['x-goog-authenticated-user-email'] || '';
   const email = rawEmail.replace('accounts.google.com:', '').trim();
   if (!email) return res.status(401).json({ error: 'IAP identity required' });
-  if (!db)    return res.json({ email, role: null }); // Firestore disabled: return bare identity
+  if (!db) return res.json({ email, role: null }); // Firestore disabled: return bare identity
 
   try {
     const snap = await db.collection('users')
@@ -246,9 +246,9 @@ app.get('/me', async (req, res) => {
     const user = snap.docs[0].data();
     return res.json({
       email,
-      role:        user.role,
+      role: user.role,
       displayName: user.displayName || null,
-      userId:      snap.docs[0].id,
+      userId: snap.docs[0].id,
       provisioned: true
     });
   } catch (err) {
@@ -262,8 +262,8 @@ app.post('/upload-url', requireApiKey, async (req, res) => {
   const { project, tool, name } = req.body || {};
   const missing = [];
   if (!project) missing.push('project');
-  if (!tool)    missing.push('tool');
-  if (!name)    missing.push('name');
+  if (!tool) missing.push('tool');
+  if (!name) missing.push('name');
   if (missing.length > 0) return res.status(400).json({ error: 'Missing required fields', missing });
   if (!BUCKET_NAME) return res.status(500).json({ error: 'Server misconfiguration: GCS_BUCKET not set' });
 
@@ -285,18 +285,18 @@ app.post('/capture', requireApiKey, requireMultipart, upload.single('file'), asy
   const { projectId, userId, tool, tabUrl } = req.body || {};
   const missing = [];
   if (!projectId) missing.push('projectId');
-  if (!userId)    missing.push('userId');
+  if (!userId) missing.push('userId');
   if (missing.length > 0) return res.status(400).json({ error: 'Missing required fields', missing });
-  if (!req.file)            return res.status(400).json({ error: 'Missing required field: file' });
-  if (req.file.size === 0)  return res.status(400).json({ error: 'file must not be empty (0 bytes)' });
-  if (!BUCKET_NAME)         return res.status(500).json({ error: 'Server misconfiguration: GCS_BUCKET not set' });
+  if (!req.file) return res.status(400).json({ error: 'Missing required field: file' });
+  if (req.file.size === 0) return res.status(400).json({ error: 'file must not be empty (0 bytes)' });
+  if (!BUCKET_NAME) return res.status(500).json({ error: 'Server misconfiguration: GCS_BUCKET not set' });
 
   const safeProject = sanitize(projectId);
-  const safeUser    = sanitize(userId);
-  const safeTool    = tool ? sanitize(tool, 32) : '';
-  const safeTabUrl  = tabUrl ? tabUrl.slice(0, 500) : '';
-  const objectPath  = buildObjectPath(safeProject, safeUser, safeTool);
-  const uploadedAt  = new Date().toISOString();
+  const safeUser = sanitize(userId);
+  const safeTool = tool ? sanitize(tool, 32) : '';
+  const safeTabUrl = tabUrl ? tabUrl.slice(0, 500) : '';
+  const objectPath = buildObjectPath(safeProject, safeUser, safeTool);
+  const uploadedAt = new Date().toISOString();
 
   const blob = gcs.bucket(BUCKET_NAME).file(objectPath);
   try {
@@ -333,16 +333,16 @@ app.post('/admin/projects', requireRole('admin'), async (req, res) => {
   }
   if (!db) return res.status(503).json({ error: 'Firestore not available' });
 
-  const now        = new Date().toISOString();
+  const now = new Date().toISOString();
   const projectRef = db.collection('projects').doc();
-  const projectId  = projectRef.id;
+  const projectId = projectRef.id;
 
   await projectRef.set({
-    name:          name.trim().slice(0, 128),
-    adminId:       req.user.userId,
-    memberCount:   0,
-    createdAt:     now,
-    updatedAt:     now,
+    name: name.trim().slice(0, 128),
+    adminId: req.user.userId,
+    memberCount: 0,
+    createdAt: now,
+    updatedAt: now,
     schemaVersion: 1
   });
 
@@ -377,7 +377,7 @@ app.patch('/admin/projects/:id', requireRole('admin'), async (req, res) => {
   const { id } = req.params;
   if (!db) return res.status(503).json({ error: 'Firestore not available' });
 
-  const ref  = db.collection('projects').doc(id);
+  const ref = db.collection('projects').doc(id);
   const snap = await ref.get();
   if (!snap.exists) return res.status(404).json({ error: 'Project not found' });
 
@@ -408,7 +408,7 @@ app.delete('/admin/projects/:id', requireRole('admin'), async (req, res) => {
   const { id } = req.params;
   if (!db) return res.status(503).json({ error: 'Firestore not available' });
 
-  const projectRef  = db.collection('projects').doc(id);
+  const projectRef = db.collection('projects').doc(id);
   const projectSnap = await projectRef.get();
   if (!projectSnap.exists) return res.status(404).json({ error: 'Project not found' });
 
@@ -435,8 +435,8 @@ app.post('/admin/projects/:id/members', requireRole('admin'), async (req, res) =
   }
   if (!db) return res.status(503).json({ error: 'Firestore not available' });
 
-  const projectRef    = db.collection('projects').doc(id);
-  const membershipId  = `${id}_${userId}`;
+  const projectRef = db.collection('projects').doc(id);
+  const membershipId = `${id}_${userId}`;
   const membershipRef = db.collection('project_memberships').doc(membershipId);
 
   try {
@@ -452,11 +452,11 @@ app.post('/admin/projects/:id/members', requireRole('admin'), async (req, res) =
 
       const now = new Date().toISOString();
       tx.set(membershipRef, {
-        projectId:     id,
+        projectId: id,
         userId,
         role,
-        admittedAt:    now,
-        admittedBy:    req.user.userId,
+        admittedAt: now,
+        admittedBy: req.user.userId,
         schemaVersion: 1
       });
       tx.update(projectRef, { memberCount: FieldValue.increment(1), updatedAt: now });
@@ -474,7 +474,7 @@ app.delete('/admin/projects/:id/members/:userId', requireRole('admin'), async (r
   const { id, userId } = req.params;
   if (!db) return res.status(503).json({ error: 'Firestore not available' });
 
-  const projectRef    = db.collection('projects').doc(id);
+  const projectRef = db.collection('projects').doc(id);
   const membershipRef = db.collection('project_memberships').doc(`${id}_${userId}`);
 
   try {
@@ -499,7 +499,7 @@ app.delete('/admin/projects/:id/members/:userId', requireRole('admin'), async (r
 // 5.9 — GET /admin/projects/:id/activity
 // Returns last 100 uploads for the project; ?tool= filter uses composite index.
 app.get('/admin/projects/:id/activity', requireRole('admin'), async (req, res) => {
-  const { id }   = req.params;
+  const { id } = req.params;
   const { tool } = req.query;
   if (!db) return res.status(503).json({ error: 'Firestore not available' });
 
@@ -516,7 +516,7 @@ app.get('/admin/projects/:id/activity', requireRole('admin'), async (req, res) =
       .limit(100);
   }
 
-  const snap    = await query.get();
+  const snap = await query.get();
   const uploads = snap.docs.map(doc => ({ uploadId: doc.id, ...doc.data() }));
   return res.json(uploads);
 });
@@ -548,10 +548,10 @@ app.get('/admin/users', requireRole('admin'), async (req, res) => {
         const userSnap = await db.collection('users').doc(mData.userId).get();
         if (!userSnap.exists) return null;
         return {
-          userId:     mData.userId,
+          userId: mData.userId,
           ...userSnap.data(),
           membership: {
-            role:       mData.role,
+            role: mData.role,
             admittedAt: mData.admittedAt,
             admittedBy: mData.admittedBy
           }
@@ -566,8 +566,8 @@ app.get('/admin/users', requireRole('admin'), async (req, res) => {
   let query = db.collection('users').orderBy('createdAt', 'desc');
   // Note: role filter requires a single-field index on (role, createdAt).
   // For Sprint 5, we filter in memory to avoid an index deploy gate.
-  const snap  = await query.get();
-  let users   = snap.docs.map(doc => ({ userId: doc.id, ...doc.data() }));
+  const snap = await query.get();
+  let users = snap.docs.map(doc => ({ userId: doc.id, ...doc.data() }));
   if (role && ROLE_HIERARCHY[role]) {
     users = users.filter(u => u.role === role);
   }
@@ -585,6 +585,9 @@ app.get('/admin/users/:id', requireRole('admin'), async (req, res) => {
 
   return res.json({ userId: snap.id, ...snap.data() });
 });
+
+// ─ Admin Users Router (Sprint 5) ──────────────────────────────────
+app.use('/admin', require('./routes/admin/users'));
 
 // ─ 404 fallback ───────────────────────────────────────────────────
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
