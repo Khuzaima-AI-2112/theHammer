@@ -1,5 +1,5 @@
 steps:
-  # 1. Run tests against the Firestore emulator before building
+  # ── 1. Start Firestore emulator ────────────────────────────────────────────
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     id: 'start-firestore-emulator'
     entrypoint: bash
@@ -15,6 +15,7 @@ steps:
     env:
       - 'FIRESTORE_EMULATOR_HOST=127.0.0.1:8080'
 
+  # ── 2. Run backend tests ────────────────────────────────────────────────────
   - name: 'node:20-alpine'
     id: 'test'
     waitFor: ['start-firestore-emulator']
@@ -27,42 +28,104 @@ steps:
       - 'NODE_ENV=test'
       - 'FIRESTORE_EMULATOR_HOST=127.0.0.1:8080'
 
-  # 2. Build the container image
+  # ── 3. Build backend image ──────────────────────────────────────────────────
   - name: 'gcr.io/cloud-builders/docker'
-    id: 'build'
+    id: 'build-backend'
     waitFor: ['test']
     args:
       - 'build'
       - '-t'
-      - 'northamerica-northeast1-docker.pkg.dev/$PROJECT_ID/hammer/hammer-api:$COMMIT_SHA'
+      - 'northamerica-northeast1-docker.pkg.dev/$PROJECT_ID/thehammer/backend:$COMMIT_SHA'
       - 'backend/'
 
-  # 3. Push to Artifact Registry
+  # ── 4. Push backend image ───────────────────────────────────────────────────
   - name: 'gcr.io/cloud-builders/docker'
-    id: 'push'
-    waitFor: ['build']
+    id: 'push-backend'
+    waitFor: ['build-backend']
     args:
       - 'push'
-      - 'northamerica-northeast1-docker.pkg.dev/$PROJECT_ID/hammer/hammer-api:$COMMIT_SHA'
+      - 'northamerica-northeast1-docker.pkg.dev/$PROJECT_ID/thehammer/backend:$COMMIT_SHA'
 
-  # 4. Deploy to Cloud Run
+  # ── 5. Deploy backend to Cloud Run ─────────────────────────────────────────
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
-    id: 'deploy'
-    waitFor: ['push']
+    id: 'deploy-backend'
+    waitFor: ['push-backend']
     entrypoint: gcloud
     args:
       - 'run'
       - 'deploy'
-      - 'hammer-api'
+      - 'thehammer-backend'
       - '--image'
-      - 'northamerica-northeast1-docker.pkg.dev/$PROJECT_ID/hammer/hammer-api:$COMMIT_SHA'
+      - 'northamerica-northeast1-docker.pkg.dev/$PROJECT_ID/thehammer/backend:$COMMIT_SHA'
       - '--region'
       - 'northamerica-northeast1'
+      - '--platform'
+      - 'managed'
+      - '--allow-unauthenticated'
+      - '--min-instances'
+      - '0'
+      - '--max-instances'
+      - '5'
+      - '--memory'
+      - '256Mi'
+      - '--timeout'
+      - '30s'
+      - '--service-account'
+      - 'thehammer-backend@$PROJECT_ID.iam.gserviceaccount.com'
+      - '--set-secrets'
+      - 'API_KEY=thehammer-api-key:latest'
       - '--set-env-vars'
-      - 'NODE_ENV=production'
+      - 'NODE_ENV=production,GCS_BUCKET=thehammer-storage-2026'
+
+  # ── 6. Build portal image ───────────────────────────────────────────────────
+  # Runs in parallel with the backend build — only needs tests to pass.
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'build-portal'
+    waitFor: ['test']
+    args:
+      - 'build'
+      - '-t'
+      - 'northamerica-northeast1-docker.pkg.dev/$PROJECT_ID/thehammer/portal:$COMMIT_SHA'
+      - 'portal/'
+
+  # ── 7. Push portal image ────────────────────────────────────────────────────
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'push-portal'
+    waitFor: ['build-portal']
+    args:
+      - 'push'
+      - 'northamerica-northeast1-docker.pkg.dev/$PROJECT_ID/thehammer/portal:$COMMIT_SHA'
+
+  # ── 8. Deploy portal to Cloud Run ──────────────────────────────────────────
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'deploy-portal'
+    waitFor: ['push-portal']
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'thehammer-portal'
+      - '--image'
+      - 'northamerica-northeast1-docker.pkg.dev/$PROJECT_ID/thehammer/portal:$COMMIT_SHA'
+      - '--region'
+      - 'northamerica-northeast1'
+      - '--platform'
+      - 'managed'
+      - '--allow-unauthenticated'
+      - '--min-instances'
+      - '0'
+      - '--max-instances'
+      - '3'
+      - '--memory'
+      - '128Mi'
+      - '--timeout'
+      - '10s'
+      - '--service-account'
+      - 'thehammer-backend@$PROJECT_ID.iam.gserviceaccount.com'
 
 images:
-  - 'northamerica-northeast1-docker.pkg.dev/$PROJECT_ID/hammer/hammer-api:$COMMIT_SHA'
+  - 'northamerica-northeast1-docker.pkg.dev/$PROJECT_ID/thehammer/backend:$COMMIT_SHA'
+  - 'northamerica-northeast1-docker.pkg.dev/$PROJECT_ID/thehammer/portal:$COMMIT_SHA'
 
 options:
   logging: CLOUD_LOGGING_ONLY
