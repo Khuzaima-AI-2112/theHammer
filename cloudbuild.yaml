@@ -1,20 +1,54 @@
 steps:
-  # 1. Build the container image
+  # 1. Run tests against the Firestore emulator before building
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'start-firestore-emulator'
+    entrypoint: bash
+    args:
+      - '-c'
+      - |
+        apt-get install -y default-jre-headless --quiet
+        npm install -g firebase-tools --quiet
+        firebase emulators:start --only firestore --project demo-hammer &
+        echo "Waiting for Firestore emulator..."
+        sleep 10
+        echo "Emulator ready."
+    env:
+      - 'FIRESTORE_EMULATOR_HOST=127.0.0.1:8080'
+
+  - name: 'node:20-alpine'
+    id: 'test'
+    waitFor: ['start-firestore-emulator']
+    dir: 'backend'
+    entrypoint: sh
+    args:
+      - '-c'
+      - 'npm ci && npm test'
+    env:
+      - 'NODE_ENV=test'
+      - 'FIRESTORE_EMULATOR_HOST=127.0.0.1:8080'
+
+  # 2. Build the container image
   - name: 'gcr.io/cloud-builders/docker'
+    id: 'build'
+    waitFor: ['test']
     args:
       - 'build'
       - '-t'
       - 'northamerica-northeast1-docker.pkg.dev/$PROJECT_ID/hammer/hammer-api:$COMMIT_SHA'
       - 'backend/'
-      
-  # 2. Push the container image to Artifact Registry
+
+  # 3. Push to Artifact Registry
   - name: 'gcr.io/cloud-builders/docker'
+    id: 'push'
+    waitFor: ['build']
     args:
       - 'push'
       - 'northamerica-northeast1-docker.pkg.dev/$PROJECT_ID/hammer/hammer-api:$COMMIT_SHA'
-      
-  # 3. Deploy the container to Cloud Run
+
+  # 4. Deploy to Cloud Run
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'deploy'
+    waitFor: ['push']
     entrypoint: gcloud
     args:
       - 'run'
@@ -24,6 +58,8 @@ steps:
       - 'northamerica-northeast1-docker.pkg.dev/$PROJECT_ID/hammer/hammer-api:$COMMIT_SHA'
       - '--region'
       - 'northamerica-northeast1'
+      - '--set-env-vars'
+      - 'NODE_ENV=production'
 
 images:
   - 'northamerica-northeast1-docker.pkg.dev/$PROJECT_ID/hammer/hammer-api:$COMMIT_SHA'

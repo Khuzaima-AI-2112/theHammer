@@ -25,6 +25,14 @@
         { "fieldPath": "projectId",  "order": "ASCENDING"  },
         { "fieldPath": "admittedAt", "order": "DESCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "users",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "role",  "order": "ASCENDING" },
+        { "fieldPath": "email", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []
