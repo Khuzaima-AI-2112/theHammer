@@ -47,6 +47,13 @@ steps:
       - 'northamerica-northeast1-docker.pkg.dev/$PROJECT_ID/thehammer/backend:$COMMIT_SHA'
 
   # ── 5. Deploy backend to Cloud Run ─────────────────────────────────────────
+  #
+  # --no-allow-unauthenticated: Cloud Run IAM blocks all requests that do not
+  # carry a valid Google identity token. The extension and portal authenticate
+  # via X-Api-Key (checked by requireApiKey / requireAdmin middleware), but
+  # Cloud Run itself still requires a valid invoker identity. The Cloud Build
+  # service account (thehammer-backend@) is granted roles/run.invoker so the
+  # smoke test step below can reach the service.
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     id: 'deploy-backend'
     waitFor: ['push-backend']
@@ -61,7 +68,7 @@ steps:
       - 'northamerica-northeast1'
       - '--platform'
       - 'managed'
-      - '--allow-unauthenticated'
+      - '--no-allow-unauthenticated'
       - '--min-instances'
       - '0'
       - '--max-instances'
@@ -111,7 +118,7 @@ steps:
       - 'northamerica-northeast1'
       - '--platform'
       - 'managed'
-      - '--allow-unauthenticated'
+      - '--no-allow-unauthenticated'
       - '--min-instances'
       - '0'
       - '--max-instances'
@@ -122,6 +129,43 @@ steps:
       - '10s'
       - '--service-account'
       - 'thehammer-backend@$PROJECT_ID.iam.gserviceaccount.com'
+
+  # ── 9. Smoke test ───────────────────────────────────────────────────────────
+  # Runs after both deploys complete. Fetches an identity token for the Cloud
+  # Build SA, then calls /health on each service. A non-200 from either service
+  # fails the build — Cloud Run keeps the previous revision at 100% traffic.
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'smoke-test'
+    waitFor: ['deploy-backend', 'deploy-portal']
+    entrypoint: bash
+    args:
+      - '-c'
+      - |
+        set -euo pipefail
+
+        TOKEN=$(gcloud auth print-identity-token)
+
+        BACKEND_URL=$(gcloud run services describe thehammer-backend \
+          --region northamerica-northeast1 --format 'value(status.url)')
+
+        PORTAL_URL=$(gcloud run services describe thehammer-portal \
+          --region northamerica-northeast1 --format 'value(status.url)')
+
+        echo "── backend: $BACKEND_URL"
+        STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+          -H "Authorization: Bearer $TOKEN" \
+          "$BACKEND_URL/health")
+        echo "   /health → $STATUS"
+        [ "$STATUS" = "200" ] || { echo "FAIL: backend /health returned $STATUS"; exit 1; }
+
+        echo "── portal: $PORTAL_URL"
+        STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+          -H "Authorization: Bearer $TOKEN" \
+          "$PORTAL_URL/health")
+        echo "   /health → $STATUS"
+        [ "$STATUS" = "200" ] || { echo "FAIL: portal /health returned $STATUS"; exit 1; }
+
+        echo "Smoke test passed ✓"
 
 images:
   - 'northamerica-northeast1-docker.pkg.dev/$PROJECT_ID/thehammer/backend:$COMMIT_SHA'
