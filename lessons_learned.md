@@ -192,3 +192,12 @@ Run this before starting any new sprint:
 **What happened:** The deploy script relied on `$env:GCP_PROJECT_ID` being set. If the environment variable isn't set in the current shell session, the deployment would fail or target the wrong project environment.
 **Rule going forward:**
 - Rather than solely relying on environment variables, build fallback validation into scripts. Using commands like `gcloud config get-value project` to confirm the target matches the intention (`thehammer`) prevents deployment accidents.
+
+### 11. Cloud Build inline bash scripts require escaped substitution variables ($$)
+
+**What happened:** A Cloud Build deployment failed with `generic::invalid_argument: invalid value for 'build.substitutions': key in the template "BACKEND_URL" is not a valid built-in substitution`.
+**Root cause:** Shell variables like `$BACKEND_URL` were used in an inline bash script within `cloudbuild.yaml`. Cloud Build evaluates anything starting with `$` as a Cloud Build substitution variable *before* passing the script to bash. Since `$BACKEND_URL` isn't a native substitution, Cloud Build aborted the build.
+**Rule going forward:**
+- Whenever writing inline shell scripts inside `cloudbuild.yaml`, escape all bash variable references with a double dollar sign (`$$`).
+- Example: Use `$$STATUS` and `$$TOKEN`, not `$STATUS` and `$TOKEN`.
+- Single dollar signs (`$`) should exclusively be used for Cloud Build built-ins (like `$PROJECT_ID` or `$COMMIT_SHA`) or explicitly defined custom substitutions.
