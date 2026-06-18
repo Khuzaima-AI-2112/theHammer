@@ -30,10 +30,10 @@ The extension's primary directive is to immediately and smoothly capture a scree
 * **Rule:** No new feature can block the capture loop. 
 * **Example:** If the backend `app.thehammer.io` is unreachable, the extension *must* fall back to caching the screenshot locally (`chrome.storage.local`). The user must never lose a screenshot because an analyst feature went down.
 
-## 5. Verify the Target Environment
-We deploy to Google Cloud Project environments (`thehammer`).
-* **Rule:** Always run the `./verify-gcp-env.ps1` script at the start of a coding session. 
-* **Why:** If the active `gcloud` configuration drifts to a personal or unrelated project, infrastructure changes or deployments will fail or pollute the wrong project. 
+## 5. Deployments are CI/CD Only
+We deploy to Google Cloud Project environments via GitHub Actions.
+* **Rule:** You are working remotely on GitHub. Do not attempt to write or execute manual `gcloud run deploy` commands or assume you have local access to the GCP production environment. 
+* **Why:** All infrastructure changes and code deployments must flow through Pull Requests and our automated CI/CD pipelines to ensure the `thehammer` and `hammer-dev` environments remain protected.
 
 ## 6. Consult the "Lessons Learned"
 We keep a living document of critical mistakes made during development.

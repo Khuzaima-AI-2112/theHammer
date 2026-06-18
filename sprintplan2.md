@@ -81,7 +81,7 @@ Probabilities reflect **first-attempt completion** without rework. A 🔴 task i
 All Sprint 4 console items (M.1–M.4, I.1–I.4, A.1–A.2, C.1–C.4, F.1–F.3) verified ✅ before any Sprint 5 code is written.
 
 Additional pre-flight for Sprint 5:
-- [ ] Developer executed `./verify-gcp-env.ps1` to assert configuration context locally
+- [ ] Developer understands all deployments flow through GitHub Actions (No local `gcloud` access assumed)
 - [ ] CRX key generated; `EXTENSION_ID` stored in Secret Manager — required before CORS is configured
 - [ ] `gcloud firestore databases describe` confirms `type: FIRESTORE_NATIVE`
 - [ ] IAP OAuth consent screen created in `hammer-prod` — **HARD BLOCKER**; without it, IAP will not inject `X-Goog-Authenticated-User-Email` and Sprint 5.13 auth guard cannot function
