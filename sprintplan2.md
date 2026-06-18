@@ -97,6 +97,8 @@ Additional pre-flight for Sprint 5:
 | 5.6 | `POST /admin/projects/:id/members` | Firestore **transaction**: atomically writes `project_memberships/{userId}` doc AND increments `project.memberCount`; `role` field present | 🟡 88% |
 | 5.7 | `DELETE /admin/projects/:id/members/:userId` | Membership doc deleted; `GET /admin/projects/:id` member count decrements (transaction); verified | 🟢 95% |
 | 5.8 | `GET /admin/projects/:id/activity` | Returns last 100 `uploads` docs for project; `?tool=` filter uses composite index `(projectId ASC, tool ASC, uploadedAt DESC)` declared in `firestore.indexes.json` | 🟡 87% |
+| 5.8b | `GET /me/projects` | Resolves user identity from `X-Api-Key`; returns only projects assigned to that user | 🟢 96% |
+| 5.8c | `GET /config` | Returns global extension settings (retention days, max size, etc.) configured by admins | 🟢 95% |
 
 ### Admin Portal SPA
 
@@ -106,6 +108,8 @@ Additional pre-flight for Sprint 5:
 | 5.10 | Project detail — user roster | Admitted users listed with role badge; Admit and Remove buttons update Firestore via transaction and re-render without full page reload | 🟡 84% |
 | 5.11 | Activity feed per tool | `?tool=` filter applied on click; screenshot thumbnails load via V4 signed URLs (15-min lifetime); URLs auto-refreshed on `visibilitychange` + proactive refresh after 9 min | 🟡 79% |
 | 5.12 | Report viewer tab (placeholder) | Panel fetches `reports` Firestore collection; renders "No reports yet" empty state; full render deferred to Sprint 7 | 🟢 93% |
+| 5.12b | Global Settings panel | Admins can update global capture settings (retention, etc.) persisting to Firestore config doc | 🟢 94% |
+| 5.12c | User Profile view | Logged-in user can view assigned projects and copy their Personal API Key | 🟢 95% |
 | 5.13 | Auth guard | Portal is protected by Cloud IAP at the LB level — no unauthenticated request reaches the SPA. `hammer-api` routes read `X-Goog-Authenticated-User-Email` header for identity; missing or invalid `X-Api-Key` → 401 on all `/admin/*` API routes | 🟢 96% |
 | 5.14 | Deploy Admin Portal to Cloud Run | Image pushed to Artifact Registry tagged with Git SHA; `hammer-portal` deployed via GitHub Actions canary (10% → 15 min → 100%); `curl $PORTAL_URL/health` → `{"status":"ok"}`; accessible via `https://app.thehammer.io` after Sprint 21 LB cutover | 🟢 92% |
 
@@ -113,9 +117,11 @@ Additional pre-flight for Sprint 5:
 
 | # | Task | Done when | P% |
 |---|---|---|---|
-| 5.15 | Extension popup reads projects/users from backend API | Dropdown populates from `GET /admin/projects` within 5 s; `EXTENSION_ID` read from Secret Manager; CORS allows `chrome-extension://${EXTENSION_ID}`; falls back to last-cached `chrome.storage.local` value if fetch fails within 3 s | 🟠 67% |
+| 5.15 | Personal API Key auth | User pastes Personal API Key (generated in Portal); Backend URL defaults to `https://app.thehammer.io/api` (no typing needed); "User" dropdown is completely removed because backend identifies them via their key | 🟢 92% |
+| 5.16 | Auto-select Project & Stage | Popup dropdown reads `GET /me/projects`; if only one project is returned, automatically selects it and hides the dropdown; introduces new "Project Stage" dropdown (Beginning / During / After) saved to Firestore | 🟢 90% |
+| 5.17 | Centralized Admin Settings | Configuration settings (Cloud Run URL, retention periods, default capture sizes) are fetched from `GET /config`; Popup Settings tab is disabled or made read-only | � 94% |
 
-> **5.15 mitigation:** implement cache-first pattern (`chrome.storage.local` as stale-while-revalidate) before attempting live fetch. If backend unreachable, popup works from cache — no capture-blocking regression.
+> **Mitigation for 5.15–5.17:** Extension falls back to cached `chrome.storage.local` if `app.thehammer.io` is unreachable to ensure capture isn't blocked offline.
 
 ---
 
