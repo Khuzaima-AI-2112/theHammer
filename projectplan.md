@@ -61,6 +61,211 @@ Google Cloud Storage
 
 ---
 
+## Firestore Data Model (Sprint 5.1)
+
+Sprint 5 introduces three new top-level Firestore collections: `projects`, `users`, and `project_memberships`. This design preserves the existing flat `uploads` collection and adds a `projectId` field to `uploads` documents for project-scoped queries; no `uploads/{projectId}/...` subcollections are introduced.
+
+All new Firestore document types created in Sprint 5 must include `schemaVersion: 1`. Timestamps are stored as Firestore timestamps in persisted documents and are shown as ISO 8601 strings in the examples below for readability.
+
+### Collection layout
+
+| Collection | Purpose | Document ID | Notes |
+|---|---|---|---|
+| `projects` | Admin-created project records used across portal, extension, and reporting | `projectId` (e.g. `proj_website_redesign`) | Stores summary fields including `memberCount` |
+| `users` | Directory of people who can capture, administer, analyze, or design | `userId` (e.g. `user_alice_chen`) | Profile record; API keys live separately in Sprint 9 |
+| `project_memberships` | Join table linking users to projects with a role | deterministic membership ID such as `{projectId}__{userId}` | Flat collection; not a subcollection under `projects` |
+| `uploads` | Existing screenshot metadata collection | existing upload document ID | Remains flat; queried by `projectId`, `userId`, `tool`, `uploadedAt` |
+
+### Schema — `projects`
+
+Each project document represents one admin-managed project visible in the Admin Portal and selectable by assigned users.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `projectId` | string | Yes | Stable identifier duplicated from the document ID for API responses |
+| `name` | string | Yes | Human-readable project name |
+| `description` | string | No | Optional admin-entered summary |
+| `status` | string | Yes | Initial values: `active` or `archived` |
+| `memberCount` | number | Yes | Denormalized count maintained transactionally |
+| `createdAt` | timestamp | Yes | Creation timestamp |
+| `createdBy` | string | Yes | Email or user ID of creator |
+| `updatedAt` | timestamp | Yes | Last metadata update timestamp |
+| `schemaVersion` | number | Yes | Must be `1` |
+
+Example documents:
+
+```json
+{
+  "projectId": "proj_website_redesign",
+  "name": "Website Redesign",
+  "description": "Capture redesign work across Figma, Jira, and QA.",
+  "status": "active",
+  "memberCount": 3,
+  "createdAt": "2026-06-18T13:00:00Z",
+  "createdBy": "admin@thehammer.io",
+  "updatedAt": "2026-06-18T13:00:00Z",
+  "schemaVersion": 1
+}
+```
+
+```json
+{
+  "projectId": "proj_gtm_migration",
+  "name": "GTM Migration",
+  "description": "Migration from legacy tags to new GTM container structure.",
+  "status": "active",
+  "memberCount": 2,
+  "createdAt": "2026-06-18T13:10:00Z",
+  "createdBy": "admin@thehammer.io",
+  "updatedAt": "2026-06-18T13:10:00Z",
+  "schemaVersion": 1
+}
+```
+
+```json
+{
+  "projectId": "proj_q4_enablement",
+  "name": "Q4 Enablement",
+  "description": "Instructional content and rollout assets for Q4 sales enablement.",
+  "status": "archived",
+  "memberCount": 1,
+  "createdAt": "2026-06-18T13:20:00Z",
+  "createdBy": "admin@thehammer.io",
+  "updatedAt": "2026-06-18T13:45:00Z",
+  "schemaVersion": 1
+}
+```
+
+### Schema — `users`
+
+Each user document stores the human profile used by the Admin Portal and future role-aware workflows. This collection represents people, not credentials.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `userId` | string | Yes | Stable identifier duplicated from document ID |
+| `email` | string | Yes | Primary email address |
+| `displayName` | string | Yes | Human-readable display name |
+| `defaultRole` | string | Yes | Initial values: `admin`, `user`, `analyst`, `instructional_designer` |
+| `isActive` | boolean | Yes | Soft-activation flag |
+| `createdAt` | timestamp | Yes | Creation timestamp |
+| `updatedAt` | timestamp | Yes | Last profile update timestamp |
+| `schemaVersion` | number | Yes | Must be `1` |
+
+Example documents:
+
+```json
+{
+  "userId": "user_alice_chen",
+  "email": "alice@thehammer.io",
+  "displayName": "Alice Chen",
+  "defaultRole": "admin",
+  "isActive": true,
+  "createdAt": "2026-06-18T13:00:00Z",
+  "updatedAt": "2026-06-18T13:00:00Z",
+  "schemaVersion": 1
+}
+```
+
+```json
+{
+  "userId": "user_ben_singh",
+  "email": "ben@thehammer.io",
+  "displayName": "Ben Singh",
+  "defaultRole": "analyst",
+  "isActive": true,
+  "createdAt": "2026-06-18T13:05:00Z",
+  "updatedAt": "2026-06-18T13:05:00Z",
+  "schemaVersion": 1
+}
+```
+
+```json
+{
+  "userId": "user_chloe_martin",
+  "email": "chloe@thehammer.io",
+  "displayName": "Chloe Martin",
+  "defaultRole": "instructional_designer",
+  "isActive": false,
+  "createdAt": "2026-06-18T13:15:00Z",
+  "updatedAt": "2026-06-18T13:40:00Z",
+  "schemaVersion": 1
+}
+```
+
+### Schema — `project_memberships`
+
+`project_memberships` is a flat join collection, not a nested subcollection. This is intentional so membership queries work in both directions (`project -> users` and `user -> projects`) without introducing subcollection drift, while still supporting the Sprint 5.6 transaction requirement.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `membershipId` | string | Yes | Stable identifier duplicated from document ID, recommended format `{projectId}__{userId}` |
+| `projectId` | string | Yes | Foreign key to `projects.projectId` |
+| `userId` | string | Yes | Foreign key to `users.userId` |
+| `role` | string | Yes | User's role within that specific project |
+| `createdAt` | timestamp | Yes | Membership creation timestamp |
+| `createdBy` | string | Yes | Actor who admitted the member |
+| `schemaVersion` | number | Yes | Must be `1` |
+
+Example documents:
+
+```json
+{
+  "membershipId": "proj_website_redesign__user_alice_chen",
+  "projectId": "proj_website_redesign",
+  "userId": "user_alice_chen",
+  "role": "admin",
+  "createdAt": "2026-06-18T13:01:00Z",
+  "createdBy": "admin@thehammer.io",
+  "schemaVersion": 1
+}
+```
+
+```json
+{
+  "membershipId": "proj_website_redesign__user_ben_singh",
+  "projectId": "proj_website_redesign",
+  "userId": "user_ben_singh",
+  "role": "analyst",
+  "createdAt": "2026-06-18T13:06:00Z",
+  "createdBy": "admin@thehammer.io",
+  "schemaVersion": 1
+}
+```
+
+```json
+{
+  "membershipId": "proj_gtm_migration__user_chloe_martin",
+  "projectId": "proj_gtm_migration",
+  "userId": "user_chloe_martin",
+  "role": "instructional_designer",
+  "createdAt": "2026-06-18T13:16:00Z",
+  "createdBy": "admin@thehammer.io",
+  "schemaVersion": 1
+}
+```
+
+### Uploads compatibility note
+
+The existing `uploads` collection remains flat. Sprint 5 queries and later reporting features depend on each upload document carrying a `projectId` field so records can be filtered by project without introducing `projects/{projectId}/uploads/*` subcollections.
+
+Minimum `uploads` fields required for Sprint 5 compatibility:
+
+```json
+{
+  "uploadId": "upl_01jxzexample",
+  "projectId": "proj_website_redesign",
+  "userId": "user_alice_chen",
+  "tool": "figma",
+  "uploadedAt": "2026-06-18T14:00:00Z"
+}
+```
+
+### Transaction rule for memberships
+
+Task 5.6 requires `POST /admin/projects/:id/members` to use a Firestore transaction that writes the `project_memberships` document and increments `projects.memberCount` atomically. This schema is designed for that exact pattern and avoids any need for a `projects/{projectId}/members` subcollection.
+
+---
+
 ## Object Naming Convention
 
 ```

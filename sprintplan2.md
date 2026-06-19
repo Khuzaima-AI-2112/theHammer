@@ -81,7 +81,7 @@ Probabilities reflect **first-attempt completion** without rework. A 🔴 task i
 All Sprint 4 console items (M.1–M.4, I.1–I.4, A.1–A.2, C.1–C.4, F.1–F.3) verified ✅ before any Sprint 5 code is written.
 
 Additional pre-flight for Sprint 5:
-- [ ] Developer understands all deployments flow through GitHub Actions (No local `gcloud` access assumed)
+- [x] Developer understands all deployments flow through GitHub Actions (No local `gcloud` access assumed)
 - [ ] CRX key generated; `EXTENSION_ID` stored in Secret Manager — required before CORS is configured
 - [ ] `gcloud firestore databases describe` confirms `type: FIRESTORE_NATIVE`
 - [ ] IAP OAuth consent screen created in `hammer-prod` — **HARD BLOCKER**; without it, IAP will not inject `X-Goog-Authenticated-User-Email` and Sprint 5.13 auth guard cannot function
@@ -92,7 +92,7 @@ Additional pre-flight for Sprint 5:
 
 | # | Task | Done when | P% |
 |---|---|---|---|
-| 5.1 | Firestore data model: `projects`, `users`, `project_memberships` | Schema documented in `projectplan.md`; flat `uploads` collection confirmed (no subcollections); `schemaVersion: 1` field on all new doc types; 3 example JSON docs per collection | 🟢 96% |
+| 5.1 | Firestore data model: `projects`, `users`, `project_memberships` | Schema documented in `projectplan.md`; flat `uploads` collection confirmed (no subcollections); `schemaVersion: 1` field on all new doc types; 3 example JSON docs per collection | ✅ done |
 | 5.2 | `POST /admin/projects` | Returns `201 { projectId, name, createdAt }`; doc visible in Firestore; `schemaVersion: 1` present | 🟢 95% |
 | 5.3 | `GET /admin/projects` | Returns array; each item includes `memberCount` via Firestore `count()` aggregation query (not client-side count) | 🟢 92% |
 | 5.4 | `PATCH /admin/projects/:id` | Partial update; updated fields reflected in Firestore within 2 s; additive-only — no field renames | 🟢 93% |
@@ -100,8 +100,8 @@ Additional pre-flight for Sprint 5:
 | 5.6 | `POST /admin/projects/:id/members` | Firestore **transaction**: atomically writes `project_memberships/{userId}` doc AND increments `project.memberCount`; `role` field present | 🟡 88% |
 | 5.7 | `DELETE /admin/projects/:id/members/:userId` | Membership doc deleted; `GET /admin/projects/:id` member count decrements (transaction); verified | 🟢 95% |
 | 5.8 | `GET /admin/projects/:id/activity` | Returns last 100 `uploads` docs for project; `?tool=` filter uses composite index `(projectId ASC, tool ASC, uploadedAt DESC)` declared in `firestore.indexes.json` | 🟡 87% |
-| 5.8b | `GET /me/projects` | Resolves user identity from `X-Api-Key`; returns only projects assigned to that user | 🟢 96% |
-| 5.8c | `GET /config` | Returns global extension settings (retention days, max size, etc.) configured by admins | 🟢 95% |
+| 5.8b | `GET /me/projects` | Resolves user identity from `X-Api-Key`; returns only projects assigned to that user | ✅ done |
+| 5.8c | `GET /config` | Returns global extension settings (retention days, max size, etc.) configured by admins | ✅ done |
 
 ### Admin Portal SPA
 
@@ -122,7 +122,7 @@ Additional pre-flight for Sprint 5:
 |---|---|---|---|
 | 5.15 | Personal API Key auth | User pastes Personal API Key (generated in Portal); Backend URL defaults to `https://app.thehammer.io/api` (no typing needed); "User" dropdown is completely removed because backend identifies them via their key | 🟢 92% |
 | 5.16 | Auto-select Project & Stage | Popup dropdown reads `GET /me/projects`; if only one project is returned, automatically selects it and hides the dropdown; introduces new "Project Stage" dropdown (Beginning / During / After) saved to Firestore | 🟢 90% |
-| 5.17 | Centralized Admin Settings | Configuration settings (Cloud Run URL, retention periods, default capture sizes) are fetched from `GET /config`; Popup Settings tab is disabled or made read-only | � 94% |
+| 5.17 | Centralized Admin Settings | Configuration settings (Cloud Run URL, retention periods, default capture sizes) are fetched from `GET /config`; Popup Settings tab is disabled or made read-only | 🟢 94% |
 
 > **Mitigation for 5.15–5.17:** Extension falls back to cached `chrome.storage.local` if `app.thehammer.io` is unreachable to ensure capture isn't blocked offline.
 
