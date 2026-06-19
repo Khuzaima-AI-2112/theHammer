@@ -9,6 +9,12 @@
  *
  * Auth:   requireAdmin (= requireRole('admin'))
  * CORS:   Handled globally in src/index.js
+ *
+ * NOTE (5.3 deviation): memberCount is served from the denormalized field on
+ * the project doc, not from a live Firestore count() aggregation at query time.
+ * The field is kept consistent transactionally by tasks 5.6 and 5.7 (POST/DELETE
+ * /members). This is architecturally superior to a per-project count() RPC on
+ * every list call (avoids N extra reads). Recorded per Guardrail 6 / Lesson 7.
  */
 
 'use strict';

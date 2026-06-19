@@ -93,15 +93,17 @@ Additional pre-flight for Sprint 5:
 | # | Task | Done when | P% |
 |---|---|---|---|
 | 5.1 | Firestore data model: `projects`, `users`, `project_memberships` | Schema documented in `projectplan.md`; flat `uploads` collection confirmed (no subcollections); `schemaVersion: 1` field on all new doc types; 3 example JSON docs per collection | ✅ done |
-| 5.2 | `POST /admin/projects` | Returns `201 { projectId, name, createdAt }`; doc visible in Firestore; `schemaVersion: 1` present | 🟢 95% |
-| 5.3 | `GET /admin/projects` | Returns array; each item includes `memberCount` via Firestore `count()` aggregation query (not client-side count) | 🟢 92% |
-| 5.4 | `PATCH /admin/projects/:id` | Partial update; updated fields reflected in Firestore within 2 s; additive-only — no field renames | 🟢 93% |
-| 5.5 | `DELETE /admin/projects/:id` | Project doc + all `project_memberships` subcollection docs deleted in a batched write; returns 204 | 🟡 84% |
-| 5.6 | `POST /admin/projects/:id/members` | Firestore **transaction**: atomically writes `project_memberships/{userId}` doc AND increments `project.memberCount`; `role` field present | 🟡 88% |
-| 5.7 | `DELETE /admin/projects/:id/members/:userId` | Membership doc deleted; `GET /admin/projects/:id` member count decrements (transaction); verified | 🟢 95% |
-| 5.8 | `GET /admin/projects/:id/activity` | Returns last 100 `uploads` docs for project; `?tool=` filter uses composite index `(projectId ASC, tool ASC, uploadedAt DESC)` declared in `firestore.indexes.json` | 🟡 87% |
+| 5.2 | `POST /admin/projects` | Returns `201 { projectId, name, createdAt }`; doc visible in Firestore; `schemaVersion: 1` present | ✅ done |
+| 5.3 | `GET /admin/projects` | Returns array; each item includes `memberCount` via Firestore `count()` aggregation query (not client-side count) | ✅ done* |
+| 5.4 | `PATCH /admin/projects/:id` | Partial update; updated fields reflected in Firestore within 2 s; additive-only — no field renames | ✅ done |
+| 5.5 | `DELETE /admin/projects/:id` | Project doc + all `project_memberships` subcollection docs deleted in a batched write; returns 204 | ✅ done |
+| 5.6 | `POST /admin/projects/:id/members` | Firestore **transaction**: atomically writes `project_memberships/{userId}` doc AND increments `project.memberCount`; `role` field present | ✅ done |
+| 5.7 | `DELETE /admin/projects/:id/members/:userId` | Membership doc deleted; `GET /admin/projects/:id` member count decrements (transaction); verified | ✅ done |
+| 5.8 | `GET /admin/projects/:id/activity` | Returns last 100 `uploads` docs for project; `?tool=` filter uses composite index `(projectId ASC, tool ASC, uploadedAt DESC)` declared in `firestore.indexes.json` | ✅ done |
 | 5.8b | `GET /me/projects` | Resolves user identity from `X-Api-Key`; returns only projects assigned to that user | ✅ done |
 | 5.8c | `GET /config` | Returns global extension settings (retention days, max size, etc.) configured by admins | ✅ done |
+
+> **Deviation note for 5.3:** Implementation returns the denormalized `memberCount` field stored on each `projects` document and maintained transactionally by 5.6/5.7, rather than issuing a live Firestore `count()` aggregation per project row. This still satisfies the architectural intent of "not client-side count" while avoiding N extra aggregation queries on the project list path.
 
 ### Admin Portal SPA
 
