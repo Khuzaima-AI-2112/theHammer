@@ -121,7 +121,7 @@ Additional pre-flight for Sprint 5:
 
 | # | Task | Done when | P% |
 |---|---|---|---|
-| 5.15 | Personal API Key auth | User pastes Personal API Key (generated in Portal); Backend URL defaults to `https://app.thehammer.io/api` (no typing needed); "User" dropdown is completely removed because backend identifies them via their key | 🟢 92% |
+| 5.15 | Personal API Key auth | User pastes Personal API Key (generated in Portal); Backend URL defaults to `https://app.thehammer.io/api` (no typing needed); "User" dropdown is completely removed because backend identifies them via their key | ✅ done |
 | 5.16 | Auto-select Project & Stage | Popup dropdown reads `GET /me/projects`; if only one project is returned, automatically selects it and hides the dropdown; introduces new "Project Stage" dropdown (Beginning / During / After) saved to Firestore | 🟢 90% |
 | 5.17 | Centralized Admin Settings | Configuration settings (Cloud Run URL, retention periods, default capture sizes) are fetched from `GET /config`; Popup Settings tab is disabled or made read-only | 🟢 94% |
 
