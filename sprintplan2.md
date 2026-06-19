@@ -25,8 +25,8 @@ Sprints 5–9 extend The Hammer from a screenshot-capture tool into a **multi-ro
 | CORS | `https://app.thehammer.io` + `chrome-extension://${EXTENSION_ID}`; never `*` |
 | FFmpeg export | Cloud Run **Job**, not Service; triggered via Cloud Tasks; `--task-timeout 1800s`; 50-slide hard ceiling |
 | Monitoring alerts | 8 calibrated alerts (§6.3 of `arch_decisions.md`); 4 SLO objects in Cloud Monitoring |
-| Container registry | Artifact Registry `us-central1-docker.pkg.dev/{PROJECT_ID}/hammer/`; tagged with Git SHA; never `latest` |
-| Deploy process | GitHub Actions; WIF auth; 10% canary → 15 min monitor → 100% promote |
+| Container registry | Artifact Registry `northamerica-northeast1-docker.pkg.dev/{PROJECT_ID}/thehammer/`; tagged with `$COMMIT_SHA`; never `latest` |
+| Deploy process | **Google Cloud Build trigger on push to `main`** — defined in `cloudbuild.yaml`; pipeline is live and must not be modified; no local `gcloud run deploy`, no GitHub Actions deploy steps |
 | IaC | Terraform; `hammer-dev` + `hammer-prod` projects; all resources in `infra/` |
 
 ---
@@ -81,12 +81,11 @@ Probabilities reflect **first-attempt completion** without rework. A 🔴 task i
 All Sprint 4 console items (M.1–M.4, I.1–I.4, A.1–A.2, C.1–C.4, F.1–F.3) verified ✅ before any Sprint 5 code is written.
 
 Additional pre-flight for Sprint 5:
-- [x] Developer understands all deployments flow through GitHub Actions (No local `gcloud` access assumed)
+- [x] Developer understands all deployments flow through the **Google Cloud Build trigger** (`cloudbuild.yaml`) on push to `main` — no local `gcloud` deploys, no manual steps
 - [ ] CRX key generated; `EXTENSION_ID` stored in Secret Manager — required before CORS is configured
 - [ ] `gcloud firestore databases describe` confirms `type: FIRESTORE_NATIVE`
 - [ ] IAP OAuth consent screen created in `hammer-prod` — **HARD BLOCKER**; without it, IAP will not inject `X-Goog-Authenticated-User-Email` and Sprint 5.13 auth guard cannot function
-- [ ] Artifact Registry repo `us-central1-docker.pkg.dev/{PROJECT_ID}/hammer/` created
-- [ ] GitHub Actions WIF pool + `hammer-cicd-sa` configured (replaces `deploy.ps1` for service deploys)
+- [ ] Artifact Registry repo `northamerica-northeast1-docker.pkg.dev/{PROJECT_ID}/thehammer/` confirmed live
 
 ### Backend — Express + Firestore
 
@@ -116,7 +115,7 @@ Additional pre-flight for Sprint 5:
 | 5.12b | Global Settings panel | Admins can update global capture settings (retention, etc.) persisting to Firestore config doc | 🟢 94% |
 | 5.12c | User Profile view | Logged-in user can view assigned projects and copy their Personal API Key | 🟢 95% |
 | 5.13 | Auth guard | Portal is protected by Cloud IAP at the LB level — no unauthenticated request reaches the SPA. `hammer-api` routes read `X-Goog-Authenticated-User-Email` header for identity; missing or invalid `X-Api-Key` → 401 on all `/admin/*` API routes | 🟢 96% |
-| 5.14 | Deploy Admin Portal to Cloud Run | Image pushed to Artifact Registry tagged with Git SHA; `hammer-portal` deployed via GitHub Actions canary (10% → 15 min → 100%); `curl $PORTAL_URL/health` → `{"status":"ok"}`; accessible via `https://app.thehammer.io` after Sprint 21 LB cutover | 🟢 92% |
+| 5.14 | Deploy Admin Portal to Cloud Run | Image built and pushed to Artifact Registry tagged with `$COMMIT_SHA` by **Cloud Build trigger** on push to `main`; `hammer-portal` deployed automatically by `cloudbuild.yaml` step 8; smoke test in `cloudbuild.yaml` step 9 verifies `curl $PORTAL_URL/health` → `{"status":"ok"}`; accessible via `https://app.thehammer.io` after Sprint 21 LB cutover — **do not modify `cloudbuild.yaml` or trigger configuration** | 🟢 92% |
 
 ### Extension Migration
 
@@ -287,8 +286,8 @@ Additional pre-flight for Sprint 5:
 
 | # | Task | Done when | P% |
 |---|---|---|---|
-| 9.5 | Integration test suite | `npm run test:integration` covers: project CRUD (with transaction), user admission, capture → Firestore, report generation (mock OCR), video export (mock Cloud Tasks + FFmpeg), inactivity logging, SHA-256 key middleware; all pass in CI via GitHub Actions | 🟡 74% |
-| 9.6 | End-to-end smoke test script | `scripts/smoke-test.sh` (replaces `.ps1` — runs in GitHub Actions Linux runner) exercises all 4 roles against `https://app.thehammer.io`; exits 0; runs on push to `main` via GitHub Actions; canary gate aborts if smoke test fails | 🟡 71% |
+| 9.5 | Integration test suite | `npm run test:integration` covers: project CRUD (with transaction), user admission, capture → Firestore, report generation (mock OCR), video export (mock Cloud Tasks + FFmpeg), inactivity logging, SHA-256 key middleware; all pass in **Cloud Build CI** (`cloudbuild.yaml` test step) | 🟡 74% |
+| 9.6 | End-to-end smoke test script | `scripts/smoke-test.sh` exercises all 4 roles against `https://app.thehammer.io`; exits 0; **runs as a step in `cloudbuild.yaml` on every push to `main`** — if smoke test fails, Cloud Run keeps the previous revision at 100% traffic; do not add a separate CI trigger | 🟡 71% |
 
 ### Cloud Monitoring — Application Layer
 
@@ -311,7 +310,7 @@ The full 8-alert set from `arch_decisions.md` §6.3 is implemented here. Alerts 
 | # | Task | Done when | P% |
 |---|---|---|---|
 | 9.11 | Firestore security rules | Direct writes to `projects`, `users`, `reports`, `storyboards`, `api_keys` blocked for all non-SA principals; `api_keys.keyHash` field not readable by any client; tested with Firebase emulator; deployed via `firebase deploy --only firestore:rules` in CI | 🟡 77% |
-| 9.12 | Binary Authorization | Policy: only images signed by `hammer-cicd-sa` via Cloud Build can be deployed to Cloud Run; prevents ad-hoc `gcloud run deploy` from laptop; added to `infra/cloud_run.tf` | 🟡 75% |
+| 9.12 | Binary Authorization | Policy: only images signed by the Cloud Build service account via Cloud Build can be deployed to Cloud Run; prevents ad-hoc `gcloud run deploy` from laptop; added to `infra/cloud_run.tf` | 🟡 75% |
 | 9.13 | Key rotation automation | Cloud Scheduler (quarterly) → Cloud Function: generates new key per active user, writes to `pending_rotations`, emails new key, sets 7-day grace period; daily cleanup sets `isActive: false` on expired keys | 🟠 68% |
 | 9.14 | `runbook.md` created | Three minimum procedures documented: (1) Cloud Run revision rollback, (2) flush stuck export job, (3) revoke compromised API key; verified each procedure executes successfully in `hammer-dev` | 🟢 95% |
 | 9.15 | Admin Portal consolidated dashboard | 5 live metrics via Firestore `onSnapshot`: active projects, active users today, screenshots today, pending reports, pending exports | 🟡 76% |
