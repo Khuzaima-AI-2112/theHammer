@@ -63,25 +63,25 @@
     }
 
     .footer { margin-top: 12px; display: flex; justify-content: space-between; align-items: center; }
-    #admin-link, #settings-toggle {
+    #settings-toggle {
       font-size: 11px; color: #01696f; text-decoration: none;
       background: none; border: none; cursor: pointer; padding: 0;
     }
-    #admin-link:hover, #settings-toggle:hover { text-decoration: underline; }
+    #settings-toggle:hover { text-decoration: underline; }
     #status { margin-top: 10px; font-size: 12px; color: #555; min-height: 16px; text-align: center; }
 
-    /* First-run banner */
-    #seed-banner {
+    /* ── Not-configured banner (5.15) ── */
+    #no-key-banner {
       display: none; margin-top: 10px; padding: 8px 10px;
       background: #fff8e1; border: 1px solid #ffe082; border-radius: 6px;
       font-size: 11px; color: #6d4c00; line-height: 1.4;
     }
-    #seed-banner button {
+    #no-key-banner button {
       flex: none; display: inline; padding: 0; background: none; border: none;
       color: #01696f; font-weight: 700; font-size: 11px; cursor: pointer; text-decoration: underline;
     }
 
-    /* ── Settings panel (task 2.13 + 4.4) ── */
+    /* ── Settings panel (5.15: Personal API Key replaces user mgmt) ── */
     #settings-panel {
       display: none; margin-top: 12px; padding: 10px;
       background: #fff; border: 1px solid #ddd; border-radius: 8px;
@@ -97,6 +97,8 @@
     #settings-panel input[type="url"],
     #settings-panel input[type="password"],
     #settings-panel input[type="number"] { font-size: 13px; }
+    /* Backend URL is read-only — managed by GET /config (task 5.17) */
+    #cloud-run-url[readonly] { background: #f3f3f3; color: #888; cursor: not-allowed; }
     #url-error { display: none; font-size: 11px; color: #c0392b; margin-top: 3px; }
     #settings-save-btn {
       width: 100%; padding: 7px 0; background: #01696f; color: #fff;
@@ -133,21 +135,32 @@
 
   <!-- Capture panel -->
   <div id="capture-panel">
+    <!-- 5.16: project dropdown populated from GET /me/projects -->
     <div class="field">
       <label for="project-select">Project</label>
-      <select id="project-select"><option value="">— select —</option></select>
+      <select id="project-select"><option value="">— loading… —</option></select>
     </div>
+
+    <!-- 5.16: Project Stage dropdown (Beginning / During / After) -->
     <div class="field">
-      <label for="user-select">User</label>
-      <select id="user-select"><option value="">— select —</option></select>
+      <label for="stage-select">Stage</label>
+      <select id="stage-select">
+        <option value="">— select stage —</option>
+        <option value="beginning">Beginning</option>
+        <option value="during">During</option>
+        <option value="after">After</option>
+      </select>
     </div>
+
     <div class="field">
       <label for="tool-input">Tool / Context <span style="font-weight:400;text-transform:none">(optional)</span></label>
       <input id="tool-input" type="text" placeholder="e.g. Figma, Jira, Notion" maxlength="64" />
     </div>
 
-    <div id="seed-banner">
-      Using sample data. <button id="open-admin-banner">Open Admin</button> to add your real projects and users.
+    <!-- 5.15: shown when Personal API Key has not been set -->
+    <div id="no-key-banner">
+      Paste your <strong>Personal API Key</strong> in Settings to start capturing.
+      <button id="open-settings-banner">Open Settings</button>
     </div>
 
     <div class="row">
@@ -160,37 +173,42 @@
       <div id="progress-bar"></div>
     </div>
 
-    <!-- Settings panel (2.13 + 4.4: 5 fields, one atomic save) -->
+    <!-- Settings panel (5.15: Personal API Key; backend URL read-only default) -->
     <div id="settings-panel">
       <h2>Settings</h2>
+      <!-- 5.15: Backend URL defaults to https://app.thehammer.io/api; read-only (managed by GET /config in 5.17) -->
       <div class="field">
-        <label for="cloud-run-url">Cloud Run URL</label>
-        <input id="cloud-run-url" type="url" placeholder="https://...run.app" />
+        <label for="cloud-run-url">Backend URL</label>
+        <input id="cloud-run-url" type="url" readonly
+               value="https://app.thehammer.io/api"
+               title="Managed by admin config — not editable here." />
         <p id="url-error">URL must start with https://</p>
       </div>
+      <!-- 5.15: Personal API Key — the sole identity credential -->
       <div class="field">
-        <label for="api-key-input">API Key</label>
-        <input id="api-key-input" type="password" placeholder="••••••••" autocomplete="off" />
+        <label for="api-key-input">Personal API Key</label>
+        <input id="api-key-input" type="password" placeholder="Paste your key here" autocomplete="off" />
+      </div>
+      <!-- Retention and max-size are read from GET /config in 5.17; shown read-only here -->
+      <div class="field">
+        <label for="retention-input">Retention (days) <span style="font-weight:400;text-transform:none;font-size:10px">admin-managed</span></label>
+        <input id="retention-input" type="number" placeholder="—" min="1" max="3650" readonly />
       </div>
       <div class="field">
-        <label for="retention-input">Retention (days)</label>
-        <input id="retention-input" type="number" placeholder="90" min="1" max="3650" />
-      </div>
-      <div class="field">
-        <label for="max-size-input">Max upload size (MB)</label>
-        <input id="max-size-input" type="number" placeholder="10" min="1" max="50" />
+        <label for="max-size-input">Max upload size (MB) <span style="font-weight:400;text-transform:none;font-size:10px">admin-managed</span></label>
+        <input id="max-size-input" type="number" placeholder="—" min="1" max="50" readonly />
       </div>
       <div class="field" style="display:flex;align-items:center;gap:8px;">
         <input id="notify-input" type="checkbox" style="width:auto" />
         <label for="notify-input" style="text-transform:none;font-size:12px;margin-bottom:0">Show upload notifications</label>
       </div>
-      <button id="settings-save-btn">Save Settings</button>
+      <!-- Only the API key and notify pref are user-controlled; other fields are admin-sourced -->
+      <button id="settings-save-btn">Save Key</button>
     </div>
 
     <p id="status"></p>
 
     <div class="footer">
-      <button id="admin-link">⚙ Admin</button>
       <button id="settings-toggle">⚙ Settings</button>
     </div>
   </div>
