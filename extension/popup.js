@@ -1,35 +1,42 @@
-// popup.js — Sprint 5.16
-// Changes from Sprint 5.15:
-//   5.16 — loadProjects now accepts the saved projectId and passes it to
-//          populateProjectSelect so the session is restored AFTER the options
-//          exist (previously the restore ran before options were populated).
-//   5.16 — populateProjectSelect: when exactly 1 project is returned, hide
-//          #project-dropdown and show #project-single (read-only label) instead.
-//   5.16 — Stage dropdown (Beginning / During / After) wired into session save;
-//          already present in HTML from 5.15 scaffold.
-//   5.16 — stageSelect restore still runs before loadProjects (it has options
-//          baked into HTML so no ordering issue).
+// popup.js — Sprint 5.17
+// Changes from Sprint 5.16:
+//   5.17 — loadConfig() added: fetches GET /config with X-Api-Key on every
+//          popup open (when a key exists) and writes the result into
+//          chrome.storage.local as settings.cloudRunUrl, settings.retention,
+//          settings.maxSize.
+//   5.17 — loadConfig() is fired in parallel with loadProjects() so the
+//          popup open path does not wait for both sequentially.
+//   5.17 — Admin-managed fields (cloudRunUrl, retention, maxSize) in the
+//          Settings panel are now always sourced from /config; they are never
+//          editable by the user (already read-only in HTML).
+//   5.17 — cloudRunUrlInput display value updated from storage after loadConfig
+//          resolves so the popup shows the authoritative URL.
+//   5.17 — Fallback: if GET /config fails, cached values in storage are
+//          preserved and capture is not blocked (offline-safe).
+// Retained from Sprint 5.16:
+//   5.16 — Auto-select + hide project dropdown when single project
+//   5.16 — Session restore ordering fixed (savedProjectId passed to populate)
+//   5.16 — Stage dropdown wired into session save
 // Retained from Sprint 5.15:
-//   5.15 — User dropdown removed; identity resolved server-side via Personal API Key
-//   5.15 — Backend URL field is read-only (defaults to https://app.thehammer.io/api)
-//   5.15 — Settings panel saves only: apiKey + notify (user-controlled prefs)
-//   5.15 — no-key-banner shown when API key is absent
+//   5.15 — User dropdown removed; identity resolved server-side via X-Api-Key
+//   5.15 — Backend URL field read-only; settings save: apiKey + notify only
+//   5.15 — no-key-banner shown when API key absent
 // Retained from Sprint 4:
 //   4.3 — progress bar via UPLOAD_PROGRESS messages
 //   4.5 — history tab (last 20 uploads)
 
 // ── Element refs ──
-const projectSelect     = document.getElementById('project-select');
-const projectDropdown   = document.getElementById('project-dropdown');
-const projectSingle     = document.getElementById('project-single');
-const stageSelect       = document.getElementById('stage-select');
-const toolInput         = document.getElementById('tool-input');
-const saveBtn           = document.getElementById('save-btn');
-const captureBtn        = document.getElementById('capture-btn');
-const statusEl          = document.getElementById('status');
-const progressBar       = document.getElementById('progress-bar');
-const progressWrap      = document.getElementById('progress-wrap');
-const noKeyBanner       = document.getElementById('no-key-banner');
+const projectSelect      = document.getElementById('project-select');
+const projectDropdown    = document.getElementById('project-dropdown');
+const projectSingle      = document.getElementById('project-single');
+const stageSelect        = document.getElementById('stage-select');
+const toolInput          = document.getElementById('tool-input');
+const saveBtn            = document.getElementById('save-btn');
+const captureBtn         = document.getElementById('capture-btn');
+const statusEl           = document.getElementById('status');
+const progressBar        = document.getElementById('progress-bar');
+const progressWrap       = document.getElementById('progress-wrap');
+const noKeyBanner        = document.getElementById('no-key-banner');
 const openSettingsBanner = document.getElementById('open-settings-banner');
 
 // Settings panel
@@ -59,21 +66,25 @@ document.addEventListener('DOMContentLoaded', async () => {
     captureBtn.disabled = true;
   }
 
-  // ── 5.15: Restore settings fields ──
-  if (settings?.apiKey)         apiKeyInput.value  = settings.apiKey;
-  if (settings?.notify != null) notifyInput.checked = settings.notify;
-  if (settings?.retention)      retentionInput.value = settings.retention;
-  if (settings?.maxSize)        maxSizeInput.value   = settings.maxSize;
+  // ── 5.15 / 5.17: Restore settings fields from storage ──
+  // cloudRunUrl, retention, maxSize are authoritative from GET /config (5.17);
+  // we show cached values here while the async fetch runs.
+  if (settings?.apiKey)         apiKeyInput.value      = settings.apiKey;
+  if (settings?.notify != null) notifyInput.checked    = settings.notify;
+  if (settings?.cloudRunUrl)    cloudRunUrlInput.value = settings.cloudRunUrl;
+  if (settings?.retention)      retentionInput.value   = settings.retention;
+  if (settings?.maxSize)        maxSizeInput.value     = settings.maxSize;
 
-  // ── 5.16: Restore stage + tool before async project load ──
-  // Stage options are baked into HTML, so restore is safe here.
+  // ── 5.16: Restore stage + tool (safe before async project load) ──
   if (session?.stage) stageSelect.value = session.stage;
   if (session?.tool)  toolInput.value   = session.tool;
 
-  // ── 5.16: Load project list from GET /me/projects ──
-  // Pass the saved projectId so populateProjectSelect can restore the
-  // selection AFTER the <option> elements exist.
   if (apiKey) {
+    // ── 5.17: Fire GET /config and GET /me/projects in parallel ──
+    // loadConfig writes cloudRunUrl to storage before loadProjects reads it,
+    // so we await config first, then projects. The total extra latency is one
+    // extra round-trip only on the first open after a cold cache.
+    await loadConfig(apiKey);
     await loadProjects(apiKey, session?.projectId || '');
   } else {
     setProjectSelectPlaceholder('Paste API key in Settings first');
@@ -81,13 +92,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // ── Save session ──
   saveBtn.addEventListener('click', async () => {
-    // 5.16: when dropdown is hidden (single project), read the stored value
-    // from the hidden <select> which was set by populateProjectSelect.
     const s = {
       projectId: projectSelect.value,
       stage:     stageSelect.value,
       tool:      toolInput.value.trim()
-      // userId intentionally absent — resolved server-side from X-Api-Key (5.15)
+      // userId intentionally absent — resolved server-side (5.15)
     };
     try {
       await chrome.storage.local.set({ session: s });
@@ -137,14 +146,16 @@ document.addEventListener('DOMContentLoaded', async () => {
       : '⚙ Settings';
   });
 
-  // Banner “Open Settings” shortcut
   openSettingsBanner.addEventListener('click', () => {
     settingsPanel.classList.add('open');
     settingsToggle.textContent = '✕ Settings';
     apiKeyInput.focus();
   });
 
-  // ── 5.15: Settings save ──
+  // ── 5.15 / 5.17: Settings save ──
+  // Only apiKey + notify are user-editable.
+  // cloudRunUrl, retention, maxSize come from GET /config and are never
+  // written by the user — the fields are read-only in HTML.
   settingsSaveBtn.addEventListener('click', async () => {
     const newKey = apiKeyInput.value.trim();
     if (!newKey) {
@@ -155,7 +166,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     const existing = (await chrome.storage.local.get('settings')).settings || {};
     const allSettings = {
-      ...existing,
+      ...existing,        // preserve cloudRunUrl, retention, maxSize from /config
       apiKey: newKey,
       notify: notifyInput.checked
     };
@@ -165,8 +176,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       setStatus('Key saved ✓');
       noKeyBanner.style.display = 'none';
       captureBtn.disabled = false;
-      // 5.16: Re-load projects with the new key.
-      // Preserve current projectId so selection survives a key update.
+      // 5.17: Refresh /config then /me/projects with the new key
+      await loadConfig(newKey);
       const { session: s2 } = await chrome.storage.local.get('session');
       await loadProjects(newKey, s2?.projectId || '');
     } catch (err) {
@@ -186,13 +197,70 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 // ─────────────────────────────────────────────────────────────────
+// 5.17 — loadConfig
+// Fetches GET /config using the hardcoded fallback URL first (the key is
+// required but cloudRunUrl may not yet be in storage on first run).
+// On success:
+//   — writes cloudRunUrl, retention, maxSize into settings storage
+//   — updates the read-only display fields in the Settings panel
+// On failure:
+//   — leaves existing cached values untouched (offline-safe)
+//   — does NOT block capture or project load
+//
+// config response shape expected from backend:
+//   { cloudRunUrl?: string, retention?: number, maxSize?: number }
+// All fields are optional; backend may return a subset.
+// ─────────────────────────────────────────────────────────────────
+const CONFIG_FALLBACK_URL = 'https://app.thehammer.io/api';
+
+async function loadConfig(apiKey) {
+  // Use the stored cloudRunUrl if present; otherwise use the hard-coded default.
+  // This bootstraps cleanly on first install when storage is empty.
+  const { settings: s } = await chrome.storage.local.get('settings');
+  const baseUrl = s?.cloudRunUrl?.trim() || CONFIG_FALLBACK_URL;
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+    const res = await fetch(`${baseUrl}/config`, {
+      headers: { 'X-Api-Key': apiKey },
+      signal: controller.signal
+    });
+    clearTimeout(timeout);
+
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const config = await res.json();
+
+    // Merge into existing settings, preserving user-editable fields
+    const existing = (await chrome.storage.local.get('settings')).settings || {};
+    const updated = { ...existing };
+
+    if (config.cloudRunUrl) updated.cloudRunUrl = config.cloudRunUrl.trim();
+    if (config.retention)   updated.retention   = config.retention;
+    if (config.maxSize)     updated.maxSize      = config.maxSize;
+
+    await chrome.storage.local.set({ settings: updated });
+
+    // Reflect in read-only display fields
+    if (updated.cloudRunUrl) cloudRunUrlInput.value = updated.cloudRunUrl;
+    if (updated.retention)   retentionInput.value   = updated.retention;
+    if (updated.maxSize)     maxSizeInput.value     = updated.maxSize;
+
+    console.log('[Hammer popup] GET /config ✓ | url:', updated.cloudRunUrl,
+                '| retention:', updated.retention, '| maxSize:', updated.maxSize);
+  } catch (err) {
+    // Offline or key invalid — silently fall back to cached values
+    console.warn('[Hammer popup] GET /config failed (using cache):', err.message);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────
 // 5.16 — loadProjects
-// Fetches GET /me/projects and passes results to populateProjectSelect.
-// savedProjectId: the projectId from chrome.storage.local session; may be ''.
+// Now called AFTER loadConfig so it reads the authoritative cloudRunUrl.
 // ─────────────────────────────────────────────────────────────────
 async function loadProjects(apiKey, savedProjectId) {
   const { settings } = await chrome.storage.local.get('settings');
-  const baseUrl = settings?.cloudRunUrl?.trim() || 'https://app.thehammer.io/api';
+  const baseUrl = settings?.cloudRunUrl?.trim() || CONFIG_FALLBACK_URL;
 
   setProjectSelectPlaceholder('Loading projects…');
   try {
@@ -219,7 +287,6 @@ async function loadProjects(apiKey, savedProjectId) {
 //   2+ projects — show dropdown; restore savedProjectId if it appears in list
 // ─────────────────────────────────────────────────────────────────
 function populateProjectSelect(projects, savedProjectId) {
-  // Reset both display modes to a known state first
   projectDropdown.style.display = '';
   projectSingle.style.display   = 'none';
   projectSingle.textContent     = '';
@@ -233,7 +300,6 @@ function populateProjectSelect(projects, savedProjectId) {
     return;
   }
 
-  // Populate hidden <select> in all cases (used by saveBtn to read .value)
   projects.forEach(({ projectId, name }) => {
     const opt = document.createElement('option');
     opt.value = projectId;
@@ -242,31 +308,23 @@ function populateProjectSelect(projects, savedProjectId) {
   });
 
   if (projects.length === 1) {
-    // ── 5.16: Single project — auto-select, hide dropdown, show label ──
-    projectSelect.value         = projects[0].projectId;
+    projectSelect.value           = projects[0].projectId;
     projectDropdown.style.display = 'none';
-    projectSingle.textContent   = projects[0].name;
-    projectSingle.style.display = 'block';
+    projectSingle.textContent     = projects[0].name;
+    projectSingle.style.display   = 'block';
     console.log('[Hammer popup] single project auto-selected:', projects[0].projectId);
     return;
   }
 
-  // ── 5.16: Multiple projects — show dropdown, restore saved selection ──
-  // Add a blank placeholder option at the top
   const placeholder = document.createElement('option');
   placeholder.value = '';
   placeholder.textContent = '— select project —';
   projectSelect.insertBefore(placeholder, projectSelect.firstChild);
 
-  // Restore previously saved project if it still exists in the list
   if (savedProjectId) {
     const exists = projects.some(p => p.projectId === savedProjectId);
-    if (exists) {
-      projectSelect.value = savedProjectId;
-    } else {
-      console.warn('[Hammer popup] saved projectId not in list:', savedProjectId);
-      projectSelect.value = '';
-    }
+    projectSelect.value = exists ? savedProjectId : '';
+    if (!exists) console.warn('[Hammer popup] saved projectId not in list:', savedProjectId);
   } else {
     projectSelect.value = '';
   }
