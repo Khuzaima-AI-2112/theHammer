@@ -38,7 +38,7 @@ Sprints 5–9 extend The Hammer from a screenshot-capture tool into a **multi-ro
 | **Admin** | Creates projects, admits users, assigns roles, reviews per-project/per-tool activity, reads analyst reports |
 | **Analyst** | Generates user efficiency, project progress, GTM/GA4/Ads audit, and executive summary reports |
 | **Instructional Designer** | Sequences screenshots into annotated storyboards, exports cloud-rendered MP4 videos and PDF instruction docs |
-| **User** | Captures screenshots; session timestamps (first + last) auto-logged; prompted after 45 s of inactivity |
+| **User** | Captures screenshots; session timestamps (first + last) auto-logged; prompted after 45 s of inactivity (when enabled by admin entitlement) |
 
 ### Build Order
 
@@ -121,9 +121,9 @@ Additional pre-flight for Sprint 5:
 
 | # | Task | Done when | P% |
 |---|---|---|---|
-| 5.15 | Personal API Key auth | User pastes Personal API Key (generated in Portal); Backend URL defaults to `https://app.thehammer.io/api` (no typing needed); "User" dropdown is completely removed because backend identifies them via their key | 🟢 92% |
-| 5.16 | Auto-select Project & Stage | Popup dropdown reads `GET /me/projects`; if only one project is returned, automatically selects it and hides the dropdown; introduces new "Project Stage" dropdown (Beginning / During / After) saved to Firestore | 🟢 90% |
-| 5.17 | Centralized Admin Settings | Configuration settings (Cloud Run URL, retention periods, default capture sizes) are fetched from `GET /config`; Popup Settings tab is disabled or made read-only | 🟢 94% |
+| 5.15 | Personal API Key auth | User pastes Personal API Key (generated in Portal); Backend URL defaults to `https://app.thehammer.io/api` (no typing needed); "User" dropdown is completely removed because backend identifies them via their key | ✅ done |
+| 5.16 | Auto-select Project & Stage | Popup dropdown reads `GET /me/projects`; if only one project is returned, automatically selects it and hides the dropdown; introduces new "Project Stage" dropdown (Beginning / During / After) saved to Firestore | ✅ done |
+| 5.17 | Centralized Admin Settings | Configuration settings (Cloud Run URL, retention periods, default capture sizes) are fetched from `GET /config`; Popup Settings tab is disabled or made read-only | ✅ done |
 
 > **Mitigation for 5.15–5.17:** Extension falls back to cached `chrome.storage.local` if `app.thehammer.io` is unreachable to ensure capture isn't blocked offline.
 
@@ -131,7 +131,7 @@ Additional pre-flight for Sprint 5:
 
 ## Sprint 6 — Session Timestamps & Inactivity Tracking
 
-**Goal:** Log first/last capture timestamps per session; prompt user after 45 s of inactivity using a reliable timer strategy.
+**Goal:** Log first/last capture timestamps per session; prompt user after 45 s of inactivity using a reliable timer strategy; allow admins to enable/disable inactivity prompts per user and see "true active time" (session time minus inactive time) in reports.
 
 **Sprint P%: 🟡 74%** — Timestamp logging is high-confidence. Inactivity timer delivery depends on the findings of Sprint 6S (research spike). If 6S validates the hybrid `chrome.alarms` + `Date` approach, tasks 6.4 and 6.10 execute cleanly. If not, the fallback (1-minute alarm with UX copy adjusted to "about a minute") is the accepted done-when condition.
 
@@ -154,8 +154,10 @@ Additional pre-flight for Sprint 5:
 | 6.6 | Notification fallback when popup is closed | If popup is not open, `chrome.notifications.create` shows a system notification with "Capture" action button; suppressed on `chrome://` and non-http/https tab URLs | 🟡 76% |
 | 6.7 | Dialogue auto-dismisses after 30 s | Modal closes without action; next inactivity cycle starts fresh | 🟡 77% |
 | 6.8 | Timer resets on every capture event | All three capture triggers (keyboard, toolbar, floating button) cancel and restart the alarm; verified across all three | 🟢 91% |
-| 6.9 | Inactivity events logged to Firestore | `inactivity_events` doc: `triggeredAt`, `userId`, `projectId`, `acknowledged` (bool), `schemaVersion: 1`, `deleteAfter` (= `triggeredAt + 365 days` for TTL) | 🟡 83% |
+| 6.9 | Inactivity events logged to Firestore | `inactivity_events` doc: `triggeredAt`, `userId`, `projectId`, `acknowledged` (bool), optional `inactiveDurationMs`, `schemaVersion: 1`, `deleteAfter` (= `triggeredAt + 365 days` for TTL) | 🟡 83% |
 | 6.10 | `chrome.alarms` used (not `setTimeout`) — verified post-suspend | Service worker uses `chrome.runtime.connect` keepalive port from popup + `chrome.storage.session` for in-flight state; after device screen lock for 60 s, alarm fires on resume; `setTimeout`-only implementation fails this test | 🟡 70% |
+| 6.12 | Inactivity prompt entitlement per user | Admin can toggle "Enable inactivity reminders" per user in the Admin Portal; flag stored in Firestore (`users`/`api_keys`); extension only schedules `chrome.alarms` when this flag is true | 🟡 78% |
+| 6.13 | True active time computed | For users with inactivity enabled, backend computes `trueActiveMs = sessionDurationMs - inactiveTimeInSession` per session (gap- or event-based); exposed as aggregates for Sprint 7.5 User Efficiency report | 🟡 78% |
 
 ### Admin Portal: Inactivity Visibility
 
@@ -186,7 +188,7 @@ Additional pre-flight for Sprint 5:
 
 **Goal:** Analyst generates structured reports stored in GCS + indexed in Firestore; Admin Portal Report Viewer functional.
 
-**Sprint P%: 🟡 71%** — Firestore-aggregation reports are high-confidence. OCR reports (7.8–7.11) only enter this sprint if Sprint 6S S.4 passes; otherwise replaced by CSV-import workflow.
+**Sprint P%: 🟡 71%** — Firestore-aggregation reports are high-confidence. OCR reports (7.8–7.11) only enter this sprint if Sprint 6S S.4 passes; otherwise replaced with CSV-import workflow.
 
 > **Auth decision resolved:** `/reports/*` routes check the SHA-256 hash of the `X-Api-Key` header against the Firestore `api_keys` collection and assert `role == 'analyst'`.
 
@@ -205,7 +207,7 @@ Additional pre-flight for Sprint 5:
 
 | # | Task | Done when | P% |
 |---|---|---|---|
-| 7.5 | Report: **User Efficiency** | Captures/hour, inactivity rate (from `inactivity_events`), median session length from `session_events`; all metrics via Firestore `count()` + aggregation; GCS `hammer-reports-{PROJECT_ID}` JSON + HTML | 🟢 91% |
+| 7.5 | Report: **User Efficiency** | Captures/hour, inactivity rate (from `inactivity_events`), **true active time** (sessionDuration - inactive time), median session length from `session_events`; all metrics via Firestore `count()` + aggregation; GCS `hammer-reports-{PROJECT_ID}` JSON + HTML | 🟢 91% |
 | 7.6 | Report: **Project Progress** | Total captures (`count()`), daily trend array, active users, tools used; GCS JSON + HTML | 🟢 91% |
 | 7.7 | Report: **Executive Summary** | Before/After narrative filled from Firestore data using a Markdown template; LLM fill is an optional enhancement, not required for done-when | 🟡 78% |
 

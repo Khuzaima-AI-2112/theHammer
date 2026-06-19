@@ -1,30 +1,179 @@
 // ─────────────────────────────────────────────────────────────────
-// The Hammer — Service Worker (Sprint 4)
-// Sprint 4 additions:
+// The Hammer — Service Worker
+// Sprint 6 additions (6.1–6.3):
+//   6.1 — sessionStart logged on first capture of a session.
+//          First uploads doc gets isFirstInSession: true + sessionStart ISO.
+//          Session state stored in chrome.storage.session (survives SW restart,
+//          cleared when all Chrome windows close).
+//   6.2 — sessionEnd double-flush:
+//          (a) chrome.runtime.onSuspend  — fires before SW is killed
+//          (b) chrome.windows.onRemoved  — fires when last window closes
+//          Both write a session_events doc to POST /session-events.
+//          A flushed flag in chrome.storage.session prevents double-write.
+//   6.3 — session_events doc contains all required fields:
+//          sessionId, projectId, userId (resolved server-side), sessionStart,
+//          sessionEnd, totalCaptures, firstCapturePath, lastCapturePath,
+//          schemaVersion: 1, deleteAfter (sessionStart + 365 days ISO).
+// Sprint 5.15 changes (retained):
+//   — userId guard removed; identity resolved server-side via X-Api-Key.
+//   — capture() returns { reason: 'no_api_key' } when key absent.
+//   — uploadBlobWithSignedUrl: userId removed from POST body.
+// Sprint 4 additions (retained):
 //   4.1 — offline queue in chrome.storage.local
-//   4.2 — exponential backoff retry (max 3, 1s/2s/4s in same wake cycle)
-//   4.3 — XHR upload with onprogress → chrome.runtime.sendMessage to popup
-//   4.4 — atomic settings save (read from storage; save handled in popup.js)
-//   4.5 — history: last 20 uploads (oldest dropped at 21)
+//   4.2 — exponential backoff retry (max 3, 1s/2s/4s)
+//   4.3 — XHR upload with onprogress → chrome.runtime.sendMessage
+//   4.4 — atomic settings read
+//   4.5 — history: last 20 uploads
 // ─────────────────────────────────────────────────────────────────
 
 // CAPTURE response contract (authoritative):
 // { ok: boolean, path?: string, reason?: string, error?: string }
+// reason values: 'blocked' | 'no_api_key' | 'no_project'
 
 const ICON_DATA_URI =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ' +
   'AAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
 
-const DEFAULT_CLOUD_RUN_URL = '';
+const FALLBACK_API_BASE = 'https://app.thehammer.io/api';
+
+// ─────────────────────────────────────────────────────────────────
+// 6.1 / 6.2 / 6.3 — Session state helpers
+//
+// chrome.storage.session shape:
+// {
+//   activeSession: {
+//     sessionId:        string   (crypto.randomUUID())
+//     projectId:        string
+//     sessionStart:     ISO string
+//     totalCaptures:    number
+//     firstCapturePath: string
+//     lastCapturePath:  string
+//     flushed:          boolean  (true once sessionEnd has been written)
+//   } | null
+// }
+//
+// chrome.storage.session is cleared automatically when all Chrome windows close,
+// which is exactly when a session ends organically.
+// ─────────────────────────────────────────────────────────────────
+async function sessionGet() {
+  const { activeSession = null } = await chrome.storage.session.get('activeSession');
+  return activeSession;
+}
+
+async function sessionSet(s) {
+  await chrome.storage.session.set({ activeSession: s });
+}
+
+async function sessionClear() {
+  await chrome.storage.session.remove('activeSession');
+}
+
+// 6.1: Called at the start of every successful capture.
+// Returns { isFirstInSession, sessionStart } for inclusion in the upload body.
+async function sessionOnCapture(projectId, capturePath) {
+  let s = await sessionGet();
+  const now = new Date().toISOString();
+
+  if (!s || s.projectId !== projectId || s.flushed) {
+    // Start a new session
+    s = {
+      sessionId:        crypto.randomUUID(),
+      projectId,
+      sessionStart:     now,
+      totalCaptures:    1,
+      firstCapturePath: capturePath,
+      lastCapturePath:  capturePath,
+      flushed:          false
+    };
+    await sessionSet(s);
+    console.log('[Hammer SW] new session started | id:', s.sessionId);
+    return { isFirstInSession: true, sessionStart: s.sessionStart, sessionId: s.sessionId };
+  }
+
+  // Continue existing session
+  s.totalCaptures++;
+  s.lastCapturePath = capturePath;
+  await sessionSet(s);
+  return { isFirstInSession: false, sessionStart: s.sessionStart, sessionId: s.sessionId };
+}
+
+// 6.2 / 6.3: Write session_events doc to backend. Idempotent via flushed flag.
+async function sessionFlush(reason) {
+  const s = await sessionGet();
+  if (!s || s.flushed) return;
+
+  const { settings } = await chrome.storage.local.get('settings');
+  const cloudRunUrl = settings?.cloudRunUrl?.trim() || FALLBACK_API_BASE;
+  const apiKey      = settings?.apiKey?.trim() || '';
+  if (!apiKey) return;
+
+  const now = new Date().toISOString();
+
+  // 6.3: deleteAfter = sessionStart + 365 days
+  const deleteAfter = new Date(
+    new Date(s.sessionStart).getTime() + 365 * 24 * 60 * 60 * 1000
+  ).toISOString();
+
+  const body = {
+    sessionId:        s.sessionId,
+    projectId:        s.projectId,
+    // userId resolved server-side from X-Api-Key (5.15)
+    sessionStart:     s.sessionStart,
+    sessionEnd:       now,
+    totalCaptures:    s.totalCaptures,
+    firstCapturePath: s.firstCapturePath,
+    lastCapturePath:  s.lastCapturePath,
+    schemaVersion:    1,
+    deleteAfter,
+    flushReason:      reason   // 'suspend' | 'window_removed' — diagnostic only
+  };
+
+  // Mark flushed BEFORE the network call to prevent a race between the two
+  // flush triggers both attempting to write simultaneously.
+  s.flushed = true;
+  await sessionSet(s);
+
+  try {
+    const res = await fetch(`${cloudRunUrl}/session-events`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Api-Key': apiKey },
+      body:    JSON.stringify(body),
+      // keepalive: true allows the fetch to outlive the SW suspension window
+      keepalive: true
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    console.log('[Hammer SW] session_events written ✓ | id:', s.sessionId, '| reason:', reason);
+  } catch (err) {
+    console.error('[Hammer SW] session_events write failed:', err.message,
+                  '| session:', s.sessionId);
+    // Un-mark flushed so the other flush trigger can retry
+    s.flushed = false;
+    await sessionSet(s);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────
+// 6.2 — Double-flush listeners
+// ─────────────────────────────────────────────────────────────────
+
+// (a) SW about to be suspended
+chrome.runtime.onSuspend.addListener(() => {
+  console.log('[Hammer SW] onSuspend — flushing session');
+  sessionFlush('suspend');
+});
+
+// (b) A Chrome window was closed; flush if no windows remain
+chrome.windows.onRemoved.addListener(async () => {
+  const windows = await chrome.windows.getAll();
+  if (windows.length === 0) {
+    console.log('[Hammer SW] last window closed — flushing session');
+    await sessionFlush('window_removed');
+    await sessionClear();
+  }
+});
 
 // ─────────────────────────────────────────────────────────────────
 // 4.1 — Offline queue helpers
-// Storage shape: { queue: [...], failed: [...] }
-//   queue   — pending items to upload on next wake
-//   failed  — items that exhausted all retries
-// Each item: { blob (base64 string), session, tabUrl, ts }
-// Blob stored as base64 string because chrome.storage does not support
-// Blob objects directly.
 // ─────────────────────────────────────────────────────────────────
 async function queueGet() {
   const { queue = [], failed = [] } = await chrome.storage.local.get(['queue', 'failed']);
@@ -43,9 +192,7 @@ async function queueAdd(blobBase64, session, tabUrl) {
 }
 
 // ─────────────────────────────────────────────────────────────────
-// 4.5 — History helpers
-// Storage: { history: [ { path, size, ts, projectId, userId, tool }, ... ] }
-// Max 20 entries; oldest dropped when 21st is added.
+// 4.5 — History helpers (max 20 entries)
 // ─────────────────────────────────────────────────────────────────
 async function historyAppend(entry) {
   const { history = [] } = await chrome.storage.local.get('history');
@@ -56,34 +203,22 @@ async function historyAppend(entry) {
 
 // ─────────────────────────────────────────────────────────────────
 // 4.2 — Retry with exponential backoff
-// Short delays (1s / 2s / 4s) run inside a single wake cycle using
-// a Promise-based sleep — safe because the worker stays alive while
-// awaiting the upload Promises that keep it awake.
-// This is distinct from using setTimeout for work AFTER the worker
-// might sleep: here the await chain keeps the worker alive throughout.
-// Only a final long retry (not used here; max 3 attempts at 1/2/4s)
-// would need chrome.alarms.
 // ─────────────────────────────────────────────────────────────────
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-const RETRY_DELAYS_MS = [1000, 2000, 4000]; // attempts 1, 2, 3
+const RETRY_DELAYS_MS = [1000, 2000, 4000];
 
-// Attempt uploadFn up to 3 times with 1s/2s/4s delays.
-// Returns the result of the first success, or throws after all retries exhausted.
 async function withRetry(uploadFn) {
   let lastErr;
   for (let attempt = 0; attempt < RETRY_DELAYS_MS.length; attempt++) {
     try {
-      const result = await uploadFn();
-      console.log(`[Hammer SW] upload succeeded on attempt ${attempt + 1}`);
-      return result;
+      return await uploadFn();
     } catch (err) {
       lastErr = err;
       console.warn(`[Hammer SW] attempt ${attempt + 1} failed:`, err.message);
       if (attempt < RETRY_DELAYS_MS.length - 1) {
-        console.log(`[Hammer SW] retrying in ${RETRY_DELAYS_MS[attempt]}ms…`);
         await sleep(RETRY_DELAYS_MS[attempt]);
       }
     }
@@ -93,9 +228,6 @@ async function withRetry(uploadFn) {
 
 // ─────────────────────────────────────────────────────────────────
 // 4.3 — XHR PUT with upload progress
-// fetch() has no upload progress in service workers.
-// XMLHttpRequest.upload.onprogress works and is wrapped here in a Promise.
-// Progress is posted to the popup via chrome.runtime.sendMessage.
 // ─────────────────────────────────────────────────────────────────
 function xhrPut(url, blob) {
   return new Promise((resolve, reject) => {
@@ -107,9 +239,7 @@ function xhrPut(url, blob) {
     xhr.upload.onprogress = (evt) => {
       if (!evt.lengthComputable) return;
       const pct = Math.round((evt.loaded / evt.total) * 100);
-      // Post progress to popup — popup.js listens for UPLOAD_PROGRESS messages
       chrome.runtime.sendMessage({ type: 'UPLOAD_PROGRESS', percent: pct }).catch(() => {});
-      console.log(`[Hammer SW] upload progress: ${pct}%`);
     };
 
     xhr.onload = () => {
@@ -123,23 +253,21 @@ function xhrPut(url, blob) {
 
     xhr.onerror   = () => reject(new Error('XHR network error'));
     xhr.ontimeout = () => reject(new Error('XHR PUT timed out after 30s'));
-
     xhr.send(blob);
   });
 }
 
 // ─────────────────────────────────────────────────────────────────
-// Drain offline queue on every service worker startup.
-// The worker wakes on browser start — this is the natural drain trigger.
+// Drain offline queue on every SW startup
 // ─────────────────────────────────────────────────────────────────
 (async () => {
   const { queue, failed } = await queueGet();
   if (queue.length === 0) return;
 
   const { settings } = await chrome.storage.local.get('settings');
-  const cloudRunUrl = settings?.cloudRunUrl?.trim() || DEFAULT_CLOUD_RUN_URL;
+  const cloudRunUrl = settings?.cloudRunUrl?.trim() || FALLBACK_API_BASE;
   const apiKey      = settings?.apiKey?.trim() || '';
-  if (!cloudRunUrl || !apiKey) return; // can't drain without creds
+  if (!cloudRunUrl || !apiKey) return;
 
   console.log('[Hammer SW] draining offline queue:', queue.length, 'item(s)');
 
@@ -148,7 +276,6 @@ function xhrPut(url, blob) {
 
   for (const item of queue) {
     try {
-      // Rebuild Blob from base64 string
       const binaryStr = atob(item.blobBase64);
       const bytes = new Uint8Array(binaryStr.length);
       for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
@@ -163,7 +290,6 @@ function xhrPut(url, blob) {
         size:      blob.size,
         ts:        Date.now(),
         projectId: item.session.projectId,
-        userId:    item.session.userId,
         tool:      item.session.tool ?? ''
       });
       console.log('[Hammer SW] drained queued item ✓ | path:', result.path);
@@ -174,7 +300,6 @@ function xhrPut(url, blob) {
   }
 
   await queueSave(remaining, newFailed);
-  console.log('[Hammer SW] queue drain complete. remaining:', remaining.length, 'failed:', newFailed.length);
 })();
 
 // ── Install: inject content.js into already-open tabs ──
@@ -182,21 +307,15 @@ chrome.runtime.onInstalled.addListener(async () => {
   const tabs = await chrome.tabs.query({ url: ['http://*/*', 'https://*/*'] });
   for (const tab of tabs) {
     try {
-      await chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        files: ['content.js']
-      });
-    } catch (e) {
-      // Restricted page — ignore silently
-    }
+      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['content.js'] });
+    } catch (e) { /* restricted page — ignore */ }
   }
-  console.log('[Hammer SW] installed; injected content.js into', tabs.length, 'open tabs');
+  console.log('[Hammer SW] installed; injected content.js into', tabs.length, 'tabs');
 });
 
 // ── Keyboard shortcut ──
 chrome.commands.onCommand.addListener(async (command) => {
   if (command !== 'capture-screenshot') return;
-  console.log('[Hammer SW] command fired:', command);
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   await capture(tab);
 });
@@ -209,7 +328,6 @@ chrome.runtime.onConnect.addListener((port) => {
   _openPorts.set(port.sender?.tab?.id ?? 'unknown', port);
   port.onDisconnect.addListener(() => {
     _openPorts.delete(port.sender?.tab?.id ?? 'unknown');
-    console.log('[Hammer SW] capture-port disconnected');
   });
 });
 
@@ -225,11 +343,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   tabPromise
     .then((tab) => capture(tab))
     .then((result) => {
-      if (result === null) {
-        sendResponse({ ok: false, reason: 'blocked' });
-      } else {
-        sendResponse({ ok: true, path: result.path });
-      }
+      if (result === null)          sendResponse({ ok: false, reason: 'blocked' });
+      else if (result.reason)       sendResponse({ ok: false, reason: result.reason });
+      else                          sendResponse({ ok: true, path: result.path });
     })
     .catch((err) => sendResponse({ ok: false, error: err.message }));
 
@@ -238,7 +354,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 // ─────────────────────────────────────────────────────────────────
 // capture(tab) — shared by all three triggers
-// Returns { path } on success, or null if blocked.
+// 6.1: calls sessionOnCapture() after a successful upload to log
+//      sessionStart / isFirstInSession on the uploads doc via the upload body.
 // ─────────────────────────────────────────────────────────────────
 async function capture(tab) {
   if (!tab || !tab.url ||
@@ -250,27 +367,19 @@ async function capture(tab) {
     return null;
   }
 
-  const { session } = await chrome.storage.local.get('session');
-  if (!session || !session.projectId || !session.userId) {
-    await showNotification('Project / User not set',
-      'Open the popup and save a Project and User before capturing.');
-    return null;
-  }
-
-  // 4.4 — read all settings atomically from the single 'settings' key
   const { settings } = await chrome.storage.local.get('settings');
-  const cloudRunUrl = settings?.cloudRunUrl?.trim() || DEFAULT_CLOUD_RUN_URL;
+  const cloudRunUrl = settings?.cloudRunUrl?.trim() || FALLBACK_API_BASE;
   const apiKey      = settings?.apiKey?.trim() || '';
 
-  if (!cloudRunUrl) {
-    await showNotification('Cloud Run URL not set',
-      'Open popup ⚙ Settings and enter your Cloud Run URL before capturing.');
-    return null;
+  if (!apiKey) {
+    console.warn('[Hammer SW] capture blocked: no API key');
+    return { reason: 'no_api_key' };
   }
 
-  if (!apiKey) {
-    await showNotification('API key not set',
-      'Open popup ⚙ Settings and enter your API key before capturing.');
+  const { session } = await chrome.storage.local.get('session');
+  if (!session || !session.projectId) {
+    await showNotification('Project not set',
+      'Open the popup, select a Project and press Save before capturing.');
     return null;
   }
 
@@ -283,7 +392,6 @@ async function capture(tab) {
   }
 
   if (!dataUrl.startsWith('data:image/png;base64,') || dataUrl.length < 10000) {
-    console.error('[Hammer SW] unexpected dataUrl:', dataUrl.slice(0, 80));
     await showNotification('Capture failed', 'Screenshot data looks invalid. Try again.');
     return null;
   }
@@ -294,47 +402,57 @@ async function capture(tab) {
     return null;
   }
 
-  console.log('[Hammer SW] captured PNG ✓ | size:', blob.size,
-    '| project:', session.projectId, '| user:', session.userId);
+  console.log('[Hammer SW] captured PNG ✓ | size:', blob.size, '| project:', session.projectId);
 
-  // ── Try upload with retry (4.2). On total failure, queue for later (4.1). ──
+  // 6.1: Determine session context BEFORE upload so we can include
+  //      isFirstInSession + sessionStart in the upload-url request body.
+  //      We use a temporary path placeholder; we'll update lastCapturePath
+  //      after we know the real GCS path.
+  const prePath = `pending/${session.projectId}/${Date.now()}`;
+  const sessionCtx = await sessionOnCapture(session.projectId, prePath);
+
   let uploadResult;
   try {
     uploadResult = await withRetry(() =>
-      uploadBlobWithSignedUrl(blob, session, tab.url, cloudRunUrl, apiKey)
+      uploadBlobWithSignedUrl(blob, session, tab.url, cloudRunUrl, apiKey, sessionCtx)
     );
   } catch (uploadErr) {
-    console.error('[Hammer SW] all retries failed, queuing for later:', uploadErr.message);
-    // 4.1 — store in offline queue as base64
+    console.error('[Hammer SW] all retries failed, queuing:', uploadErr.message);
     const base64 = await blobToBase64(blob);
     await queueAdd(base64, session, tab.url);
     await showNotification('Upload queued', 'No connection — will retry when online.');
     return null;
   }
 
-  // 4.5 — append to history
+  // Update session state with the real GCS path
+  const s = await sessionGet();
+  if (s && !s.flushed) {
+    if (s.firstCapturePath === prePath) s.firstCapturePath = uploadResult.path;
+    s.lastCapturePath = uploadResult.path;
+    await sessionSet(s);
+  }
+
   await historyAppend({
     path:      uploadResult.path,
     size:      blob.size,
     ts:        Date.now(),
     projectId: session.projectId,
-    userId:    session.userId,
     tool:      session.tool ?? ''
   });
 
   await showNotification('Screenshot uploaded ✓', uploadResult.path || 'Saved to GCS');
-  console.log('[Hammer SW] upload ✓ | path:', uploadResult.path);
+  console.log('[Hammer SW] upload ✓ | path:', uploadResult.path,
+              '| isFirst:', sessionCtx.isFirstInSession);
   return uploadResult;
 }
 
 // ─────────────────────────────────────────────────────────────────
 // uploadBlobWithSignedUrl
-// Primary: POST /upload-url → XHR PUT to GCS (with onprogress — task 4.3)
-// Fallback: POST /capture via proxy
-// Returns { path } on success, throws on failure.
+// 6.1: sessionCtx { isFirstInSession, sessionStart, sessionId } added to body
+//      so the backend can stamp the uploads doc correctly.
+// 5.15: userId removed from body.
 // ─────────────────────────────────────────────────────────────────
-async function uploadBlobWithSignedUrl(blob, session, tabUrl, cloudRunUrl, apiKey) {
-  // Step 1: get signed URL from Cloud Run
+async function uploadBlobWithSignedUrl(blob, session, tabUrl, cloudRunUrl, apiKey, sessionCtx = {}) {
   const controller1 = new AbortController();
   const t1 = setTimeout(() => controller1.abort(), 15_000);
   let signedUrlResponse;
@@ -343,9 +461,13 @@ async function uploadBlobWithSignedUrl(blob, session, tabUrl, cloudRunUrl, apiKe
       method:  'POST',
       headers: { 'Content-Type': 'application/json', 'X-Api-Key': apiKey },
       body:    JSON.stringify({
-        project: session.projectId,
-        tool:    session.tool ?? '',
-        name:    session.userId
+        project:           session.projectId,
+        tool:              session.tool  ?? '',
+        stage:             session.stage ?? '',
+        // 6.1 — session fields for backend to stamp on the uploads doc
+        isFirstInSession:  sessionCtx.isFirstInSession  ?? false,
+        sessionStart:      sessionCtx.sessionStart       ?? null,
+        sessionId:         sessionCtx.sessionId          ?? null
       }),
       signal: controller1.signal
     });
@@ -357,39 +479,38 @@ async function uploadBlobWithSignedUrl(blob, session, tabUrl, cloudRunUrl, apiKe
     signedUrlResponse = await res.json();
   } catch (err) {
     clearTimeout(t1);
-    // Fall back to proxy
     console.warn('[Hammer SW] /upload-url failed, using proxy:', err.message);
-    return uploadViaProxy(blob, session, tabUrl, cloudRunUrl, apiKey);
+    return uploadViaProxy(blob, session, tabUrl, cloudRunUrl, apiKey, sessionCtx);
   }
 
-  console.log('[Hammer SW] signed URL received | path:', signedUrlResponse.path);
-
-  // Step 2: XHR PUT directly to GCS (task 4.3 — onprogress)
   try {
     await xhrPut(signedUrlResponse.signedUrl, blob);
   } catch (err) {
-    // Fall back to proxy
     console.warn('[Hammer SW] XHR PUT failed, using proxy:', err.message);
-    return uploadViaProxy(blob, session, tabUrl, cloudRunUrl, apiKey);
+    return uploadViaProxy(blob, session, tabUrl, cloudRunUrl, apiKey, sessionCtx);
   }
 
   return { path: signedUrlResponse.path };
 }
 
 // ─────────────────────────────────────────────────────────────────
-// uploadViaProxy — Sprint 2 /capture path
-// Returns { path, size } on success, throws on failure.
+// uploadViaProxy — /capture fallback path
+// 6.1: sessionCtx fields added to FormData.
+// 5.15: userId removed.
 // ─────────────────────────────────────────────────────────────────
-async function uploadViaProxy(blob, session, tabUrl, cloudRunUrl, apiKey) {
+async function uploadViaProxy(blob, session, tabUrl, cloudRunUrl, apiKey, sessionCtx = {}) {
   const controller = new AbortController();
   const timeoutId  = setTimeout(() => controller.abort(), 15_000);
 
   const formData = new FormData();
-  formData.append('file',      blob, 'screenshot.png');
-  formData.append('projectId', session.projectId);
-  formData.append('userId',    session.userId);
-  formData.append('tool',      session.tool ?? '');
-  formData.append('tabUrl',    tabUrl ?? '');
+  formData.append('file',               blob, 'screenshot.png');
+  formData.append('projectId',          session.projectId);
+  formData.append('tool',               session.tool  ?? '');
+  formData.append('stage',              session.stage ?? '');
+  formData.append('tabUrl',             tabUrl ?? '');
+  formData.append('isFirstInSession',   String(sessionCtx.isFirstInSession ?? false));
+  formData.append('sessionStart',       sessionCtx.sessionStart ?? '');
+  formData.append('sessionId',          sessionCtx.sessionId    ?? '');
 
   try {
     const response = await fetch(`${cloudRunUrl}/capture`, {
@@ -399,25 +520,18 @@ async function uploadViaProxy(blob, session, tabUrl, cloudRunUrl, apiKey) {
       signal:  controller.signal
     });
     clearTimeout(timeoutId);
-
     if (!response.ok) {
       const text = await response.text().catch(() => response.status.toString());
       throw new Error(`/capture HTTP ${response.status} — ${text.slice(0, 200)}`);
     }
-
-    const result = await response.json();
-    console.log('[Hammer SW] proxy upload ✓ | path:', result.path);
-    return result;
-
+    return await response.json();
   } catch (err) {
     clearTimeout(timeoutId);
-    throw err; // let withRetry handle it
+    throw err;
   }
 }
 
-// ─────────────────────────────────────────────────────────────────
-// Helpers
-// ─────────────────────────────────────────────────────────────────
+// ── Helpers ──
 function blobToBase64(blob) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -430,10 +544,7 @@ function blobToBase64(blob) {
 function showNotification(title, message) {
   return new Promise((resolve) => {
     chrome.notifications.create('', {
-      type:    'basic',
-      iconUrl: ICON_DATA_URI,
-      title,
-      message
+      type: 'basic', iconUrl: ICON_DATA_URI, title, message
     }, resolve);
   });
 }

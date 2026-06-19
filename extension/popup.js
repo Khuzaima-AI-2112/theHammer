@@ -1,82 +1,102 @@
-// popup.js — Sprint 4
-// 4.3: progress bar via UPLOAD_PROGRESS messages from service worker
-// 4.4: all 5 settings fields saved atomically as { settings: {...} }
-// 4.5: history tab showing last 20 uploads
-
-const SEED_CONFIG = {
-  projects: [
-    { id: 'proj-seed-1', name: 'Sample Project A' },
-    { id: 'proj-seed-2', name: 'Sample Project B' }
-  ],
-  users: [
-    { id: 'user-seed-1', name: 'Alice' },
-    { id: 'user-seed-2', name: 'Bob' }
-  ]
-};
+// popup.js — Sprint 5.17
+// Changes from Sprint 5.16:
+//   5.17 — loadConfig() added: fetches GET /config with X-Api-Key on every
+//          popup open (when a key exists) and writes the result into
+//          chrome.storage.local as settings.cloudRunUrl, settings.retention,
+//          settings.maxSize.
+//   5.17 — loadConfig() is fired in parallel with loadProjects() so the
+//          popup open path does not wait for both sequentially.
+//   5.17 — Admin-managed fields (cloudRunUrl, retention, maxSize) in the
+//          Settings panel are now always sourced from /config; they are never
+//          editable by the user (already read-only in HTML).
+//   5.17 — cloudRunUrlInput display value updated from storage after loadConfig
+//          resolves so the popup shows the authoritative URL.
+//   5.17 — Fallback: if GET /config fails, cached values in storage are
+//          preserved and capture is not blocked (offline-safe).
+// Retained from Sprint 5.16:
+//   5.16 — Auto-select + hide project dropdown when single project
+//   5.16 — Session restore ordering fixed (savedProjectId passed to populate)
+//   5.16 — Stage dropdown wired into session save
+// Retained from Sprint 5.15:
+//   5.15 — User dropdown removed; identity resolved server-side via X-Api-Key
+//   5.15 — Backend URL field read-only; settings save: apiKey + notify only
+//   5.15 — no-key-banner shown when API key absent
+// Retained from Sprint 4:
+//   4.3 — progress bar via UPLOAD_PROGRESS messages
+//   4.5 — history tab (last 20 uploads)
 
 // ── Element refs ──
-const projectSelect    = document.getElementById('project-select');
-const userSelect       = document.getElementById('user-select');
-const toolInput        = document.getElementById('tool-input');
-const saveBtn          = document.getElementById('save-btn');
-const captureBtn       = document.getElementById('capture-btn');
-const adminLink        = document.getElementById('admin-link');
-const openAdminBanner  = document.getElementById('open-admin-banner');
-const seedBanner       = document.getElementById('seed-banner');
-const statusEl         = document.getElementById('status');
-const progressBar      = document.getElementById('progress-bar');
-const progressWrap     = document.getElementById('progress-wrap');
+const projectSelect      = document.getElementById('project-select');
+const projectDropdown    = document.getElementById('project-dropdown');
+const projectSingle      = document.getElementById('project-single');
+const stageSelect        = document.getElementById('stage-select');
+const toolInput          = document.getElementById('tool-input');
+const saveBtn            = document.getElementById('save-btn');
+const captureBtn         = document.getElementById('capture-btn');
+const statusEl           = document.getElementById('status');
+const progressBar        = document.getElementById('progress-bar');
+const progressWrap       = document.getElementById('progress-wrap');
+const noKeyBanner        = document.getElementById('no-key-banner');
+const openSettingsBanner = document.getElementById('open-settings-banner');
 
-// Settings panel (task 2.13 + 4.4)
+// Settings panel
 const settingsToggle   = document.getElementById('settings-toggle');
 const settingsPanel    = document.getElementById('settings-panel');
-const cloudRunUrlInput = document.getElementById('cloud-run-url');
+const cloudRunUrlInput = document.getElementById('cloud-run-url');  // read-only
 const apiKeyInput      = document.getElementById('api-key-input');
-const retentionInput   = document.getElementById('retention-input');
-const maxSizeInput     = document.getElementById('max-size-input');
+const retentionInput   = document.getElementById('retention-input'); // read-only (admin-managed)
+const maxSizeInput     = document.getElementById('max-size-input');  // read-only (admin-managed)
 const notifyInput      = document.getElementById('notify-input');
-const urlError         = document.getElementById('url-error');
 const settingsSaveBtn  = document.getElementById('settings-save-btn');
 
-// History tab (task 4.5)
-const tabCapture       = document.getElementById('tab-capture');
-const tabHistory       = document.getElementById('tab-history');
-const capturePanel     = document.getElementById('capture-panel');
-const historyPanel     = document.getElementById('history-panel');
-const historyList      = document.getElementById('history-list');
+// History tab (4.5)
+const tabCapture   = document.getElementById('tab-capture');
+const tabHistory   = document.getElementById('tab-history');
+const capturePanel = document.getElementById('capture-panel');
+const historyPanel = document.getElementById('history-panel');
+const historyList  = document.getElementById('history-list');
 
 document.addEventListener('DOMContentLoaded', async () => {
-  let { config, session, settings } = await chrome.storage.local.get(['config', 'session', 'settings']);
+  const { session, settings } = await chrome.storage.local.get(['session', 'settings']);
 
-  if (!config) {
-    config = SEED_CONFIG;
-    seedBanner.style.display = 'block';
+  // ── 5.15: Show no-key-banner if API key has never been set ──
+  const apiKey = settings?.apiKey?.trim() || '';
+  if (!apiKey) {
+    noKeyBanner.style.display = 'block';
+    captureBtn.disabled = true;
   }
 
-  populateSelect(projectSelect, config.projects);
-  populateSelect(userSelect, config.users);
+  // ── 5.15 / 5.17: Restore settings fields from storage ──
+  // cloudRunUrl, retention, maxSize are authoritative from GET /config (5.17);
+  // we show cached values here while the async fetch runs.
+  if (settings?.apiKey)         apiKeyInput.value      = settings.apiKey;
+  if (settings?.notify != null) notifyInput.checked    = settings.notify;
+  if (settings?.cloudRunUrl)    cloudRunUrlInput.value = settings.cloudRunUrl;
+  if (settings?.retention)      retentionInput.value   = settings.retention;
+  if (settings?.maxSize)        maxSizeInput.value     = settings.maxSize;
 
-  if (session) {
-    if (session.projectId) projectSelect.value = session.projectId;
-    if (session.userId)    userSelect.value    = session.userId;
-    if (session.tool)      toolInput.value     = session.tool;
-  }
+  // ── 5.16: Restore stage + tool (safe before async project load) ──
+  if (session?.stage) stageSelect.value = session.stage;
+  if (session?.tool)  toolInput.value   = session.tool;
 
-  // 4.4 — restore all 5 settings fields
-  if (settings) {
-    if (settings.cloudRunUrl) cloudRunUrlInput.value = settings.cloudRunUrl;
-    if (settings.apiKey)      apiKeyInput.value      = settings.apiKey;
-    if (settings.retention)   retentionInput.value   = settings.retention;
-    if (settings.maxSize)     maxSizeInput.value     = settings.maxSize;
-    if (settings.notify != null) notifyInput.checked = settings.notify;
+  if (apiKey) {
+    // ── 5.17: Fire GET /config and GET /me/projects in parallel ──
+    // loadConfig writes cloudRunUrl to storage before loadProjects reads it,
+    // so we await config first, then projects. The total extra latency is one
+    // extra round-trip only on the first open after a cold cache.
+    await loadConfig(apiKey);
+    await loadProjects(apiKey, session?.projectId || '');
+  } else {
+    setProjectSelectPlaceholder('Paste API key in Settings first');
   }
 
   // ── Save session ──
   saveBtn.addEventListener('click', async () => {
     const s = {
       projectId: projectSelect.value,
-      userId:    userSelect.value,
+      stage:     stageSelect.value,
       tool:      toolInput.value.trim()
+      // userId intentionally absent — resolved server-side (5.15)
     };
     try {
       await chrome.storage.local.set({ session: s });
@@ -101,26 +121,22 @@ document.addEventListener('DOMContentLoaded', async () => {
         setStatus('Uploaded ✓');
         refreshHistory();
       } else if (response?.reason === 'blocked') {
-        setStatus('Blocked — set Project & User first.');
+        setStatus('Blocked — set Project & save first.');
+      } else if (response?.reason === 'no_api_key') {
+        setStatus('Paste your Personal API Key in Settings.');
+        noKeyBanner.style.display = 'block';
       } else {
         setStatus('Failed: ' + (response?.error ?? 'unknown'));
       }
     });
   });
 
-  // ── 4.3 — listen for upload progress from service worker ──
+  // ── 4.3: listen for upload progress from service worker ──
   chrome.runtime.onMessage.addListener((message) => {
     if (message.type === 'UPLOAD_PROGRESS') {
       showProgress(message.percent);
     }
   });
-
-  // ── Admin link ──
-  function openAdmin() {
-    chrome.tabs.create({ url: chrome.runtime.getURL('admin.html') });
-  }
-  adminLink.addEventListener('click', openAdmin);
-  openAdminBanner.addEventListener('click', openAdmin);
 
   // ── Settings toggle ──
   settingsToggle.addEventListener('click', () => {
@@ -130,48 +146,197 @@ document.addEventListener('DOMContentLoaded', async () => {
       : '⚙ Settings';
   });
 
-  // ── 4.4 — Settings save: all 5 fields in ONE atomic write ──
+  openSettingsBanner.addEventListener('click', () => {
+    settingsPanel.classList.add('open');
+    settingsToggle.textContent = '✕ Settings';
+    apiKeyInput.focus();
+  });
+
+  // ── 5.15 / 5.17: Settings save ──
+  // Only apiKey + notify are user-editable.
+  // cloudRunUrl, retention, maxSize come from GET /config and are never
+  // written by the user — the fields are read-only in HTML.
   settingsSaveBtn.addEventListener('click', async () => {
-    const rawUrl = cloudRunUrlInput.value.trim();
-    if (rawUrl && !rawUrl.startsWith('https://')) {
-      urlError.style.display = 'block';
-      cloudRunUrlInput.focus();
+    const newKey = apiKeyInput.value.trim();
+    if (!newKey) {
+      setStatus('API key cannot be empty.');
+      apiKeyInput.focus();
       return;
     }
-    urlError.style.display = 'none';
 
+    const existing = (await chrome.storage.local.get('settings')).settings || {};
     const allSettings = {
-      cloudRunUrl: rawUrl,
-      apiKey:      apiKeyInput.value.trim(),
-      retention:   retentionInput.value.trim(),
-      maxSize:     maxSizeInput.value.trim(),
-      notify:      notifyInput.checked
+      ...existing,        // preserve cloudRunUrl, retention, maxSize from /config
+      apiKey: newKey,
+      notify: notifyInput.checked
     };
 
     try {
-      // Single atomic write — all 5 fields together
       await chrome.storage.local.set({ settings: allSettings });
-      setStatus('Settings saved ✓');
+      setStatus('Key saved ✓');
+      noKeyBanner.style.display = 'none';
+      captureBtn.disabled = false;
+      // 5.17: Refresh /config then /me/projects with the new key
+      await loadConfig(newKey);
+      const { session: s2 } = await chrome.storage.local.get('session');
+      await loadProjects(newKey, s2?.projectId || '');
     } catch (err) {
       console.error('[Hammer popup] settings save error:', err);
-      setStatus('Settings save failed: ' + err.message);
+      setStatus('Save failed: ' + err.message);
     }
   });
 
-  cloudRunUrlInput.addEventListener('input', () => { urlError.style.display = 'none'; });
-
-  // ── 4.5 — Tab switching ──
+  // ── 4.5: Tab switching ──
   tabCapture.addEventListener('click', () => switchTab('capture'));
   tabHistory.addEventListener('click', () => {
     switchTab('history');
     refreshHistory();
   });
 
-  // Load history on open in case user starts on capture tab then switches
   refreshHistory();
 });
 
-// ── Progress bar ──
+// ─────────────────────────────────────────────────────────────────
+// 5.17 — loadConfig
+// Fetches GET /config using the hardcoded fallback URL first (the key is
+// required but cloudRunUrl may not yet be in storage on first run).
+// On success:
+//   — writes cloudRunUrl, retention, maxSize into settings storage
+//   — updates the read-only display fields in the Settings panel
+// On failure:
+//   — leaves existing cached values untouched (offline-safe)
+//   — does NOT block capture or project load
+//
+// config response shape expected from backend:
+//   { cloudRunUrl?: string, retention?: number, maxSize?: number }
+// All fields are optional; backend may return a subset.
+// ─────────────────────────────────────────────────────────────────
+const CONFIG_FALLBACK_URL = 'https://app.thehammer.io/api';
+
+async function loadConfig(apiKey) {
+  // Use the stored cloudRunUrl if present; otherwise use the hard-coded default.
+  // This bootstraps cleanly on first install when storage is empty.
+  const { settings: s } = await chrome.storage.local.get('settings');
+  const baseUrl = s?.cloudRunUrl?.trim() || CONFIG_FALLBACK_URL;
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+    const res = await fetch(`${baseUrl}/config`, {
+      headers: { 'X-Api-Key': apiKey },
+      signal: controller.signal
+    });
+    clearTimeout(timeout);
+
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const config = await res.json();
+
+    // Merge into existing settings, preserving user-editable fields
+    const existing = (await chrome.storage.local.get('settings')).settings || {};
+    const updated = { ...existing };
+
+    if (config.cloudRunUrl) updated.cloudRunUrl = config.cloudRunUrl.trim();
+    if (config.retention)   updated.retention   = config.retention;
+    if (config.maxSize)     updated.maxSize      = config.maxSize;
+
+    await chrome.storage.local.set({ settings: updated });
+
+    // Reflect in read-only display fields
+    if (updated.cloudRunUrl) cloudRunUrlInput.value = updated.cloudRunUrl;
+    if (updated.retention)   retentionInput.value   = updated.retention;
+    if (updated.maxSize)     maxSizeInput.value     = updated.maxSize;
+
+    console.log('[Hammer popup] GET /config ✓ | url:', updated.cloudRunUrl,
+                '| retention:', updated.retention, '| maxSize:', updated.maxSize);
+  } catch (err) {
+    // Offline or key invalid — silently fall back to cached values
+    console.warn('[Hammer popup] GET /config failed (using cache):', err.message);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────
+// 5.16 — loadProjects
+// Now called AFTER loadConfig so it reads the authoritative cloudRunUrl.
+// ─────────────────────────────────────────────────────────────────
+async function loadProjects(apiKey, savedProjectId) {
+  const { settings } = await chrome.storage.local.get('settings');
+  const baseUrl = settings?.cloudRunUrl?.trim() || CONFIG_FALLBACK_URL;
+
+  setProjectSelectPlaceholder('Loading projects…');
+  try {
+    const res = await fetch(`${baseUrl}/me/projects`, {
+      headers: { 'X-Api-Key': apiKey }
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const projects = await res.json();
+    populateProjectSelect(projects, savedProjectId);
+  } catch (err) {
+    console.warn('[Hammer popup] GET /me/projects failed:', err.message);
+    setProjectSelectPlaceholder('Could not load projects');
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────
+// 5.16 — populateProjectSelect
+// projects:       array of { projectId, name } from /me/projects
+// savedProjectId: string to restore; '' if none
+//
+// Rules:
+//   0 projects — dropdown shows “— no projects assigned —”
+//   1 project  — auto-select + hide dropdown + show #project-single label
+//   2+ projects — show dropdown; restore savedProjectId if it appears in list
+// ─────────────────────────────────────────────────────────────────
+function populateProjectSelect(projects, savedProjectId) {
+  projectDropdown.style.display = '';
+  projectSingle.style.display   = 'none';
+  projectSingle.textContent     = '';
+  projectSelect.innerHTML       = '';
+
+  if (!projects || projects.length === 0) {
+    const opt = document.createElement('option');
+    opt.value = '';
+    opt.textContent = '— no projects assigned —';
+    projectSelect.appendChild(opt);
+    return;
+  }
+
+  projects.forEach(({ projectId, name }) => {
+    const opt = document.createElement('option');
+    opt.value = projectId;
+    opt.textContent = name;
+    projectSelect.appendChild(opt);
+  });
+
+  if (projects.length === 1) {
+    projectSelect.value           = projects[0].projectId;
+    projectDropdown.style.display = 'none';
+    projectSingle.textContent     = projects[0].name;
+    projectSingle.style.display   = 'block';
+    console.log('[Hammer popup] single project auto-selected:', projects[0].projectId);
+    return;
+  }
+
+  const placeholder = document.createElement('option');
+  placeholder.value = '';
+  placeholder.textContent = '— select project —';
+  projectSelect.insertBefore(placeholder, projectSelect.firstChild);
+
+  if (savedProjectId) {
+    const exists = projects.some(p => p.projectId === savedProjectId);
+    projectSelect.value = exists ? savedProjectId : '';
+    if (!exists) console.warn('[Hammer popup] saved projectId not in list:', savedProjectId);
+  } else {
+    projectSelect.value = '';
+  }
+}
+
+function setProjectSelectPlaceholder(msg) {
+  projectDropdown.style.display = '';
+  projectSingle.style.display   = 'none';
+  projectSelect.innerHTML       = `<option value="">${msg}</option>`;
+}
+
+// ── Progress bar (4.3) ──
 function showProgress(pct) {
   progressWrap.style.display = 'block';
   progressBar.style.width = pct + '%';
@@ -183,7 +348,7 @@ function hideProgress() {
   progressBar.style.width = '0%';
 }
 
-// ── History ──
+// ── 4.5 History ──
 async function refreshHistory() {
   const { history = [] } = await chrome.storage.local.get('history');
   historyList.innerHTML = '';
@@ -215,16 +380,6 @@ function switchTab(tab) {
 }
 
 // ── Helpers ──
-function populateSelect(selectEl, items) {
-  while (selectEl.options.length > 1) selectEl.remove(1);
-  (items || []).forEach(({ id, name }) => {
-    const opt = document.createElement('option');
-    opt.value = id;
-    opt.textContent = name;
-    selectEl.appendChild(opt);
-  });
-}
-
 function setStatus(msg) {
   statusEl.textContent = msg;
   setTimeout(() => { if (statusEl.textContent === msg) statusEl.textContent = ''; }, 4000);
