@@ -1,37 +1,46 @@
-// popup.js — Sprint 5.15
-// Changes from Sprint 4:
+// popup.js — Sprint 5.16
+// Changes from Sprint 5.15:
+//   5.16 — loadProjects now accepts the saved projectId and passes it to
+//          populateProjectSelect so the session is restored AFTER the options
+//          exist (previously the restore ran before options were populated).
+//   5.16 — populateProjectSelect: when exactly 1 project is returned, hide
+//          #project-dropdown and show #project-single (read-only label) instead.
+//   5.16 — Stage dropdown (Beginning / During / After) wired into session save;
+//          already present in HTML from 5.15 scaffold.
+//   5.16 — stageSelect restore still runs before loadProjects (it has options
+//          baked into HTML so no ordering issue).
+// Retained from Sprint 5.15:
 //   5.15 — User dropdown removed; identity resolved server-side via Personal API Key
-//   5.15 — SEED_CONFIG and userSelect logic removed
 //   5.15 — Backend URL field is read-only (defaults to https://app.thehammer.io/api)
 //   5.15 — Settings panel saves only: apiKey + notify (user-controlled prefs)
 //   5.15 — no-key-banner shown when API key is absent
-//   5.16 (scaffold) — project-select and stage-select present; project list
-//          populated from GET /me/projects on load (wired up fully in 5.16)
 // Retained from Sprint 4:
 //   4.3 — progress bar via UPLOAD_PROGRESS messages
 //   4.5 — history tab (last 20 uploads)
 
 // ── Element refs ──
-const projectSelect   = document.getElementById('project-select');
-const stageSelect     = document.getElementById('stage-select');
-const toolInput       = document.getElementById('tool-input');
-const saveBtn         = document.getElementById('save-btn');
-const captureBtn      = document.getElementById('capture-btn');
-const statusEl        = document.getElementById('status');
-const progressBar     = document.getElementById('progress-bar');
-const progressWrap    = document.getElementById('progress-wrap');
-const noKeyBanner     = document.getElementById('no-key-banner');
+const projectSelect     = document.getElementById('project-select');
+const projectDropdown   = document.getElementById('project-dropdown');
+const projectSingle     = document.getElementById('project-single');
+const stageSelect       = document.getElementById('stage-select');
+const toolInput         = document.getElementById('tool-input');
+const saveBtn           = document.getElementById('save-btn');
+const captureBtn        = document.getElementById('capture-btn');
+const statusEl          = document.getElementById('status');
+const progressBar       = document.getElementById('progress-bar');
+const progressWrap      = document.getElementById('progress-wrap');
+const noKeyBanner       = document.getElementById('no-key-banner');
 const openSettingsBanner = document.getElementById('open-settings-banner');
 
 // Settings panel
-const settingsToggle  = document.getElementById('settings-toggle');
-const settingsPanel   = document.getElementById('settings-panel');
+const settingsToggle   = document.getElementById('settings-toggle');
+const settingsPanel    = document.getElementById('settings-panel');
 const cloudRunUrlInput = document.getElementById('cloud-run-url');  // read-only
-const apiKeyInput     = document.getElementById('api-key-input');
-const retentionInput  = document.getElementById('retention-input'); // read-only (admin-managed)
-const maxSizeInput    = document.getElementById('max-size-input');  // read-only (admin-managed)
-const notifyInput     = document.getElementById('notify-input');
-const settingsSaveBtn = document.getElementById('settings-save-btn');
+const apiKeyInput      = document.getElementById('api-key-input');
+const retentionInput   = document.getElementById('retention-input'); // read-only (admin-managed)
+const maxSizeInput     = document.getElementById('max-size-input');  // read-only (admin-managed)
+const notifyInput      = document.getElementById('notify-input');
+const settingsSaveBtn  = document.getElementById('settings-save-btn');
 
 // History tab (4.5)
 const tabCapture   = document.getElementById('tab-capture');
@@ -51,30 +60,29 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   // ── 5.15: Restore settings fields ──
-  // Backend URL is always the read-only default; never overwritten from storage
-  // (task 5.17 will overwrite it from GET /config, but it remains read-only to the user)
-  if (settings?.apiKey)    apiKeyInput.value      = settings.apiKey;
+  if (settings?.apiKey)         apiKeyInput.value  = settings.apiKey;
   if (settings?.notify != null) notifyInput.checked = settings.notify;
-  // Admin-managed read-only fields — populated from GET /config in task 5.17
-  if (settings?.retention) retentionInput.value   = settings.retention;
-  if (settings?.maxSize)   maxSizeInput.value     = settings.maxSize;
+  if (settings?.retention)      retentionInput.value = settings.retention;
+  if (settings?.maxSize)        maxSizeInput.value   = settings.maxSize;
 
-  // ── Restore session (project, stage, tool) ──
-  if (session?.projectId) projectSelect.value = session.projectId;
-  if (session?.stage)     stageSelect.value   = session.stage;
-  if (session?.tool)      toolInput.value     = session.tool;
+  // ── 5.16: Restore stage + tool before async project load ──
+  // Stage options are baked into HTML, so restore is safe here.
+  if (session?.stage) stageSelect.value = session.stage;
+  if (session?.tool)  toolInput.value   = session.tool;
 
-  // ── 5.16 scaffold: populate project dropdown from GET /me/projects ──
-  // Full wiring happens in task 5.16; for now we attempt the call and fall
-  // back gracefully if the key is missing or the call fails.
+  // ── 5.16: Load project list from GET /me/projects ──
+  // Pass the saved projectId so populateProjectSelect can restore the
+  // selection AFTER the <option> elements exist.
   if (apiKey) {
-    await loadProjects(apiKey);
+    await loadProjects(apiKey, session?.projectId || '');
   } else {
     setProjectSelectPlaceholder('Paste API key in Settings first');
   }
 
   // ── Save session ──
   saveBtn.addEventListener('click', async () => {
+    // 5.16: when dropdown is hidden (single project), read the stored value
+    // from the hidden <select> which was set by populateProjectSelect.
     const s = {
       projectId: projectSelect.value,
       stage:     stageSelect.value,
@@ -129,15 +137,14 @@ document.addEventListener('DOMContentLoaded', async () => {
       : '⚙ Settings';
   });
 
-  // Banner "Open Settings" shortcut
+  // Banner “Open Settings” shortcut
   openSettingsBanner.addEventListener('click', () => {
     settingsPanel.classList.add('open');
     settingsToggle.textContent = '✕ Settings';
     apiKeyInput.focus();
   });
 
-  // ── 5.15: Settings save — only apiKey + notify are user-controlled ──
-  // Backend URL, retention, and maxSize are admin-managed (read-only fields).
+  // ── 5.15: Settings save ──
   settingsSaveBtn.addEventListener('click', async () => {
     const newKey = apiKeyInput.value.trim();
     if (!newKey) {
@@ -146,14 +153,11 @@ document.addEventListener('DOMContentLoaded', async () => {
       return;
     }
 
-    // Preserve existing admin-managed values so they survive the write
     const existing = (await chrome.storage.local.get('settings')).settings || {};
     const allSettings = {
       ...existing,
       apiKey: newKey,
       notify: notifyInput.checked
-      // cloudRunUrl: not written here — stays as default or set by GET /config (5.17)
-      // retention + maxSize: not written here — populated by GET /config (5.17)
     };
 
     try {
@@ -161,8 +165,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       setStatus('Key saved ✓');
       noKeyBanner.style.display = 'none';
       captureBtn.disabled = false;
-      // Re-load projects now that we have a key
-      await loadProjects(newKey);
+      // 5.16: Re-load projects with the new key.
+      // Preserve current projectId so selection survives a key update.
+      const { session: s2 } = await chrome.storage.local.get('session');
+      await loadProjects(newKey, s2?.projectId || '');
     } catch (err) {
       console.error('[Hammer popup] settings save error:', err);
       setStatus('Save failed: ' + err.message);
@@ -180,13 +186,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 // ─────────────────────────────────────────────────────────────────
-// 5.16 scaffold — load project list from GET /me/projects
-// Full implementation (auto-select if 1 project, hide dropdown) in task 5.16.
-// Fails gracefully: on error, dropdown shows a "could not load" message.
+// 5.16 — loadProjects
+// Fetches GET /me/projects and passes results to populateProjectSelect.
+// savedProjectId: the projectId from chrome.storage.local session; may be ''.
 // ─────────────────────────────────────────────────────────────────
-async function loadProjects(apiKey) {
+async function loadProjects(apiKey, savedProjectId) {
   const { settings } = await chrome.storage.local.get('settings');
-  // Read the stored cloudRunUrl if present; fall back to the default.
   const baseUrl = settings?.cloudRunUrl?.trim() || 'https://app.thehammer.io/api';
 
   setProjectSelectPlaceholder('Loading projects…');
@@ -196,15 +201,30 @@ async function loadProjects(apiKey) {
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const projects = await res.json();
-    populateProjectSelect(projects);
+    populateProjectSelect(projects, savedProjectId);
   } catch (err) {
     console.warn('[Hammer popup] GET /me/projects failed:', err.message);
     setProjectSelectPlaceholder('Could not load projects');
   }
 }
 
-function populateProjectSelect(projects) {
-  projectSelect.innerHTML = '';
+// ─────────────────────────────────────────────────────────────────
+// 5.16 — populateProjectSelect
+// projects:       array of { projectId, name } from /me/projects
+// savedProjectId: string to restore; '' if none
+//
+// Rules:
+//   0 projects — dropdown shows “— no projects assigned —”
+//   1 project  — auto-select + hide dropdown + show #project-single label
+//   2+ projects — show dropdown; restore savedProjectId if it appears in list
+// ─────────────────────────────────────────────────────────────────
+function populateProjectSelect(projects, savedProjectId) {
+  // Reset both display modes to a known state first
+  projectDropdown.style.display = '';
+  projectSingle.style.display   = 'none';
+  projectSingle.textContent     = '';
+  projectSelect.innerHTML       = '';
+
   if (!projects || projects.length === 0) {
     const opt = document.createElement('option');
     opt.value = '';
@@ -212,27 +232,53 @@ function populateProjectSelect(projects) {
     projectSelect.appendChild(opt);
     return;
   }
-  const placeholder = document.createElement('option');
-  placeholder.value = '';
-  placeholder.textContent = projects.length === 1 ? projects[0].name : '— select project —';
-  projectSelect.appendChild(placeholder);
+
+  // Populate hidden <select> in all cases (used by saveBtn to read .value)
   projects.forEach(({ projectId, name }) => {
     const opt = document.createElement('option');
     opt.value = projectId;
     opt.textContent = name;
     projectSelect.appendChild(opt);
   });
-  // 5.16: auto-select if only one project
+
   if (projects.length === 1) {
-    projectSelect.value = projects[0].projectId;
+    // ── 5.16: Single project — auto-select, hide dropdown, show label ──
+    projectSelect.value         = projects[0].projectId;
+    projectDropdown.style.display = 'none';
+    projectSingle.textContent   = projects[0].name;
+    projectSingle.style.display = 'block';
+    console.log('[Hammer popup] single project auto-selected:', projects[0].projectId);
+    return;
+  }
+
+  // ── 5.16: Multiple projects — show dropdown, restore saved selection ──
+  // Add a blank placeholder option at the top
+  const placeholder = document.createElement('option');
+  placeholder.value = '';
+  placeholder.textContent = '— select project —';
+  projectSelect.insertBefore(placeholder, projectSelect.firstChild);
+
+  // Restore previously saved project if it still exists in the list
+  if (savedProjectId) {
+    const exists = projects.some(p => p.projectId === savedProjectId);
+    if (exists) {
+      projectSelect.value = savedProjectId;
+    } else {
+      console.warn('[Hammer popup] saved projectId not in list:', savedProjectId);
+      projectSelect.value = '';
+    }
+  } else {
+    projectSelect.value = '';
   }
 }
 
 function setProjectSelectPlaceholder(msg) {
-  projectSelect.innerHTML = `<option value="">${msg}</option>`;
+  projectDropdown.style.display = '';
+  projectSingle.style.display   = 'none';
+  projectSelect.innerHTML       = `<option value="">${msg}</option>`;
 }
 
-// ── Progress bar ──
+// ── Progress bar (4.3) ──
 function showProgress(pct) {
   progressWrap.style.display = 'block';
   progressBar.style.width = pct + '%';
