@@ -1,30 +1,45 @@
 // ─────────────────────────────────────────────────────────────────
-// The Hammer — Service Worker (Sprint 4)
+// The Hammer — Service Worker
 // Sprint 4 additions:
 //   4.1 — offline queue in chrome.storage.local
 //   4.2 — exponential backoff retry (max 3, 1s/2s/4s in same wake cycle)
 //   4.3 — XHR upload with onprogress → chrome.runtime.sendMessage to popup
 //   4.4 — atomic settings save (read from storage; save handled in popup.js)
 //   4.5 — history: last 20 uploads (oldest dropped at 21)
+// Sprint 5.15 changes:
+//   — Removed session.userId guard: user identity is now resolved server-side
+//     from the X-Api-Key header. The extension no longer manages userId.
+//   — capture() returns { ok: false, reason: 'no_api_key' } when apiKey is
+//     absent, so popup.js can surface a targeted banner.
+//   — uploadBlobWithSignedUrl: removed `name: session.userId` from POST body;
+//     backend derives userId from the API key lookup.
+//   — session.userId removed from historyAppend calls (field left as empty
+//     string so the history schema stays consistent).
+//   — DEFAULT_CLOUD_RUN_URL updated to '' sentinel (unchanged from sprint 4);
+//     the popup read-only default is https://app.thehammer.io/api, which is
+//     written to settings by GET /config in task 5.17.
 // ─────────────────────────────────────────────────────────────────
 
 // CAPTURE response contract (authoritative):
 // { ok: boolean, path?: string, reason?: string, error?: string }
+// reason values: 'blocked' | 'no_api_key' | 'no_project'
 
 const ICON_DATA_URI =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ' +
   'AAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
 
+// Sentinel: empty string means "not configured".
+// The actual URL is stored in settings.cloudRunUrl by GET /config (task 5.17).
+// Fallback default if storage is empty: https://app.thehammer.io/api
 const DEFAULT_CLOUD_RUN_URL = '';
+const FALLBACK_API_BASE = 'https://app.thehammer.io/api';
 
 // ─────────────────────────────────────────────────────────────────
 // 4.1 — Offline queue helpers
 // Storage shape: { queue: [...], failed: [...] }
 //   queue   — pending items to upload on next wake
 //   failed  — items that exhausted all retries
-// Each item: { blob (base64 string), session, tabUrl, ts }
-// Blob stored as base64 string because chrome.storage does not support
-// Blob objects directly.
+// Each item: { blobBase64, session, tabUrl, ts, attempts }
 // ─────────────────────────────────────────────────────────────────
 async function queueGet() {
   const { queue = [], failed = [] } = await chrome.storage.local.get(['queue', 'failed']);
@@ -44,8 +59,9 @@ async function queueAdd(blobBase64, session, tabUrl) {
 
 // ─────────────────────────────────────────────────────────────────
 // 4.5 — History helpers
-// Storage: { history: [ { path, size, ts, projectId, userId, tool }, ... ] }
+// Storage: { history: [ { path, size, ts, projectId, tool }, ... ] }
 // Max 20 entries; oldest dropped when 21st is added.
+// 5.15: userId removed from history entries; backend resolves it from the key.
 // ─────────────────────────────────────────────────────────────────
 async function historyAppend(entry) {
   const { history = [] } = await chrome.storage.local.get('history');
@@ -56,22 +72,14 @@ async function historyAppend(entry) {
 
 // ─────────────────────────────────────────────────────────────────
 // 4.2 — Retry with exponential backoff
-// Short delays (1s / 2s / 4s) run inside a single wake cycle using
-// a Promise-based sleep — safe because the worker stays alive while
-// awaiting the upload Promises that keep it awake.
-// This is distinct from using setTimeout for work AFTER the worker
-// might sleep: here the await chain keeps the worker alive throughout.
-// Only a final long retry (not used here; max 3 attempts at 1/2/4s)
-// would need chrome.alarms.
+// Short delays (1s / 2s / 4s) inside a single wake cycle.
 // ─────────────────────────────────────────────────────────────────
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-const RETRY_DELAYS_MS = [1000, 2000, 4000]; // attempts 1, 2, 3
+const RETRY_DELAYS_MS = [1000, 2000, 4000];
 
-// Attempt uploadFn up to 3 times with 1s/2s/4s delays.
-// Returns the result of the first success, or throws after all retries exhausted.
 async function withRetry(uploadFn) {
   let lastErr;
   for (let attempt = 0; attempt < RETRY_DELAYS_MS.length; attempt++) {
@@ -93,9 +101,6 @@ async function withRetry(uploadFn) {
 
 // ─────────────────────────────────────────────────────────────────
 // 4.3 — XHR PUT with upload progress
-// fetch() has no upload progress in service workers.
-// XMLHttpRequest.upload.onprogress works and is wrapped here in a Promise.
-// Progress is posted to the popup via chrome.runtime.sendMessage.
 // ─────────────────────────────────────────────────────────────────
 function xhrPut(url, blob) {
   return new Promise((resolve, reject) => {
@@ -107,7 +112,6 @@ function xhrPut(url, blob) {
     xhr.upload.onprogress = (evt) => {
       if (!evt.lengthComputable) return;
       const pct = Math.round((evt.loaded / evt.total) * 100);
-      // Post progress to popup — popup.js listens for UPLOAD_PROGRESS messages
       chrome.runtime.sendMessage({ type: 'UPLOAD_PROGRESS', percent: pct }).catch(() => {});
       console.log(`[Hammer SW] upload progress: ${pct}%`);
     };
@@ -130,16 +134,15 @@ function xhrPut(url, blob) {
 
 // ─────────────────────────────────────────────────────────────────
 // Drain offline queue on every service worker startup.
-// The worker wakes on browser start — this is the natural drain trigger.
 // ─────────────────────────────────────────────────────────────────
 (async () => {
   const { queue, failed } = await queueGet();
   if (queue.length === 0) return;
 
   const { settings } = await chrome.storage.local.get('settings');
-  const cloudRunUrl = settings?.cloudRunUrl?.trim() || DEFAULT_CLOUD_RUN_URL;
+  const cloudRunUrl = settings?.cloudRunUrl?.trim() || FALLBACK_API_BASE;
   const apiKey      = settings?.apiKey?.trim() || '';
-  if (!cloudRunUrl || !apiKey) return; // can't drain without creds
+  if (!cloudRunUrl || !apiKey) return;
 
   console.log('[Hammer SW] draining offline queue:', queue.length, 'item(s)');
 
@@ -148,7 +151,6 @@ function xhrPut(url, blob) {
 
   for (const item of queue) {
     try {
-      // Rebuild Blob from base64 string
       const binaryStr = atob(item.blobBase64);
       const bytes = new Uint8Array(binaryStr.length);
       for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
@@ -163,7 +165,6 @@ function xhrPut(url, blob) {
         size:      blob.size,
         ts:        Date.now(),
         projectId: item.session.projectId,
-        userId:    item.session.userId,
         tool:      item.session.tool ?? ''
       });
       console.log('[Hammer SW] drained queued item ✓ | path:', result.path);
@@ -227,6 +228,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     .then((result) => {
       if (result === null) {
         sendResponse({ ok: false, reason: 'blocked' });
+      } else if (result.reason) {
+        sendResponse({ ok: false, reason: result.reason });
       } else {
         sendResponse({ ok: true, path: result.path });
       }
@@ -238,7 +241,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 // ─────────────────────────────────────────────────────────────────
 // capture(tab) — shared by all three triggers
-// Returns { path } on success, or null if blocked.
+// Returns { path } on success, { reason } for soft blocks, or null if page-blocked.
+//
+// 5.15 changes:
+//   — Removed session.userId guard (identity is server-side from X-Api-Key).
+//   — Added no_api_key guard: returns { reason: 'no_api_key' } immediately
+//     without a notification, so popup.js can show the targeted banner.
+//   — session.projectId guard kept: user must still select a project.
 // ─────────────────────────────────────────────────────────────────
 async function capture(tab) {
   if (!tab || !tab.url ||
@@ -250,27 +259,23 @@ async function capture(tab) {
     return null;
   }
 
-  const { session } = await chrome.storage.local.get('session');
-  if (!session || !session.projectId || !session.userId) {
-    await showNotification('Project / User not set',
-      'Open the popup and save a Project and User before capturing.');
-    return null;
-  }
-
-  // 4.4 — read all settings atomically from the single 'settings' key
+  // 4.4 — read all settings atomically
   const { settings } = await chrome.storage.local.get('settings');
-  const cloudRunUrl = settings?.cloudRunUrl?.trim() || DEFAULT_CLOUD_RUN_URL;
+  const cloudRunUrl = settings?.cloudRunUrl?.trim() || FALLBACK_API_BASE;
   const apiKey      = settings?.apiKey?.trim() || '';
 
-  if (!cloudRunUrl) {
-    await showNotification('Cloud Run URL not set',
-      'Open popup ⚙ Settings and enter your Cloud Run URL before capturing.');
-    return null;
+  // 5.15: guard on API key, not userId
+  if (!apiKey) {
+    // Return reason so popup.js shows the targeted no-key banner
+    // (no system notification — the popup is the right surface for this)
+    console.warn('[Hammer SW] capture blocked: no API key set');
+    return { reason: 'no_api_key' };
   }
 
-  if (!apiKey) {
-    await showNotification('API key not set',
-      'Open popup ⚙ Settings and enter your API key before capturing.');
+  const { session } = await chrome.storage.local.get('session');
+  if (!session || !session.projectId) {
+    await showNotification('Project not set',
+      'Open the popup, select a Project and press Save before capturing.');
     return null;
   }
 
@@ -294,10 +299,8 @@ async function capture(tab) {
     return null;
   }
 
-  console.log('[Hammer SW] captured PNG ✓ | size:', blob.size,
-    '| project:', session.projectId, '| user:', session.userId);
+  console.log('[Hammer SW] captured PNG ✓ | size:', blob.size, '| project:', session.projectId);
 
-  // ── Try upload with retry (4.2). On total failure, queue for later (4.1). ──
   let uploadResult;
   try {
     uploadResult = await withRetry(() =>
@@ -305,20 +308,17 @@ async function capture(tab) {
     );
   } catch (uploadErr) {
     console.error('[Hammer SW] all retries failed, queuing for later:', uploadErr.message);
-    // 4.1 — store in offline queue as base64
     const base64 = await blobToBase64(blob);
     await queueAdd(base64, session, tab.url);
     await showNotification('Upload queued', 'No connection — will retry when online.');
     return null;
   }
 
-  // 4.5 — append to history
   await historyAppend({
     path:      uploadResult.path,
     size:      blob.size,
     ts:        Date.now(),
     projectId: session.projectId,
-    userId:    session.userId,
     tool:      session.tool ?? ''
   });
 
@@ -329,12 +329,10 @@ async function capture(tab) {
 
 // ─────────────────────────────────────────────────────────────────
 // uploadBlobWithSignedUrl
-// Primary: POST /upload-url → XHR PUT to GCS (with onprogress — task 4.3)
-// Fallback: POST /capture via proxy
-// Returns { path } on success, throws on failure.
+// 5.15: removed `name: session.userId` from POST body.
+//       Backend now resolves userId from sha256(X-Api-Key) lookup in api_keys.
 // ─────────────────────────────────────────────────────────────────
 async function uploadBlobWithSignedUrl(blob, session, tabUrl, cloudRunUrl, apiKey) {
-  // Step 1: get signed URL from Cloud Run
   const controller1 = new AbortController();
   const t1 = setTimeout(() => controller1.abort(), 15_000);
   let signedUrlResponse;
@@ -345,7 +343,8 @@ async function uploadBlobWithSignedUrl(blob, session, tabUrl, cloudRunUrl, apiKe
       body:    JSON.stringify({
         project: session.projectId,
         tool:    session.tool ?? '',
-        name:    session.userId
+        stage:   session.stage ?? ''
+        // 5.15: `name` (userId) removed — backend derives from X-Api-Key
       }),
       signal: controller1.signal
     });
@@ -357,18 +356,15 @@ async function uploadBlobWithSignedUrl(blob, session, tabUrl, cloudRunUrl, apiKe
     signedUrlResponse = await res.json();
   } catch (err) {
     clearTimeout(t1);
-    // Fall back to proxy
     console.warn('[Hammer SW] /upload-url failed, using proxy:', err.message);
     return uploadViaProxy(blob, session, tabUrl, cloudRunUrl, apiKey);
   }
 
   console.log('[Hammer SW] signed URL received | path:', signedUrlResponse.path);
 
-  // Step 2: XHR PUT directly to GCS (task 4.3 — onprogress)
   try {
     await xhrPut(signedUrlResponse.signedUrl, blob);
   } catch (err) {
-    // Fall back to proxy
     console.warn('[Hammer SW] XHR PUT failed, using proxy:', err.message);
     return uploadViaProxy(blob, session, tabUrl, cloudRunUrl, apiKey);
   }
@@ -377,8 +373,8 @@ async function uploadBlobWithSignedUrl(blob, session, tabUrl, cloudRunUrl, apiKe
 }
 
 // ─────────────────────────────────────────────────────────────────
-// uploadViaProxy — Sprint 2 /capture path
-// Returns { path, size } on success, throws on failure.
+// uploadViaProxy — Sprint 2 /capture fallback path
+// 5.15: removed `userId` from FormData; backend resolves from X-Api-Key.
 // ─────────────────────────────────────────────────────────────────
 async function uploadViaProxy(blob, session, tabUrl, cloudRunUrl, apiKey) {
   const controller = new AbortController();
@@ -387,9 +383,10 @@ async function uploadViaProxy(blob, session, tabUrl, cloudRunUrl, apiKey) {
   const formData = new FormData();
   formData.append('file',      blob, 'screenshot.png');
   formData.append('projectId', session.projectId);
-  formData.append('userId',    session.userId);
   formData.append('tool',      session.tool ?? '');
+  formData.append('stage',     session.stage ?? '');
   formData.append('tabUrl',    tabUrl ?? '');
+  // 5.15: userId omitted — resolved server-side from X-Api-Key
 
   try {
     const response = await fetch(`${cloudRunUrl}/capture`, {
@@ -411,13 +408,11 @@ async function uploadViaProxy(blob, session, tabUrl, cloudRunUrl, apiKey) {
 
   } catch (err) {
     clearTimeout(timeoutId);
-    throw err; // let withRetry handle it
+    throw err;
   }
 }
 
-// ─────────────────────────────────────────────────────────────────
-// Helpers
-// ─────────────────────────────────────────────────────────────────
+// ── Helpers ──
 function blobToBase64(blob) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
