@@ -776,6 +776,53 @@
   </div>
 </div>
 
+<!-- ── Generate Report Modal ────────────────────────────────── -->
+<div class="modal-backdrop" id="generateReportModal" role="dialog" aria-modal="true" aria-labelledby="generateReportModalTitle">
+  <div class="modal">
+    <div class="modal-title" id="generateReportModalTitle">Generate Report</div>
+    <div class="modal-desc">Select a project and report type. Vertex AI reports extract structured UI state and user inputs.</div>
+    <div class="form-group">
+      <label class="form-label" for="reportProjectSelect">Project</label>
+      <select class="form-input filter-select" id="reportProjectSelect" style="width:100%">
+        <!-- Populated via JS -->
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="reportTypeSelect">Report Type</label>
+      <select class="form-input filter-select" id="reportTypeSelect" style="width:100%">
+        <optgroup label="Standard Reports">
+          <option value="user_efficiency">User Efficiency (Aggregated)</option>
+          <option value="project_progress">Project Progress</option>
+          <option value="executive_summary">Executive Summary</option>
+        </optgroup>
+        <optgroup label="Vertex AI OCR">
+          <option value="ui_state_changes">UI State Changes (Checkboxes/Radios)</option>
+          <option value="text_entry_tracking">Text Entry Tracking</option>
+        </optgroup>
+      </select>
+    </div>
+    <div class="form-error" id="generateReportError" aria-live="polite"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="generateReportCancelBtn" onclick="closeModal('generateReportModal')" type="button">Cancel</button>
+      <button class="btn btn-primary" id="generateReportSubmitBtn" onclick="submitGenerateReport()" type="button">Generate</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Report Viewer Modal ──────────────────────────────────── -->
+<div class="modal-backdrop" id="reportViewerModal" role="dialog" aria-modal="true">
+  <div class="modal wide" style="max-width: 800px; height: 80vh; display: flex; flex-direction: column;">
+    <div class="modal-title" style="display:flex; justify-content: space-between; align-items: center;">
+      <span>Report Viewer</span>
+      <button class="btn btn-ghost" onclick="closeModal('reportViewerModal')">Close</button>
+    </div>
+    <div id="reportViewerContent" style="flex: 1; overflow-y: auto; background: var(--color-bg); padding: var(--space-4); border-radius: var(--radius-md); border: 1px solid var(--color-border); font-family: var(--font-mono); font-size: var(--text-xs); white-space: pre-wrap;">
+      Loading report data...
+    </div>
+  </div>
+</div>
+
+
 <!-- ── App Layout ──────────────────────────────────────────── -->
 <div class="app-layout" id="appLayout">
 
@@ -824,6 +871,14 @@
     <button class="sidebar-item" data-view="reports" onclick="showView('reports')">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
       Reports
+    </button>
+    <button class="sidebar-item" data-view="settings" onclick="showView('settings')">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+      Global Settings
+    </button>
+    <button class="sidebar-item" data-view="profile" onclick="showView('profile')">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+      User Profile
     </button>
     <div class="sidebar-section-label" style="margin-top:var(--space-4)">Sprint</div>
     <button class="sidebar-item" onclick="window.open('https://github.com/cfroszte/thehammer/blob/main/sprintplan2.md','_blank')">
@@ -966,6 +1021,7 @@
               <th>Role</th>
               <th id="membershipHeader">Admitted</th>
               <th>Last active</th>
+              <th>Inactivity (s)</th>
               <th id="usersActionHeader"></th>
             </tr>
           </thead>
@@ -1053,16 +1109,91 @@
     </section>
 
     <!-- ═══════════════════════════════════════════════════════════
-         REPORTS VIEW  (placeholder — Sprint 7)
+         REPORTS VIEW  (Sprint 7)
          ═══════════════════════════════════════════════════════════ -->
     <section class="view" id="view-reports" aria-label="Reports">
       <div class="page-header">
-        <div class="page-header-left"><h1>Reports</h1><p>Report generation arrives in Sprint 7.</p></div>
+        <div class="page-header-left">
+          <h1>Reports</h1>
+          <p>Generate and view standard and Vertex AI structured reports.</p>
+        </div>
+        <button class="btn btn-primary" id="newReportBtn" onclick="openGenerateReportModal()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Generate report
+        </button>
       </div>
-      <div class="empty-state" style="flex:1">
-        <svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-        <h3>No reports yet</h3>
-        <p>Report generation arrives in Sprint 7.</p>
+
+      <div class="toolbar">
+        <div class="toolbar-left">
+          <select class="filter-select" id="reportViewProjectSelect" aria-label="Select project" onchange="loadReports()" style="min-width:200px">
+            <option value="">— Select a project —</option>
+          </select>
+        </div>
+        <button class="btn btn-ghost" id="refreshReportsBtn" onclick="loadReports()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+          Refresh
+        </button>
+      </div>
+
+      <div class="table-wrap">
+        <table aria-label="Reports table" id="reportsTable">
+          <thead>
+            <tr>
+              <th>Type</th>
+              <th>Status</th>
+              <th>Created</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="reportsBody"></tbody>
+        </table>
+        <div id="reportsEmptyState" class="empty-state" style="display:none" aria-live="polite">
+          <svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+          <h3 id="reportsEmptyTitle">Select a project</h3>
+          <p id="reportsEmptyDesc">Choose a project above to see its reports.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════════════
+         SETTINGS VIEW  (5.12b)
+         ═══════════════════════════════════════════════════════════ -->
+    <section class="view" id="view-settings" aria-label="Global Settings">
+      <div class="page-header">
+        <div class="page-header-left"><h1>Global Settings</h1><p>Configure global rules across all projects.</p></div>
+      </div>
+      <div class="page-body" style="max-width: 600px">
+        <div class="form-group">
+          <label class="form-label" style="display:flex;align-items:center;gap:var(--space-2);cursor:pointer">
+            <input type="checkbox" id="settingsInactivityToggle" style="accent-color:var(--color-primary);width:16px;height:16px">
+            <span style="color:var(--color-text);font-size:var(--text-sm)">Enable inactivity prompt globally</span>
+          </label>
+          <div style="font-size:var(--text-xs);color:var(--color-text-muted);margin-left:24px;margin-top:var(--space-1);margin-bottom:var(--space-4)">
+            When enabled, users will receive a 45-second inactivity warning prompt if they haven't uploaded a capture.
+          </div>
+        </div>
+        <button class="btn btn-primary" onclick="saveSettings()" id="saveSettingsBtn">Save settings</button>
+      </div>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════════════
+         PROFILE VIEW  (5.12c)
+         ═══════════════════════════════════════════════════════════ -->
+    <section class="view" id="view-profile" aria-label="User Profile">
+      <div class="page-header">
+        <div class="page-header-left"><h1>My Profile</h1><p>View your API keys and configuration.</p></div>
+      </div>
+      <div class="page-body" style="max-width: 600px">
+        <div class="form-group">
+          <label class="form-label">Personal API Key</label>
+          <div style="display:flex;gap:var(--space-2)">
+            <input class="form-input" id="profileApiKey" type="password" readonly value="Click 'Generate Key' to create one" aria-label="Personal API Key">
+            <button class="btn btn-ghost" onclick="generateApiKey()" id="generateApiKeyBtn">Generate New</button>
+          </div>
+          <div style="font-size:var(--text-xs);color:var(--color-text-muted);margin-top:var(--space-2)">
+            Copy this key into the Chrome extension. Generating a new key invalidates the old one. (Backend support coming in Sprint 9)
+          </div>
+        </div>
       </div>
     </section>
 
@@ -1206,6 +1337,7 @@ function showView(name) {
   // Lazy-load data on first navigation to each view
   if (name === 'users'    && allUsers.length === 0)    loadUsers();
   if (name === 'activity' && activityProjectsLoaded === false) populateActivityProjectSelect();
+  if (name === 'settings') loadSettings();
 }
 
 // ── State ──────────────────────────────────────────────────────
@@ -1634,9 +1766,49 @@ function renderUsers(list, activeProjectId) {
       <td><span class="role-badge ${roleCls}">${esc(u.role || 'user')}</span></td>
       <td class="muted">${admitted}</td>
       <td class="muted">${lastActive}</td>
+      <td>
+        <div style="display:flex;align-items:center;gap:var(--space-2)">
+          <input type="checkbox" style="accent-color:var(--color-primary);cursor:pointer"
+            onchange="toggleUserInactivity('${esc(u.id || u.userId)}', this.checked)"
+            ${u.inactivityPromptEnabled ? 'checked' : ''} />
+          <input type="number" class="form-input" style="width: 60px; padding: 4px; font-size: 12px"
+            value="${u.inactivityTimerSeconds || 45}" min="10"
+            onchange="updateUserTimer('${esc(u.id || u.userId)}', this.value)"
+            ${u.inactivityPromptEnabled ? '' : 'disabled'} />
+        </div>
+      </td>
       <td><div class="actions-cell">${actionBtn}</div></td>
     </tr>`;
   }).join('');
+}
+
+async function toggleUserInactivity(userId, enabled) {
+  try {
+    await apiFetch('/admin/users/' + encodeURIComponent(userId), {
+      method: 'PATCH',
+      body: JSON.stringify({ inactivityPromptEnabled: enabled })
+    });
+    showToast('User inactivity setting updated', 'success');
+    // Reload users to update disabled state of timer inputs
+    loadUsers();
+  } catch (err) {
+    showToast('Failed to update user setting: ' + err.message, 'error');
+    // Revert visually by reloading users
+    loadUsers();
+  }
+}
+
+async function updateUserTimer(userId, seconds) {
+  try {
+    await apiFetch('/admin/users/' + encodeURIComponent(userId), {
+      method: 'PATCH',
+      body: JSON.stringify({ inactivityTimerSeconds: parseInt(seconds, 10) })
+    });
+    showToast('User timer updated', 'success');
+  } catch (err) {
+    showToast('Failed to update user timer: ' + err.message, 'error');
+    loadUsers();
+  }
 }
 
 function updateUserStats(list) {
@@ -1740,17 +1912,48 @@ function renderActivity(list) {
   }
   table.style.display = ''; empty.style.display = 'none';
 
-  tbody.innerHTML = list.map(u => {
+  // Calculate per-user gaps > 45s (45000 ms)
+  const sorted = [...list].sort((a, b) => new Date(a.uploadedAt) - new Date(b.uploadedAt));
+  const userLastCapture = {};
+  
+  sorted.forEach(u => {
+    if (u.uploadedAt) {
+      const time = new Date(u.uploadedAt).getTime();
+      const last = userLastCapture[u.userId];
+      if (last && (time - last) > 45000) {
+        u.hasGap = true;
+        u.gapMs = time - last;
+      }
+      userLastCapture[u.userId] = time;
+    }
+  });
+
+  // Sort descending for display
+  sorted.sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt));
+
+  tbody.innerHTML = sorted.map(u => {
     const tool    = u.tool ? `<span class="tool-badge">${esc(u.tool)}</span>` : '<span class="tool-badge">—</span>';
     const user    = esc(u.userId || '—');
     const path    = u.path || '—';
     const size    = u.size ? fmtBytes(u.size) : '—';
     const time    = u.uploadedAt ? fmtRelative(u.uploadedAt) : '—';
     const fullTime = u.uploadedAt ? new Date(u.uploadedAt).toLocaleString() : '';
+
+    let trStyle = '';
+    let gapIndicator = '';
+    if (u.hasGap) {
+      trStyle = 'border-left: 3px solid var(--color-error); background: var(--color-error-bg);';
+      const gapSecs = Math.round(u.gapMs / 1000);
+      gapIndicator = `<div style="font-size:10px; color:var(--color-error); font-weight: 600; margin-top:2px;">⏱ Gap: ${gapSecs}s</div>`;
+    }
+
     return `
-    <tr>
+    <tr style="${trStyle}">
       <td>${tool}</td>
-      <td class="mono" title="${user}">${user.length > 22 ? user.slice(0, 22) + '…' : user}</td>
+      <td class="mono" title="${user}">
+        ${user.length > 22 ? user.slice(0, 22) + '…' : user}
+        ${gapIndicator}
+      </td>
       <td><span class="path-cell" title="${esc(path)}">${esc(path)}</span></td>
       <td><span class="size-badge">${size}</span></td>
       <td class="muted" title="${fullTime}">${time}</td>
@@ -1830,6 +2033,186 @@ function esc(str) {
   return String(str ?? '')
     .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
     .replace(/"/g,'&quot;').replace(/'/g,'&#x27;');
+}
+
+// ═══════════════════════════════════════════════════════════════
+// GLOBAL SETTINGS & PROFILE (5.12b, 5.12c)
+// ═══════════════════════════════════════════════════════════════
+
+let settingsLoaded = false;
+async function loadSettings() {
+  if (settingsLoaded) return;
+  try {
+    const config = await apiFetch('/config');
+    document.getElementById('settingsInactivityToggle').checked = !!config.inactivityPromptEnabled;
+    settingsLoaded = true;
+  } catch (err) {
+    showToast(`Failed to load settings: ${err.message}`, 'error');
+  }
+}
+
+async function saveSettings() {
+  const btn = document.getElementById('saveSettingsBtn');
+  btn.disabled = true; btn.textContent = 'Saving...';
+  try {
+    const inactivityPromptEnabled = document.getElementById('settingsInactivityToggle').checked;
+    await apiFetch('/config', {
+      method: 'PATCH',
+      body: JSON.stringify({ inactivityPromptEnabled })
+    });
+    showToast('Settings saved successfully.', 'success');
+  } catch (err) {
+    showToast(`Failed to save settings: ${err.message}`, 'error');
+  } finally {
+    btn.disabled = false; btn.textContent = 'Save settings';
+  }
+}
+
+async function generateApiKey() {
+  const btn = document.getElementById('generateApiKeyBtn');
+  const input = document.getElementById('profileApiKey');
+  btn.disabled = true;
+  try {
+    // Scaffold only. Backend support coming later.
+    // const res = await apiFetch('/me/key', { method: 'POST' });
+    input.type = 'text';
+    input.value = 'api_key_scaffold_test_' + Date.now();
+    showToast('New API key generated. Please copy it now.', 'success');
+  } catch (err) {
+    showToast(`Failed to generate key: ${err.message}`, 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// REPORTS VIEW (Sprint 7)
+// ═══════════════════════════════════════════════════════════════
+
+let activeReportsPoller = null;
+
+function populateReportProjectSelect() {
+  const selGen = document.getElementById('reportProjectSelect');
+  const selView = document.getElementById('reportViewProjectSelect');
+  const curGen = selGen.value;
+  const curView = selView.value;
+
+  selGen.innerHTML = '';
+  while (selView.options.length > 1) selView.remove(1);
+
+  allProjects.forEach(p => {
+    const opt1 = document.createElement('option');
+    opt1.value = p.projectId;
+    opt1.textContent = p.name;
+    selGen.appendChild(opt1);
+
+    const opt2 = document.createElement('option');
+    opt2.value = p.projectId;
+    opt2.textContent = p.name;
+    selView.appendChild(opt2);
+  });
+
+  if (curGen) selGen.value = curGen;
+  if (curView) selView.value = curView;
+}
+
+// Hook into existing loadProjects so report selects are populated
+const originalLoadProjectsReportsHook = loadProjects;
+loadProjects = async function() {
+  await originalLoadProjectsReportsHook();
+  populateReportProjectSelect();
+};
+
+function openGenerateReportModal() {
+  document.getElementById('generateReportError').textContent = '';
+  document.getElementById('generateReportSubmitBtn').disabled = false;
+  openModal('generateReportModal');
+}
+
+async function submitGenerateReport() {
+  const projectId = document.getElementById('reportProjectSelect').value;
+  const reportType = document.getElementById('reportTypeSelect').value;
+  const errorEl = document.getElementById('generateReportError');
+  const btn = document.getElementById('generateReportSubmitBtn');
+
+  if (!projectId) { errorEl.textContent = 'Please select a project.'; return; }
+
+  errorEl.textContent = ''; btn.disabled = true; btn.textContent = 'Generating...';
+  try {
+    const res = await apiFetch('/admin/reports/generate', {
+      method: 'POST',
+      body: JSON.stringify({ projectId, reportType })
+    });
+    closeModal('generateReportModal');
+    showToast('Report generation queued.', 'success');
+    
+    // Switch to that project view
+    document.getElementById('reportViewProjectSelect').value = projectId;
+    loadReports();
+    startReportPolling(res.reportId);
+  } catch (err) {
+    errorEl.textContent = err.message || 'Failed to generate report.';
+  } finally {
+    btn.disabled = false; btn.textContent = 'Generate';
+  }
+}
+
+async function loadReports() {
+  const projectId = document.getElementById('reportViewProjectSelect').value;
+  const tbody = document.getElementById('reportsBody');
+  const empty = document.getElementById('reportsEmptyState');
+  const table = document.getElementById('reportsTable');
+
+  if (!projectId) {
+    table.style.display = 'none';
+    empty.style.display = 'flex';
+    return;
+  }
+
+  table.style.display = '';
+  empty.style.display = 'none';
+  tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:var(--space-8);color:var(--color-text-muted)">Loading...</td></tr>';
+
+  try {
+    const data = await apiFetch(`/admin/reports?projectId=${encodeURIComponent(projectId)}`);
+    if (data.reports.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:var(--space-8);color:var(--color-text-muted)">No reports generated yet.</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = data.reports.map(r => `
+      <tr>
+        <td style="font-weight: 500">${esc(r.reportType)}</td>
+        <td><span class="role-badge ${r.status === 'done' ? 'admin' : (r.status === 'error' ? 'user' : 'analyst')}">${esc(r.status)}</span></td>
+        <td class="muted">${r.createdAt ? fmtDate(r.createdAt) : '—'}</td>
+        <td>
+          <button class="btn btn-ghost" ${r.status !== 'done' ? 'disabled' : ''} onclick="viewReport('${r.id}', '${r.gcsPath || ''}')">View</button>
+        </td>
+      </tr>
+    `).join('');
+  } catch (err) {
+    showToast(`Failed to load reports: ${err.message}`, 'error');
+  }
+}
+
+function startReportPolling(reportId) {
+  if (activeReportsPoller) clearInterval(activeReportsPoller);
+  activeReportsPoller = setInterval(async () => {
+    try {
+      const res = await apiFetch(`/admin/reports/${reportId}/status`);
+      if (res.status === 'done' || res.status === 'error') {
+        clearInterval(activeReportsPoller);
+        loadReports();
+      }
+    } catch (err) {
+      clearInterval(activeReportsPoller);
+    }
+  }, 2000);
+}
+
+function viewReport(reportId, gcsPath) {
+  document.getElementById('reportViewerContent').textContent = `[Mockup] Viewing Report ${reportId}\nPath: ${gcsPath}\n\nIn a full implementation, the portal will fetch a signed V4 URL from the backend and display the HTML/JSON content here securely.`;
+  openModal('reportViewerModal');
 }
 
 // ── Boot ───────────────────────────────────────────────────────

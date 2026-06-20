@@ -48,7 +48,7 @@ Sprint 5  → Admin Portal (CRUD + SPA)
 Sprint 6  → Inactivity tracking + session timestamps  
 Sprint 6S → Research spike: chrome.alarms sub-minute timing + OCR pipeline (red items isolated)
 Sprint 7  → Analyst Engine: Firestore reports + OCR reports (unblocked by 6S findings)
-Sprint 8  → Instructional Designer workspace
+Sprint 22 → Instructional Designer workspace (Deferred)
 Sprint 9  → Role-based auth hardening + integration tests + monitoring
 ```
 
@@ -108,14 +108,14 @@ Additional pre-flight for Sprint 5:
 
 | # | Task | Done when | P% |
 |---|---|---|---|
-| 5.9 | Project list view | Table: project name, member count, last capture timestamp; create/delete buttons functional | 🟢 91% |
-| 5.10 | Project detail — user roster | Admitted users listed with role badge; Admit and Remove buttons update Firestore via transaction and re-render without full page reload | 🟡 84% |
-| 5.11 | Activity feed per tool | `?tool=` filter applied on click; screenshot thumbnails load via V4 signed URLs (15-min lifetime); URLs auto-refreshed on `visibilitychange` + proactive refresh after 9 min | 🟡 79% |
-| 5.12 | Report viewer tab (placeholder) | Panel fetches `reports` Firestore collection; renders "No reports yet" empty state; full render deferred to Sprint 7 | 🟢 93% |
-| 5.12b | Global Settings panel | Admins can update global capture settings (retention, etc.) persisting to Firestore config doc | 🟢 94% |
-| 5.12c | User Profile view | Logged-in user can view assigned projects and copy their Personal API Key | 🟢 95% |
-| 5.13 | Auth guard | Portal is protected by Cloud IAP at the LB level — no unauthenticated request reaches the SPA. `hammer-api` routes read `X-Goog-Authenticated-User-Email` header for identity; missing or invalid `X-Api-Key` → 401 on all `/admin/*` API routes | 🟢 96% |
-| 5.14 | Deploy Admin Portal to Cloud Run | Image built and pushed to Artifact Registry tagged with `$COMMIT_SHA` by **Cloud Build trigger** on push to `main`; `hammer-portal` deployed automatically by `cloudbuild.yaml` step 8; smoke test in `cloudbuild.yaml` step 9 verifies `curl $PORTAL_URL/health` → `{"status":"ok"}`; accessible via `https://app.thehammer.io` after Sprint 21 LB cutover — **do not modify `cloudbuild.yaml` or trigger configuration** | 🟢 92% |
+| 5.9 | Project list view | Table: project name, member count, last capture timestamp; create/delete buttons functional | ✅ done |
+| 5.10 | Project detail — user roster | Admitted users listed with role badge; Admit and Remove buttons update Firestore via transaction and re-render without full page reload | ✅ done |
+| 5.11 | Activity feed per tool | `?tool=` filter applied on click; screenshot thumbnails load via V4 signed URLs (15-min lifetime); URLs auto-refreshed on `visibilitychange` + proactive refresh after 9 min | ✅ done |
+| 5.12 | Report viewer tab (placeholder) | Panel fetches `reports` Firestore collection; renders "No reports yet" empty state; full render deferred to Sprint 7 | ✅ done |
+| 5.12b | Global Settings panel | Admins can update global capture settings (retention, etc.) persisting to Firestore config doc | ✅ done |
+| 5.12c | User Profile view | Logged-in user can view assigned projects and copy their Personal API Key | ✅ done |
+| 5.13 | Auth guard | Portal is protected by Cloud IAP at the LB level — no unauthenticated request reaches the SPA. `hammer-api` routes read `X-Goog-Authenticated-User-Email` header for identity; missing or invalid `X-Api-Key` → 401 on all `/admin/*` API routes | ✅ done |
+| 5.14 | Deploy Admin Portal to Cloud Run | Image built and pushed to Artifact Registry tagged with `$COMMIT_SHA` by **Cloud Build trigger** on push to `main`; `hammer-portal` deployed automatically by `cloudbuild.yaml` step 8; smoke test in `cloudbuild.yaml` step 9 verifies `curl $PORTAL_URL/health` → `{"status":"ok"}`; accessible via `https://app.thehammer.io` after Sprint 21 LB cutover — **do not modify `cloudbuild.yaml` or trigger configuration** | ✅ done |
 
 ### Extension Migration
 
@@ -230,40 +230,9 @@ Additional pre-flight for Sprint 5:
 
 ---
 
-## Sprint 8 — Instructional Designer Workspace
+## Sprint 22 — Instructional Designer Workspace (Deferred)
 
-**Goal:** Cloud-only screenshot → storyboard → annotated MP4 + PDF pipeline.
-
-**Sprint P%: 🟠 63%** — Screenshot browser and annotation editor are high-confidence. FFmpeg subtitle burn-in (8.6) and drag-and-drop sequencing (8.2) are the primary risk items.
-
-> **FFmpeg decision resolved:** `hammer-export` is a **Cloud Run Job** (not a Service), triggered via Cloud Tasks. `--task-timeout 1800s`. 50-slide hard ceiling is non-negotiable and must be enforced before FFmpeg starts; requests above the limit should be rejected with HTTP 400 before enqueue. Job SA is `hammer-export-sa` with `roles/storage.objectAdmin` on `hammer-exports-{PROJECT_ID}` bucket only.
-
-### Screenshot Browser & Storyboard
-
-| # | Task | Done when | P% |
-|---|---|---|---|
-| 8.1 | Screenshot grid view | GCS `hammer-screenshots-{PROJECT_ID}` screenshots paginated 20/page; V4 signed URLs (15-min lifetime) batch-generated; sorted by `uploadedAt` ascending | 🟡 86% |
-| 8.2 | Drag-and-drop storyboard sequencing | SortableJS (CDN) reorders slides; sequence JSON saved to Firestore `storyboards` on drop; storyboard doc has `schemaVersion: 1`; works on desktop and touch (SortableJS Pointer Events API) | 🟠 66% |
-| 8.3 | Per-slide annotation editor | Click thumbnail → `<textarea>` side panel opens; debounce-saved to storyboard doc (500 ms) | 🟡 86% |
-| 8.4 | Import Analyst report as narrative seed | "Import Executive Summary" maps report paragraphs to slides by timestamp proximity; user can re-assign; pre-loaded text is editable | 🟡 77% |
-
-### Cloud Video Export
-
-| # | Task | Done when | P% |
-|---|---|---|---|
-| 8.5 | `POST /export/video` | Accepts `{ storyboardId, durationPerSlideMs, transitionMs }`; storyboard capped at 50 slides (enforced here before enqueue, reject > 50 with HTTP 400); enqueues Cloud Tasks task targeting `hammer-export` Cloud Run Job; returns `{ jobId }` within 200 ms | 🟢 93% |
-| 8.6 | FFmpeg job: screenshots → H.264 MP4 with subtitle burn-in | Cloud Run Job (`hammer-export`); 1280×720 MP4; each slide held for `durationPerSlideMs` (default 3 s); annotation text via `drawtext` filter + bundled Noto Sans font; `--task-timeout 1800s` | 🟠 63% |
-| 8.7 | FFmpeg progress reporting | `GET /export/video/:jobId/status` returns `{ status, progressPercent }` parsed from FFmpeg stderr `time=` tokens; job state persisted in Firestore | 🟡 79% |
-| 8.8 | Video stored in GCS `hammer-exports-{PROJECT_ID}` | Path: `exports/{projectId}/{storyboardId}/{timestamp}.mp4`; 24-hour V4 signed URL returned in status response; bucket lifecycle: Day 30 → NEARLINE, Day 90 → delete | 🟢 91% |
-| 8.9 | HTML5 video preview + download | `<video>` player loads via signed URL; CORS `AllowedOrigins` set on `hammer-exports-{PROJECT_ID}` bucket to `https://app.thehammer.io`; "Download" triggers blob download | 🟡 82% |
-
-### Document Export & Access Control
-
-| # | Task | Done when | P% |
-|---|---|---|---|
-| 8.10 | PDF instruction export | "Export PDF" renders thumbnails + annotations via `@media print`; `window.print()` produces clean single-column document in Chrome | 🟡 76% |
-| 8.11 | Instructional Designer role enforced | `sha256(req.headers['x-api-key'])` asserted as `role == 'instructional_designer'` from `api_keys` collection; non-ID key → 403 on `/export/*` and storyboard write routes | 🟢 94% |
-| 8.12 | Admin sees completed exports | Exports tab: all MP4s listed with title, author, `createdAt`, 24-hour signed URL download link | 🟡 84% |
+> **Deferred:** This work has been moved out of the current delivery window. See [sprint22.md](./sprint22.md) for the detailed breakdown.
 
 ---
 
@@ -346,7 +315,7 @@ The full 8-alert set from `arch_decisions.md` §6.3 is implemented here. Alerts 
 | 6 | Session timestamps + inactivity timer | 🟡 74% | 6.2 — `sessionEnd` flush on Chrome shutdown |
 | 6S | Research spike (alarms + OCR) | 🟢 91% | S.4 — OCR PoC accuracy on real GTM screenshots |
 | 7 | Analyst report engine | 🟡 71% | 7.8–7.11 — OCR extraction accuracy (conditional on 6S) |
-| 8 | Instructional Designer workspace | 🟠 63% | 8.6 — FFmpeg `drawtext` subtitle burn-in in Docker |
+| 22 | Instructional Designer workspace | 🟠 63% | Deferred |
 | 9 | Auth hardening + integration tests | 🟡 73% | 9.5/9.6 — integration + smoke tests expose upstream bugs |
 | 10 | Extension Superpowers | 🟡 71% | 10.2 — Cross-domain CSS layout quirks with DOM element bounding boxes |
 | **All sprints (sequential gates)** | Full platform | **🟠 ~12%** | Compounded — every gate must pass |
@@ -357,17 +326,17 @@ The full 8-alert set from `arch_decisions.md` §6.3 is implemented here. Alerts 
 
 ## Sprint Completion Gates
 
-| Gate | S21 | S5 | S6 | S6S | S7 | S8 | S9 | S10 |
-|---|---|---|---|---|---|---|---|---|
-| All tasks verified against Done When | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
-| No open TODO comments in committed code | ⏳ | ⏳ | ⏳ | — | ⏳ | ⏳ | ⏳ | ⏳ |
-| Previous sprint acceptance criteria still pass | — | ⏳ | ⏳ | — | ⏳ | ⏳ | ⏳ | ⏳ |
-| Role/Entitlement enforcement verified | — | — | — | — | ⏳ | ⏳ | ⏳ | ⏳ |
-| Sprint 6S go/no-go decision recorded | — | — | — | ⏳ | — | — | — | — |
-| `firestore.indexes.json` updated + deployed | — | ⏳ | ⏳ | — | ⏳ | ⏳ | — | — |
-| `infra/` Terraform zero-drift verified | ⏳ | ⏳ | — | — | — | — | ⏳ | — |
-| `lessons_learned.md` current | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
-| `dev_guiderails.md` rules strictly followed | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
+| Gate | S21 | S5 | S6 | S6S | S7 | S9 | S10 |
+|---|---|---|---|---|---|---|---|
+| All tasks verified against Done When | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
+| No open TODO comments in committed code | ⏳ | ⏳ | ⏳ | — | ⏳ | ⏳ | ⏳ |
+| Previous sprint acceptance criteria still pass | — | ⏳ | ⏳ | — | ⏳ | ⏳ | ⏳ |
+| Role/Entitlement enforcement verified | — | — | — | — | ⏳ | ⏳ | ⏳ |
+| Sprint 6S go/no-go decision recorded | — | — | — | ⏳ | — | — | — |
+| `firestore.indexes.json` updated + deployed | — | ⏳ | ⏳ | — | ⏳ | — | — |
+| `infra/` Terraform zero-drift verified | ⏳ | ⏳ | — | — | — | ⏳ | — |
+| `lessons_learned.md` current | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
+| `dev_guiderails.md` rules strictly followed | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
 
 ---
 

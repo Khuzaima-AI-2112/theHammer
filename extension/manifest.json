@@ -3,7 +3,7 @@
   "name": "The Hammer",
   "version": "0.1.0",
   "description": "One-click screenshot capture with project/user metadata.",
-  "permissions": ["activeTab", "storage", "scripting", "notifications", "tabs"],
+  "permissions": ["activeTab", "storage", "scripting", "notifications", "tabs", "alarms"],
   "commands": {
     "capture-screenshot": {
       "suggested_key": {

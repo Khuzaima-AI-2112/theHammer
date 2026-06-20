@@ -207,6 +207,7 @@ function readConfig(d) {
     maxFileSizeBytes:      d.maxFileSizeBytes       ?? CONFIG_DEFAULTS.maxFileSizeBytes,
     defaultCaptureQuality: d.defaultCaptureQuality  ?? CONFIG_DEFAULTS.defaultCaptureQuality,
     backendUrl:            d.backendUrl             ?? CONFIG_DEFAULTS.backendUrl,
+    inactivityPromptEnabled: d.inactivityPromptEnabled ?? false,
     schemaVersion:         d.schemaVersion          ?? 1,
   };
 }
@@ -220,13 +221,25 @@ router.get('/config', async (req, res, next) => {
 
     const snap = await db.collection('config').doc('global').get();
 
-    if (!snap.exists) {
-      // Return safe defaults — the admin hasn't saved a config doc yet.
-      // This is not a 404: the extension must always be able to boot.
-      return res.json({ ...CONFIG_DEFAULTS, _source: 'defaults' });
+    let configData = { ...CONFIG_DEFAULTS, inactivityPromptEnabled: false };
+    if (snap.exists) {
+      configData = readConfig(snap.data());
     }
 
-    return res.json(readConfig(snap.data()));
+    // Per-user entitlement overrides global entitlement if it is explicitly set
+    const userData = userSnap.data();
+    if (typeof userData.inactivityPromptEnabled === 'boolean') {
+      configData.inactivityPromptEnabled = userData.inactivityPromptEnabled;
+    }
+    if (typeof userData.inactivityTimerSeconds === 'number') {
+      configData.inactivityTimerSeconds = userData.inactivityTimerSeconds;
+    }
+
+    if (!snap.exists) {
+      return res.json({ ...configData, _source: 'defaults' });
+    }
+
+    return res.json(configData);
   } catch (err) {
     next(err);
   }
@@ -276,6 +289,11 @@ router.patch('/config', requireAdmin, async (req, res, next) => {
         return res.status(400).json({ error: 'backendUrl must be a valid http/https URL', field: 'backendUrl', value: body.backendUrl });
       }
       update.backendUrl = v;
+    }
+
+    // inactivityPromptEnabled — boolean
+    if ('inactivityPromptEnabled' in body) {
+      update.inactivityPromptEnabled = !!body.inactivityPromptEnabled;
     }
 
     if (Object.keys(update).length === 0) {

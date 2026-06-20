@@ -233,6 +233,126 @@ app.post('/capture', requireApiKey, requireMultipart, upload.single('file'), asy
   }
 });
 
+// ─ POST /session-events ───────────────────────────────────────────
+app.post('/session-events', requireApiKey, async (req, res, next) => {
+  try {
+    const body = req.body || {};
+    const missing = [];
+    if (!body.sessionId) missing.push('sessionId');
+    if (!body.projectId) missing.push('projectId');
+    if (!body.sessionStart) missing.push('sessionStart');
+    if (!body.sessionEnd) missing.push('sessionEnd');
+    
+    if (missing.length > 0) return res.status(400).json({ error: 'Missing required fields', missing });
+
+    const safeProject = sanitize(body.projectId);
+    
+    // Resolve user from X-Api-Key if possible
+    let resolvedUserId = null;
+    try {
+      const rawKey = req.headers['x-api-key'];
+      if (rawKey) {
+        const keyHash = sha256(rawKey);
+        const keySnap = await db.collection('api_keys').where('keyHash', '==', keyHash).where('isActive', '==', true).limit(1).get();
+        if (!keySnap.empty) {
+          resolvedUserId = keySnap.docs[0].data().userId;
+        }
+      }
+    } catch(err) {}
+
+    // Calculate trueActiveMs (Duration - any inactivity). We will do simple sessionLength for now,
+    // and if we fetch inactivity_events for this session, subtract it.
+    let trueActiveMs = null;
+    const startMs = new Date(body.sessionStart).getTime();
+    const endMs = new Date(body.sessionEnd).getTime();
+    if (!isNaN(startMs) && !isNaN(endMs)) {
+      let durationMs = endMs - startMs;
+      
+      // Fetch inactivity for this session to subtract
+      try {
+        const inactSnap = await db.collection('inactivity_events')
+          .where('sessionId', '==', body.sessionId)
+          .get();
+        
+        let inactiveMs = 0;
+        inactSnap.forEach(doc => {
+          const d = doc.data();
+          const iStart = new Date(d.inactiveStart).getTime();
+          const iEnd = new Date(d.inactiveEnd).getTime();
+          if (!isNaN(iStart) && !isNaN(iEnd)) {
+            inactiveMs += (iEnd - iStart);
+          }
+        });
+        trueActiveMs = durationMs - inactiveMs;
+        if (trueActiveMs < 0) trueActiveMs = 0;
+      } catch (err) {}
+    }
+
+    const docId = sanitize(body.sessionId, 64);
+    await db.collection('session_events').doc(docId).set({
+      sessionId: body.sessionId,
+      projectId: safeProject,
+      userId: resolvedUserId || null,
+      sessionStart: body.sessionStart,
+      sessionEnd: body.sessionEnd,
+      totalCaptures: body.totalCaptures || 0,
+      firstCapturePath: body.firstCapturePath || null,
+      lastCapturePath: body.lastCapturePath || null,
+      schemaVersion: 1,
+      deleteAfter: body.deleteAfter || null,
+      flushReason: body.flushReason || null,
+      trueActiveMs: trueActiveMs
+    }, { merge: true });
+
+    return res.json({ success: true, sessionId: body.sessionId });
+  } catch (err) {
+    return next(err);
+  }
+});
+
+// ─ POST /inactivity-events ────────────────────────────────────────
+app.post('/inactivity-events', requireApiKey, async (req, res, next) => {
+  try {
+    const body = req.body || {};
+    const missing = [];
+    if (!body.eventId) missing.push('eventId');
+    if (!body.sessionId) missing.push('sessionId');
+    if (!body.projectId) missing.push('projectId');
+    if (!body.inactiveStart) missing.push('inactiveStart');
+    if (!body.inactiveEnd) missing.push('inactiveEnd');
+    
+    if (missing.length > 0) return res.status(400).json({ error: 'Missing required fields', missing });
+
+    let resolvedUserId = null;
+    try {
+      const rawKey = req.headers['x-api-key'];
+      if (rawKey) {
+        const keyHash = sha256(rawKey);
+        const keySnap = await db.collection('api_keys').where('keyHash', '==', keyHash).where('isActive', '==', true).limit(1).get();
+        if (!keySnap.empty) {
+          resolvedUserId = keySnap.docs[0].data().userId;
+        }
+      }
+    } catch(err) {}
+
+    const docId = sanitize(body.eventId, 64);
+    await db.collection('inactivity_events').doc(docId).set({
+      eventId: body.eventId,
+      sessionId: body.sessionId,
+      projectId: sanitize(body.projectId),
+      userId: resolvedUserId || null,
+      inactiveStart: body.inactiveStart,
+      inactiveEnd: body.inactiveEnd,
+      durationMs: new Date(body.inactiveEnd).getTime() - new Date(body.inactiveStart).getTime(),
+      schemaVersion: 1
+    }, { merge: true });
+
+    return res.json({ success: true, eventId: body.eventId });
+  } catch (err) {
+    return next(err);
+  }
+});
+
 // ─────────────────────────────────────────────────────────────────
 // Admin routers (Sprint 5)
 // All route-level auth is handled inside each router via requireRole().
@@ -241,6 +361,25 @@ app.use('/',       require('./routes/admin/me'));
 app.use('/admin',  require('./routes/admin/projects'));
 app.use('/admin',  require('./routes/admin/users'));
 app.use('/admin',  require('./routes/admin/activity'));
+app.use('/admin',  require('./routes/admin/reports'));
+
+// ─────────────────────────────────────────────────────────────────
+// Internal Worker Endpoints
+// ─────────────────────────────────────────────────────────────────
+const { generateStandardReport } = require('./worker/reportsWorker');
+const { generateOcrReport } = require('./worker/ocrWorker');
+
+app.post('/worker/reports', express.json(), (req, res) => {
+  const { reportId, projectId, reportType, dateRange } = req.body;
+  generateStandardReport(reportId, projectId, reportType, dateRange);
+  res.status(202).send();
+});
+
+app.post('/worker/ocr', express.json(), (req, res) => {
+  const { reportId, projectId, reportType, dateRange } = req.body;
+  generateOcrReport(reportId, projectId, reportType, dateRange);
+  res.status(202).send();
+});
 
 // ─ 404 fallback ───────────────────────────────────────────────────
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }));

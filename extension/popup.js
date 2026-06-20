@@ -56,6 +56,11 @@ const capturePanel = document.getElementById('capture-panel');
 const historyPanel = document.getElementById('history-panel');
 const historyList  = document.getElementById('history-list');
 
+// Inactivity Modal (6.5)
+const inactivityModal = document.getElementById('inactivity-modal');
+const btnSnooze       = document.getElementById('btn-snooze');
+const btnCaptureNow   = document.getElementById('btn-capture-now');
+
 document.addEventListener('DOMContentLoaded', async () => {
   const { session, settings } = await chrome.storage.local.get(['session', 'settings']);
 
@@ -132,10 +137,39 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   // ── 4.3: listen for upload progress from service worker ──
-  chrome.runtime.onMessage.addListener((message) => {
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === 'UPLOAD_PROGRESS') {
       showProgress(message.percent);
     }
+    // ── 6.5: Inactivity Modal ──
+    if (message.type === 'INACTIVITY_WARNING') {
+      chrome.storage.local.get('settings').then(({ settings }) => {
+        const sec = settings?.inactivityTimerSeconds || 45;
+        const p = inactivityModal.querySelector('p');
+        if (p) p.textContent = `It has been ${sec} seconds since your last capture. Would you like to capture now?`;
+        inactivityModal.classList.add('open');
+      });
+      sendResponse({ handled: true });
+      return true;
+    }
+    if (message.type === 'DISMISS_INACTIVITY_PROMPT') {
+      inactivityModal.classList.remove('open');
+      sendResponse({ handled: true });
+      return true;
+    }
+  });
+
+  btnSnooze.addEventListener('click', () => {
+    inactivityModal.classList.remove('open');
+    chrome.runtime.sendMessage({ type: 'SNOOZE_INACTIVITY' });
+  });
+
+  btnCaptureNow.addEventListener('click', () => {
+    inactivityModal.classList.remove('open');
+    chrome.runtime.sendMessage({ type: 'CAPTURE_INACTIVITY' });
+    // Also update UI to show capturing state
+    setStatus('Capturing…');
+    showProgress(0);
   });
 
   // ── Settings toggle ──
@@ -238,6 +272,9 @@ async function loadConfig(apiKey) {
     if (config.cloudRunUrl) updated.cloudRunUrl = config.cloudRunUrl.trim();
     if (config.retention)   updated.retention   = config.retention;
     if (config.maxSize)     updated.maxSize      = config.maxSize;
+    if (typeof config.inactivityTimerSeconds === 'number') {
+      updated.inactivityTimerSeconds = config.inactivityTimerSeconds;
+    }
 
     await chrome.storage.local.set({ settings: updated });
 

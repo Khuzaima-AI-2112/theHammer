@@ -332,8 +332,33 @@ chrome.runtime.onConnect.addListener((port) => {
 });
 
 // ── Messages from popup and content script ──
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.type !== 'CAPTURE') return false;
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg.type === 'CAPTURE_NOW') {
+    chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
+      if (tabs.length > 0) await capture(tabs[0]);
+      sendResponse({ status: 'ok' });
+    });
+    return true; // async
+  }
+  if (msg.type === 'SNOOZE_INACTIVITY') {
+    chrome.alarms.clear('dismiss_inactivity_prompt');
+    getInactivityTimerSeconds().then(sec => {
+      chrome.alarms.create('inactivity_timer', { delayInMinutes: sec / 60 });
+    });
+    logInactivityEvent();
+    sendResponse({ status: 'ok' });
+    return true;
+  }
+  if (msg.type === 'CAPTURE_INACTIVITY') {
+    chrome.alarms.clear('dismiss_inactivity_prompt');
+    chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
+      if (tabs.length > 0) await capture(tabs[0]);
+      logInactivityEvent();
+      sendResponse({ status: 'ok' });
+    });
+    return true; // async
+  }
+  if (msg.type !== 'CAPTURE') return false;
   if (sender.tab && sender.frameId !== 0) return false;
 
   const tabPromise = sender.tab
@@ -431,6 +456,10 @@ async function capture(tab) {
     s.lastCapturePath = uploadResult.path;
     await sessionSet(s);
   }
+
+  // 6.2/6.4: Set inactivity timer (resets any existing timer)
+  const timerSec = await getInactivityTimerSeconds();
+  chrome.alarms.create('inactivity_timer', { delayInMinutes: timerSec / 60 });
 
   await historyAppend({
     path:      uploadResult.path,
@@ -532,13 +561,141 @@ async function uploadViaProxy(blob, session, tabUrl, cloudRunUrl, apiKey, sessio
 }
 
 // ── Helpers ──
-function blobToBase64(blob) {
+async function blobToBase64(blob) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload  = () => resolve(reader.result.split(',')[1]);
+    reader.onloadend = () => resolve(reader.result);
     reader.onerror = reject;
     reader.readAsDataURL(blob);
   });
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Inactivity Alarms & Notifications (Sprint 6.2 & 6.4)
+// ─────────────────────────────────────────────────────────────────
+
+async function getInactivityTimerSeconds() {
+  const { settings } = await chrome.storage.local.get('settings');
+  return settings?.inactivityTimerSeconds || 45;
+}
+
+chrome.alarms.onAlarm.addListener(async (alarm) => {
+  if (alarm.name === 'dismiss_inactivity_prompt') {
+    chrome.notifications.clear('inactivity_prompt');
+    chrome.runtime.sendMessage({ type: 'DISMISS_INACTIVITY_PROMPT' }).catch(() => {});
+    // Next inactivity cycle starts fresh
+    const timerSec = await getInactivityTimerSeconds();
+    chrome.alarms.create('inactivity_timer', { delayInMinutes: timerSec / 60 });
+    return;
+  }
+
+  if (alarm.name !== 'inactivity_timer') return;
+
+  const s = await sessionGet();
+  // Only trigger if a session is actively running
+  if (!s || s.flushed) return;
+
+  const { settings } = await chrome.storage.local.get('settings');
+  const cloudRunUrl = settings?.cloudRunUrl?.trim() || FALLBACK_API_BASE;
+  const apiKey      = settings?.apiKey?.trim() || '';
+
+  let enabled = false;
+  if (apiKey && cloudRunUrl) {
+    try {
+      const res = await fetch(`${cloudRunUrl}/config`, {
+        headers: { 'X-Api-Key': apiKey }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        enabled = !!data.inactivityPromptEnabled;
+      }
+    } catch(err) {
+      console.warn('[Hammer SW] failed to fetch config for inactivity alarm', err);
+    }
+  }
+
+  if (!enabled) return;
+
+  // URL Suppression check
+  const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  const tabUrl = tabs[0]?.url || '';
+  if (tabUrl.startsWith('chrome://') || tabUrl.startsWith('edge://') || tabUrl.startsWith('about:') || !tabUrl.startsWith('http')) {
+    const timerSec = await getInactivityTimerSeconds();
+    chrome.alarms.create('inactivity_timer', { delayInMinutes: timerSec / 60 });
+    return;
+  }
+
+  let popupHandled = false;
+  try {
+    const response = await chrome.runtime.sendMessage({ type: 'INACTIVITY_WARNING' });
+    if (response && response.handled) {
+      popupHandled = true;
+    }
+  } catch (err) {
+    // Popup closed
+  }
+
+  if (!popupHandled) {
+    chrome.notifications.create('inactivity_prompt', {
+      type: 'basic',
+      iconUrl: ICON_DATA_URI,
+      title: 'Are you still there?',
+      message: `It has been ${settings?.inactivityTimerSeconds || 45} seconds since your last capture. Would you like to capture now?`,
+      buttons: [{ title: 'Capture Now' }, { title: 'Snooze' }],
+      requireInteraction: true
+    });
+  }
+
+  chrome.alarms.create('dismiss_inactivity_prompt', { delayInMinutes: 30 / 60 });
+});
+
+chrome.notifications.onButtonClicked.addListener(async (notificationId, buttonIndex) => {
+  if (notificationId !== 'inactivity_prompt') return;
+  chrome.notifications.clear(notificationId);
+  chrome.alarms.clear('dismiss_inactivity_prompt');
+
+  if (buttonIndex === 0) {
+    // Capture Now
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (tabs.length > 0) {
+      await capture(tabs[0]);
+    }
+  } else if (buttonIndex === 1) {
+    // Snooze
+    const timerSec = await getInactivityTimerSeconds();
+    chrome.alarms.create('inactivity_timer', { delayInMinutes: timerSec / 60 });
+  }
+
+  // Always log the inactivity event
+  await logInactivityEvent();
+});
+
+async function logInactivityEvent() {
+  const s = await sessionGet();
+  if (!s || s.flushed) return;
+
+  const { settings } = await chrome.storage.local.get('settings');
+  const cloudRunUrl = settings?.cloudRunUrl?.trim() || FALLBACK_API_BASE;
+  const apiKey      = settings?.apiKey?.trim() || '';
+  const timerSeconds = settings?.inactivityTimerSeconds || 45;
+
+  if (apiKey && cloudRunUrl) {
+    const inactiveEnd = new Date().toISOString();
+    // The start of inactivity was timerSeconds ago
+    const inactiveStart = new Date(Date.now() - (timerSeconds * 1000)).toISOString();
+
+    fetch(`${cloudRunUrl}/inactivity-events`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Api-Key': apiKey },
+      body: JSON.stringify({
+        eventId: crypto.randomUUID(),
+        sessionId: s.sessionId,
+        projectId: s.projectId,
+        inactiveStart,
+        inactiveEnd
+      })
+    }).catch(e => console.warn('[Hammer SW] failed to log inactivity', e));
+  }
 }
 
 function showNotification(title, message) {

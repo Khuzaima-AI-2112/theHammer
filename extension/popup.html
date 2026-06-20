@@ -133,6 +133,29 @@
       max-width: 288px;
     }
     .history-meta { font-size: 10px; color: #999; }
+
+    /* ── Inactivity Modal (6.5) ── */
+    #inactivity-modal {
+      display: none;
+      position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0, 0, 0, 0.5);
+      z-index: 1000;
+      justify-content: center; align-items: center;
+      padding: 16px;
+    }
+    #inactivity-modal.open { display: flex; }
+    .modal-content {
+      background: #fff; border-radius: 8px; padding: 16px;
+      text-align: center; width: 100%;
+    }
+    .modal-content h3 { font-size: 14px; font-weight: 700; color: #01696f; margin-bottom: 8px; }
+    .modal-content p { font-size: 12px; color: #555; margin-bottom: 16px; line-height: 1.4; }
+    .modal-actions { display: flex; gap: 8px; }
+    .modal-actions button { flex: 1; padding: 8px 0; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; transition: background 140ms ease; }
+    #btn-snooze { background: #e6e4df; color: #1a1a1a; }
+    #btn-snooze:hover { background: #d4d1ca; }
+    #btn-capture-now { background: #01696f; color: #fff; }
+    #btn-capture-now:hover { background: #0c4e54; }
   </style>
 </head>
 <body>
@@ -233,6 +256,18 @@
   <!-- 4.5: history panel -->
   <div id="history-panel">
     <div id="history-list"></div>
+  </div>
+
+  <!-- Inactivity Modal (6.5) -->
+  <div id="inactivity-modal">
+    <div class="modal-content">
+      <h3>Are you still there?</h3>
+      <p>It has been 45 seconds since your last capture. Would you like to capture now?</p>
+      <div class="modal-actions">
+        <button id="btn-snooze">Snooze</button>
+        <button id="btn-capture-now">Capture Now</button>
+      </div>
+    </div>
   </div>
 
   <!-- MV3: no inline scripts -->

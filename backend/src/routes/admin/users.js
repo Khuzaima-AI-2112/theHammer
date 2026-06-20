@@ -32,6 +32,8 @@ function serializeUser(snap) {
     role:         d.role,
     createdAt:    d.createdAt instanceof Timestamp ? d.createdAt.toDate().toISOString() : d.createdAt,
     lastActiveAt: d.lastActiveAt instanceof Timestamp ? d.lastActiveAt.toDate().toISOString() : d.lastActiveAt,
+    inactivityPromptEnabled: d.inactivityPromptEnabled,
+    inactivityTimerSeconds: d.inactivityTimerSeconds ?? 45,
     schemaVersion: d.schemaVersion,
   };
 }
@@ -104,6 +106,7 @@ router.post('/users', requireAdmin, async (req, res, next) => {
       role,
       createdAt:     now,
       lastActiveAt:  now,
+      inactivityTimerSeconds: 45,
       schemaVersion: 1,
     });
     const snap = await ref.get();
@@ -213,6 +216,35 @@ router.delete('/projects/:id/members/:userId', requireAdmin, async (req, res, ne
     if (err.status) return res.status(err.status).json({ error: err.message });
     next(err);
   }
+});
+
+// ─── PATCH /admin/users/:id ────────────────────────────────────────────────
+// Update user configuration (e.g., inactivityPromptEnabled, inactivityTimerSeconds)
+router.patch('/users/:id', requireAdmin, async (req, res, next) => {
+  try {
+    const userId = req.params.id;
+    const updates = {};
+    if (typeof req.body?.inactivityPromptEnabled === 'boolean') {
+      updates.inactivityPromptEnabled = req.body.inactivityPromptEnabled;
+    }
+    if (typeof req.body?.inactivityTimerSeconds === 'number' && req.body.inactivityTimerSeconds > 0) {
+      updates.inactivityTimerSeconds = req.body.inactivityTimerSeconds;
+    }
+    
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({ error: 'no valid fields to update' });
+    }
+
+    const userRef = db.collection('users').doc(userId);
+    const snap = await userRef.get();
+    if (!snap.exists) return res.status(404).json({ error: 'user not found' });
+
+    updates.updatedAt = nowISO();
+    await userRef.update(updates);
+
+    const updatedSnap = await userRef.get();
+    return res.json(serializeUser(updatedSnap));
+  } catch (err) { next(err); }
 });
 
 module.exports = router;
