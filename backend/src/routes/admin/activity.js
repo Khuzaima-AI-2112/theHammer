@@ -1,8 +1,10 @@
 /**
  * Sprint 5.8  —  /admin/projects/:id/activity
+ * Sprint 5.11 —  signed URL enrichment added
  *
  * GET /admin/projects/:id/activity
  *   Returns the last N uploads for a project, optionally filtered by tool.
+ *   Each upload includes a 15-min V4 signed URL for thumbnail display.
  *   Query params:
  *     ?tool=<toolName>   — filter by tool name (optional)
  *     ?limit=<n>         — max rows; default 100, max 500
@@ -15,12 +17,37 @@
 
 const express = require('express');
 const { Timestamp } = require('firebase-admin/firestore');
+const { Storage } = require('@google-cloud/storage');
 const { db } = require('../../lib/firestore');
 const { requireAdmin } = require('../../middleware/requireAdmin');
 
 const router    = express.Router({ mergeParams: true });
 const MAX_LIMIT = 500;
 const DEF_LIMIT = 100;
+
+// GCS client — uses ADC (Application Default Credentials) on Cloud Run.
+const storage   = new Storage();
+const BUCKET    = process.env.GCS_BUCKET || 'thehammer-storage-2026';
+const bucket    = storage.bucket(BUCKET);
+
+// Signed URL lifetime: 15 minutes. Portal refreshes every 9 min via
+// visibilitychange handler so URLs are always valid when the tab is active.
+const SIGNED_URL_TTL_MS = 15 * 60 * 1000;
+
+async function makeSignedUrl(gcsPath) {
+  if (!gcsPath) return null;
+  try {
+    const [url] = await bucket.file(gcsPath).getSignedUrl({
+      version: 'v4',
+      action:  'read',
+      expires: Date.now() + SIGNED_URL_TTL_MS,
+    });
+    return url;
+  } catch (_) {
+    // Non-fatal: return null so the portal degrades to path-only display.
+    return null;
+  }
+}
 
 function serializeUpload(snap) {
   const d = snap.data();
@@ -89,10 +116,17 @@ router.get('/projects/:id/activity', requireAdmin, async (req, res, next) => {
       });
     }
 
-    const enriched = uploads.map(u => ({
+    // Generate signed URLs in parallel — capped to DEF_LIMIT rows so we
+    // never generate more than 100 signed URLs per request.
+    const signedUrls = await Promise.all(
+      uploads.map(u => makeSignedUrl(u.gcsPath))
+    );
+
+    const enriched = uploads.map((u, i) => ({
       ...u,
       userDisplayName: userMap[u.userId]?.displayName ?? null,
       userEmail:       userMap[u.userId]?.email        ?? null,
+      signedUrl:       signedUrls[i],
     }));
 
     const nextCursor = hasMore ? enriched[enriched.length - 1].uploadedAt : null;
