@@ -99,6 +99,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // ── Save session ──
   saveBtn.addEventListener('click', async () => {
+    saveBtn.disabled = true;
     const s = {
       projectId: projectSelect.value,
       stage:     stageSelect.value,
@@ -111,14 +112,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     } catch (err) {
       console.error('[Hammer popup] save error:', err);
       setStatus('Save failed: ' + err.message);
+    } finally {
+      saveBtn.disabled = false;
     }
   });
 
   // ── Capture Now ──
   captureBtn.addEventListener('click', () => {
+    captureBtn.disabled = true;
     setStatus('Capturing…');
     showProgress(0);
     chrome.runtime.sendMessage({ type: 'CAPTURE' }, (response) => {
+      captureBtn.disabled = false;
       hideProgress();
       if (chrome.runtime.lastError) {
         setStatus('Error: ' + chrome.runtime.lastError.message);
@@ -189,26 +194,27 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // ── 5.18: OAuth Login Flow ──
   authLoginBtn.addEventListener('click', async () => {
-    const existing = (await chrome.storage.local.get('settings')).settings || {};
-    
-    if (existing.firebaseToken) {
-      // Sign out
-      await chrome.storage.local.set({ settings: { ...existing, firebaseToken: '', firebaseRefreshToken: '' } });
-      authStatusText.textContent = 'Not signed in';
-      authLoginBtn.textContent = 'Sign In';
-      noKeyBanner.style.display = 'block';
-      captureBtn.disabled = true;
-      setProjectSelectPlaceholder('Sign in to view projects');
-      setStatus('Signed out.');
-      return;
-    }
-    
-    setStatus('Authenticating...');
-    const baseUrl = existing.cloudRunUrl?.trim() || 'https://app.thehammer.io';
-    const authUrl = `${baseUrl.replace('/api', '')}/auth-ext.html`;
-    const redirectUrl = chrome.identity.getRedirectURL();
-
+    authLoginBtn.disabled = true;
     try {
+      const existing = (await chrome.storage.local.get('settings')).settings || {};
+      
+      if (existing.firebaseToken) {
+        // Sign out
+        await chrome.storage.local.set({ settings: { ...existing, firebaseToken: '', firebaseRefreshToken: '' } });
+        authStatusText.textContent = 'Not signed in';
+        authLoginBtn.textContent = 'Sign In';
+        noKeyBanner.style.display = 'block';
+        captureBtn.disabled = true;
+        setProjectSelectPlaceholder('Sign in to view projects');
+        setStatus('Signed out.');
+        return;
+      }
+      
+      setStatus('Authenticating...');
+      const baseUrl = existing.cloudRunUrl?.trim() || 'https://app.thehammer.io';
+      const authUrl = `${baseUrl.replace('/api', '')}/auth-ext.html`;
+      const redirectUrl = chrome.identity.getRedirectURL();
+
       const responseUrl = await chrome.identity.launchWebAuthFlow({
         url: `${authUrl}?redirect_uri=${encodeURIComponent(redirectUrl)}`,
         interactive: true
@@ -237,11 +243,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     } catch (err) {
       console.error('[Hammer popup] OAuth error:', err);
       setStatus('Sign-in failed.');
+    } finally {
+      authLoginBtn.disabled = false;
     }
   });
 
   // ── 5.15 / 5.17: Settings save ──
   settingsSaveBtn.addEventListener('click', async () => {
+    settingsSaveBtn.disabled = true;
     const existing = (await chrome.storage.local.get('settings')).settings || {};
     const allSettings = {
       ...existing,        // preserve tokens, cloudRunUrl, etc.
@@ -254,6 +263,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     } catch (err) {
       console.error('[Hammer popup] settings save error:', err);
       setStatus('Save failed: ' + err.message);
+    } finally {
+      settingsSaveBtn.disabled = false;
     }
   });
 

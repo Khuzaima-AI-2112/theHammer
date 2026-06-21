@@ -124,6 +124,9 @@ router.get('/projects/:id/members', requireAdmin, async (req, res, next) => {
     const projectId = req.params.id;
     const projSnap  = await db.collection('projects').doc(projectId).get();
     if (!projSnap.exists) return res.status(404).json({ error: 'project not found' });
+    if (projSnap.data().workspaceId !== req.hammerUser.workspaceId) {
+      return res.status(403).json({ error: 'forbidden: project belongs to another workspace' });
+    }
 
     const membSnap = await db.collection('project_memberships')
       .where('projectId', '==', projectId)
@@ -166,6 +169,7 @@ router.post('/projects/:id/members', requireAdmin, async (req, res, next) => {
       ]);
 
       if (!projSnap.exists) throw Object.assign(new Error('project not found'),       { status: 404 });
+      if (projSnap.data().workspaceId !== req.hammerUser.workspaceId) throw Object.assign(new Error('forbidden: project belongs to another workspace'), { status: 403 });
       if (!userSnap.exists) throw Object.assign(new Error('user not found'),           { status: 404 });
       if (membSnap.exists)  throw Object.assign(new Error('membership already exists'),{ status: 409 });
 
@@ -204,6 +208,7 @@ router.delete('/projects/:id/members/:userId', requireAdmin, async (req, res, ne
       ]);
 
       if (!projSnap.exists) throw Object.assign(new Error('project not found'),    { status: 404 });
+      if (projSnap.data().workspaceId !== req.hammerUser.workspaceId) throw Object.assign(new Error('forbidden: project belongs to another workspace'), { status: 403 });
       if (!membSnap.exists) throw Object.assign(new Error('membership not found'), { status: 404 });
 
       tx.delete(membershipRef);

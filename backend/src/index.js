@@ -116,9 +116,7 @@ const upload = multer({
 function sanitize(value, maxLen = 64) {
   if (typeof value !== 'string') return '';
   return value
-    .replace(/\0/g, '')
-    .replace(/\.\.[\\/]/g, '')
-    .replace(/[^a-zA-Z0-9 _.\/\-]/g, '_')
+    .replace(/[^a-zA-Z0-9_.\-]/g, '_')
     .slice(0, maxLen);
 }
 
@@ -269,7 +267,19 @@ app.post('/upload-url', requireAuth('user'), async (req, res, next) => {
 });
 
 // ─ POST /capture ──────────────────────────────────────────────────
-app.post('/capture', requireAuth('user'), requireMultipart, upload.single('file'), async (req, res, next) => {
+app.post('/capture', requireAuth('user'), requireMultipart, (req, res, next) => {
+  upload.single('file')(req, res, (err) => {
+    if (err instanceof multer.MulterError) {
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(413).json({ error: 'Payload Too Large: File exceeds 10MB limit' });
+      }
+      return res.status(400).json({ error: err.message });
+    } else if (err) {
+      return next(err);
+    }
+    next();
+  });
+}, async (req, res, next) => {
   try {
     const { projectId, userId, tool, tabUrl } = req.body || {};
     const missing = [];
@@ -359,6 +369,12 @@ app.post('/session-events', requireAuth('user'), async (req, res, next) => {
     if (missing.length > 0) return res.status(400).json({ error: 'Missing required fields', missing });
 
     const safeProject = sanitize(body.projectId);
+
+    // Enforce Tenant Isolation
+    const projSnap = await db.collection('projects').doc(safeProject).get();
+    if (!projSnap.exists || projSnap.data().workspaceId !== req.hammerUser.workspaceId) {
+      return res.status(403).json({ error: 'Forbidden: Project not found or belongs to another workspace' });
+    }
     
     // Resolve user from X-Api-Key if possible
     let resolvedUserId = null;
@@ -436,6 +452,12 @@ app.post('/inactivity-events', requireAuth('user'), async (req, res, next) => {
     
     if (missing.length > 0) return res.status(400).json({ error: 'Missing required fields', missing });
 
+    // Enforce Tenant Isolation
+    const projSnap = await db.collection('projects').doc(sanitize(body.projectId)).get();
+    if (!projSnap.exists || projSnap.data().workspaceId !== req.hammerUser.workspaceId) {
+      return res.status(403).json({ error: 'Forbidden: Project not found or belongs to another workspace' });
+    }
+
     const resolvedUserId = req.hammerUser.uid;
 
     const docId = sanitize(body.eventId, 64);
@@ -473,16 +495,26 @@ app.use('/admin',  require('./routes/admin/workspaces'));
 // ─────────────────────────────────────────────────────────────────
 // Internal Worker Endpoints
 // ─────────────────────────────────────────────────────────────────
+const workerLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 30, // 30 requests per hour
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (_req, res, _next, options) => {
+    res.status(options.statusCode).json({ error: 'Worker rate limit exceeded (30/hr)' });
+  }
+});
+
 const { generateStandardReport } = require('./worker/reportsWorker');
 const { generateOcrReport } = require('./worker/ocrWorker');
 
-app.post('/worker/reports', express.json(), (req, res) => {
+app.post('/worker/reports', express.json(), workerLimiter, (req, res) => {
   const { reportId, projectId, reportType, dateRange } = req.body;
   generateStandardReport(reportId, projectId, reportType, dateRange);
   res.status(202).send();
 });
 
-app.post('/worker/ocr', express.json(), (req, res) => {
+app.post('/worker/ocr', express.json(), workerLimiter, (req, res) => {
   const { reportId, projectId, reportType, dateRange } = req.body;
   generateOcrReport(reportId, projectId, reportType, dateRange);
   res.status(202).send();

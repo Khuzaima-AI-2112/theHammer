@@ -362,19 +362,18 @@ chrome.commands.onCommand.addListener(async (command) => {
 });
 
 // ── Long-lived port from content script ──
-const _openPorts = new Map();
-
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== 'capture-port') return;
-  _openPorts.set(port.sender?.tab?.id ?? 'unknown', port);
-  port.onDisconnect.addListener(() => {
-    _openPorts.delete(port.sender?.tab?.id ?? 'unknown');
-  });
+  // We do not store the port globally; its existence alone keeps the worker alive
 });
 
 // ── Messages from popup and content script ──
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'CAPTURE_TAB_PORTION') {
+    if (!sender.tab) {
+      sendResponse({ error: 'Sender is not a tab' });
+      return false;
+    }
     chrome.tabs.captureVisibleTab(sender.tab.windowId, { format: 'png' }).then(dataUrl => {
       sendResponse({ dataUrl });
     }).catch(e => sendResponse({ error: e.message }));
@@ -393,6 +392,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
   if (msg.type === 'CAPTURE_NOW') {
     chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
+      if (chrome.runtime.lastError) {
+        sendResponse({ error: chrome.runtime.lastError.message });
+        return;
+      }
       if (tabs.length > 0) await capture(tabs[0]);
       sendResponse({ status: 'ok' });
     });
@@ -410,6 +413,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'CAPTURE_INACTIVITY') {
     chrome.alarms.clear('dismiss_inactivity_prompt');
     chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
+      if (chrome.runtime.lastError) {
+        sendResponse({ error: chrome.runtime.lastError.message });
+        return;
+      }
       if (tabs.length > 0) await capture(tabs[0]);
       logInactivityEvent();
       sendResponse({ status: 'ok' });
