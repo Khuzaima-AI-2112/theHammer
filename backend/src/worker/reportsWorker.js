@@ -1,8 +1,14 @@
 'use strict';
 
 const { Storage } = require('@google-cloud/storage');
+const { VertexAI } = require('@google-cloud/vertexai');
 const { db } = require('../lib/firestore');
 const gcs = new Storage();
+
+// Initialize Vertex with Cloud project and location
+const PROJECT_ID = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT || 'thehammer';
+const LOCATION = 'northamerica-northeast1'; // or us-central1
+const vertex_ai = new VertexAI({ project: PROJECT_ID, location: LOCATION });
 
 // This is a simplified MVP worker logic for generating standard reports
 async function generateStandardReport(reportId, projectId, reportType, dateRange) {
@@ -10,18 +16,50 @@ async function generateStandardReport(reportId, projectId, reportType, dateRange
   try {
     await reportRef.update({ status: 'processing', updatedAt: new Date().toISOString() });
 
+    // Fetch the project configuration to get the llmModel
+    const projectSnap = await db.collection('projects').doc(projectId).get();
+    const projectData = projectSnap.data() || {};
+    const modelId = projectData.llmModel || 'gemini-1.5-flash';
+
     // Mock data aggregation logic since full implementation requires detailed queries
     const resultData = {
       projectId,
       reportType,
       generatedAt: new Date().toISOString(),
-      summary: "This is an auto-generated report."
+      summary: "This is an auto-generated report.",
+      modelUsed: modelId
     };
 
     if (reportType === 'user_efficiency') {
       resultData.metrics = { capturesPerHour: 42, medianSessionLength: "12m 30s" };
     } else if (reportType === 'project_progress') {
       resultData.metrics = { totalCaptures: 1045, activeUsers: 8 };
+    }
+
+    // Call Vertex AI LLM Router to generate narrative summary based on metrics
+    try {
+      const generativeModel = vertex_ai.preview.getGenerativeModel({
+        model: modelId,
+        generationConfig: {
+          maxOutputTokens: 2048,
+          temperature: 0.2,
+          topP: 0.8,
+        },
+      });
+
+      const prompt = `You are an executive assistant. Generate a short narrative summary (max 3 sentences) for a report of type ${reportType}. 
+      The metrics are: ${JSON.stringify(resultData.metrics)}`;
+
+      const resp = await generativeModel.generateContent({
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      });
+      
+      const summaryText = resp.response.candidates[0].content.parts[0].text;
+      resultData.summary = summaryText;
+    } catch (llmError) {
+      console.error(`[Reports Worker] LLM Error for ${reportId} using ${modelId}:`, llmError);
+      resultData.summary = "LLM generation failed. Showing raw metrics only.";
+      resultData.llmError = llmError.message;
     }
 
     // Write to GCS

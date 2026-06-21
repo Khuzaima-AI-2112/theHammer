@@ -2,8 +2,7 @@
 
 const express = require('express');
 const { db } = require('../../lib/firestore');
-const { requireAnalyst } = require('../../middleware/requireAnalyst');
-const { requireAdmin } = require('../../middleware/requireAdmin');
+const { requireAnalyst } = require('../../middleware/requireAuth');
 // Use the Cloud Tasks library if configured, else invoke worker directly (MVP)
 // const { CloudTasksClient } = require('@google-cloud/tasks');
 
@@ -11,16 +10,10 @@ const router = express.Router();
 
 function nowISO() { return new Date().toISOString(); }
 
-// Simple middleware to accept either requireAdmin (IAP) or requireAnalyst (API Key)
-async function requireAuth(req, res, next) {
-  if (req.headers['x-api-key']) {
-    return requireAnalyst(req, res, next);
-  }
-  return requireAdmin(req, res, next);
-}
+const { analystReportLimiter } = require('../../index');
 
 // POST /reports/generate
-router.post('/reports/generate', requireAuth, async (req, res, next) => {
+router.post('/reports/generate', requireAnalyst, analystReportLimiter, async (req, res, next) => {
   try {
     const { projectId, reportType, dateRange } = req.body;
     if (!projectId || !reportType) {
@@ -72,7 +65,7 @@ router.post('/reports/generate', requireAuth, async (req, res, next) => {
 });
 
 // GET /reports/:id/status
-router.get('/reports/:id/status', requireAuth, async (req, res, next) => {
+router.get('/reports/:id/status', requireAnalyst, async (req, res, next) => {
   try {
     const snap = await db.collection('reports').doc(req.params.id).get();
     if (!snap.exists) return res.status(404).json({ error: 'report not found' });
@@ -89,7 +82,7 @@ router.get('/reports/:id/status', requireAuth, async (req, res, next) => {
 });
 
 // GET /reports
-router.get('/reports', requireAuth, async (req, res, next) => {
+router.get('/reports', requireAnalyst, async (req, res, next) => {
   try {
     const { projectId } = req.query;
     if (!projectId) {

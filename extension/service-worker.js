@@ -104,8 +104,8 @@ async function sessionFlush(reason) {
 
   const { settings } = await chrome.storage.local.get('settings');
   const cloudRunUrl = settings?.cloudRunUrl?.trim() || FALLBACK_API_BASE;
-  const apiKey      = settings?.apiKey?.trim() || '';
-  if (!apiKey) return;
+  const token       = settings?.firebaseToken?.trim() || '';
+  if (!token) return;
 
   const now = new Date().toISOString();
 
@@ -136,7 +136,7 @@ async function sessionFlush(reason) {
   try {
     const res = await fetch(`${cloudRunUrl}/session-events`, {
       method:  'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Api-Key': apiKey },
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
       body:    JSON.stringify(body),
       // keepalive: true allows the fetch to outlive the SW suspension window
       keepalive: true
@@ -184,9 +184,9 @@ async function queueSave(queue, failed) {
   await chrome.storage.local.set({ queue, failed });
 }
 
-async function queueAdd(blobBase64, session, tabUrl) {
+async function queueAdd(blobBase64, session, tabUrl, semanticData = null) {
   const { queue, failed } = await queueGet();
-  queue.push({ blobBase64, session, tabUrl, ts: Date.now(), attempts: 0 });
+  queue.push({ blobBase64, session, tabUrl, semanticData, ts: Date.now(), attempts: 0 });
   await queueSave(queue, failed);
   console.log('[Hammer SW] queued offline item; queue length:', queue.length);
 }
@@ -266,8 +266,8 @@ function xhrPut(url, blob) {
 
   const { settings } = await chrome.storage.local.get('settings');
   const cloudRunUrl = settings?.cloudRunUrl?.trim() || FALLBACK_API_BASE;
-  const apiKey      = settings?.apiKey?.trim() || '';
-  if (!cloudRunUrl || !apiKey) return;
+  const token       = settings?.firebaseToken?.trim() || '';
+  if (!cloudRunUrl || !token) return;
 
   console.log('[Hammer SW] draining offline queue:', queue.length, 'item(s)');
 
@@ -282,7 +282,7 @@ function xhrPut(url, blob) {
       const blob = new Blob([bytes], { type: 'image/png' });
 
       const result = await withRetry(() =>
-        uploadBlobWithSignedUrl(blob, item.session, item.tabUrl, cloudRunUrl, apiKey)
+        uploadBlobWithSignedUrl(blob, item.session, item.tabUrl, cloudRunUrl, token, {}, item.semanticData)
       );
 
       await historyAppend({
@@ -302,8 +302,19 @@ function xhrPut(url, blob) {
   await queueSave(remaining, newFailed);
 })();
 
-// ── Install: inject content.js into already-open tabs ──
+// ── Install: inject content.js into already-open tabs & setup context menus ──
 chrome.runtime.onInstalled.addListener(async () => {
+  chrome.contextMenus.create({
+    id: 'capture-element',
+    title: 'Hammer: Capture this element',
+    contexts: ['all']
+  });
+  chrome.contextMenus.create({
+    id: 'capture-fullpage',
+    title: 'Hammer: Capture full page',
+    contexts: ['all']
+  });
+
   const tabs = await chrome.tabs.query({ url: ['http://*/*', 'https://*/*'] });
   for (const tab of tabs) {
     try {
@@ -311,6 +322,36 @@ chrome.runtime.onInstalled.addListener(async () => {
     } catch (e) { /* restricted page — ignore */ }
   }
   console.log('[Hammer SW] installed; injected content.js into', tabs.length, 'tabs');
+});
+
+chrome.contextMenus.onClicked.addListener((info, tab) => {
+  if (info.menuItemId === 'capture-element') {
+    chrome.tabs.sendMessage(tab.id, { type: 'CAPTURE_ELEMENT' }, async (res) => {
+      if (chrome.runtime.lastError) {
+        console.warn('[Hammer SW] Context menu error:', chrome.runtime.lastError.message);
+        await showNotification('Capture failed', 'Please refresh the page to use element capture.');
+        return;
+      }
+      if (res?.ok && res.rect) {
+        await capture(tab, res.rect, res.dpr);
+      } else {
+        await showNotification('Capture failed', 'Could not determine element coordinates.');
+      }
+    });
+  } else if (info.menuItemId === 'capture-fullpage') {
+    chrome.tabs.sendMessage(tab.id, { type: 'START_FULLPAGE_CAPTURE' }, async (res) => {
+      if (chrome.runtime.lastError) {
+        console.warn('[Hammer SW] Context menu error:', chrome.runtime.lastError.message);
+        await showNotification('Capture failed', 'Please refresh the page to use full-page capture.');
+        return;
+      }
+      if (res?.ok && res.dataUrl) {
+        await capture(tab, null, 1, res.dataUrl);
+      } else {
+        await showNotification('Capture failed', res?.error || 'Unknown error during full-page capture.');
+      }
+    });
+  }
 });
 
 // ── Keyboard shortcut ──
@@ -333,6 +374,23 @@ chrome.runtime.onConnect.addListener((port) => {
 
 // ── Messages from popup and content script ──
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg.type === 'CAPTURE_TAB_PORTION') {
+    chrome.tabs.captureVisibleTab(sender.tab.windowId, { format: 'png' }).then(dataUrl => {
+      sendResponse({ dataUrl });
+    }).catch(e => sendResponse({ error: e.message }));
+    return true;
+  }
+  if (msg.type === 'STITCH_IMAGES') {
+    setupOffscreenDocument('offscreen.html').then(() => {
+      chrome.runtime.sendMessage({
+        type: 'STITCH_IMAGES_OFFSCREEN',
+        parts: msg.parts,
+        width: msg.width,
+        height: msg.height
+      }, sendResponse);
+    });
+    return true;
+  }
   if (msg.type === 'CAPTURE_NOW') {
     chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
       if (tabs.length > 0) await capture(tabs[0]);
@@ -378,11 +436,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 });
 
 // ─────────────────────────────────────────────────────────────────
-// capture(tab) — shared by all three triggers
+// capture(tab, rect, dpr) — shared by all three triggers
 // 6.1: calls sessionOnCapture() after a successful upload to log
 //      sessionStart / isFirstInSession on the uploads doc via the upload body.
 // ─────────────────────────────────────────────────────────────────
-async function capture(tab) {
+async function capture(tab, rect = null, dpr = 1, preCapturedDataUrl = null) {
   if (!tab || !tab.url ||
       tab.url.startsWith('chrome://') ||
       tab.url.startsWith('chrome-extension://') ||
@@ -394,11 +452,11 @@ async function capture(tab) {
 
   const { settings } = await chrome.storage.local.get('settings');
   const cloudRunUrl = settings?.cloudRunUrl?.trim() || FALLBACK_API_BASE;
-  const apiKey      = settings?.apiKey?.trim() || '';
+  const token       = settings?.firebaseToken?.trim() || '';
 
-  if (!apiKey) {
-    console.warn('[Hammer SW] capture blocked: no API key');
-    return { reason: 'no_api_key' };
+  if (!token) {
+    console.warn('[Hammer SW] capture blocked: no Firebase token');
+    return { reason: 'unauthorized' };
   }
 
   const { session } = await chrome.storage.local.get('session');
@@ -408,17 +466,105 @@ async function capture(tab) {
     return null;
   }
 
-  let dataUrl;
+  // 10.1: Context Engine Auto-tagging
+  if (!session.tool && tab.url) {
+    try {
+      const urlObj = new URL(tab.url);
+      const host = urlObj.hostname;
+      const title = tab.title || '';
+      
+      if (host.includes('figma.com')) {
+        session.tool = 'Figma';
+      } else if (host.includes('jira.com') || host.includes('atlassian.net')) {
+        session.tool = 'Jira';
+        // Try to extract ticket ID like PROJ-123 from title
+        const match = title.match(/\[?([A-Z]+-\d+)\]?/);
+        if (match) {
+          session.tool = `Jira (${match[1]})`;
+        }
+      } else if (host.includes('github.com')) {
+        session.tool = 'GitHub';
+      } else if (host.includes('docs.google.com')) {
+        session.tool = 'Google Docs';
+      } else if (host.includes('linear.app')) {
+        session.tool = 'Linear';
+        const match = title.match(/([A-Z]+-\d+)/);
+        if (match) {
+          session.tool = `Linear (${match[1]})`;
+        }
+      } else if (host.includes('notion.so')) {
+        session.tool = 'Notion';
+      }
+    } catch (e) {
+      console.warn('[Hammer SW] Auto-tagging URL parse failed:', e);
+    }
+  }
+
+  // 10.5: Extract Semantic Data
+  let semanticData = null;
   try {
-    dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
-  } catch (err) {
-    await showNotification('Capture failed', err.message);
-    throw err;
+    const res = await new Promise((resolve) => {
+      chrome.tabs.sendMessage(tab.id, { type: 'EXTRACT_SEMANTIC_DATA' }, resolve);
+      // Timeout in case content script is missing or hanging
+      setTimeout(() => resolve(null), 2000); 
+    });
+    if (res && res.data) semanticData = res.data;
+  } catch (e) {
+    console.warn('[Hammer SW] Semantic data extraction failed:', e.message);
+  }
+
+  let dataUrl = preCapturedDataUrl;
+  if (!dataUrl) {
+    try {
+      dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
+    } catch (err) {
+      await showNotification('Capture failed', err.message);
+      throw err;
+    }
   }
 
   if (!dataUrl.startsWith('data:image/png;base64,') || dataUrl.length < 10000) {
     await showNotification('Capture failed', 'Screenshot data looks invalid. Try again.');
     return null;
+  }
+
+  // 10.2: Crop to element if rect provided
+  if (rect) {
+    try {
+      await setupOffscreenDocument('offscreen.html');
+      const res = await chrome.runtime.sendMessage({
+        type: 'CROP_IMAGE',
+        dataUrl,
+        rect,
+        dpr
+      });
+      if (res?.ok && res.dataUrl) {
+        dataUrl = res.dataUrl;
+      } else {
+        console.warn('[Hammer SW] Element crop failed:', res?.error);
+      }
+    } catch (e) {
+      console.warn('[Hammer SW] Could not communicate with offscreen doc for crop:', e.message);
+    }
+  }
+
+  // 10.4: Pre-Upload Privacy Blur
+  if (settings?.allowPreUploadBlur) {
+    try {
+      const blurRes = await new Promise((resolve) => {
+        chrome.tabs.sendMessage(tab.id, { type: 'BLUR_SCREENSHOT', dataUrl }, resolve);
+        setTimeout(() => resolve({ timeout: true }), 30000); 
+      });
+      if (blurRes && blurRes.dataUrl === null) {
+        console.log('[Hammer SW] Capture cancelled by user during blur');
+        return null;
+      }
+      if (blurRes && blurRes.dataUrl) {
+        dataUrl = blurRes.dataUrl;
+      }
+    } catch (e) {
+      console.warn('[Hammer SW] Privacy blur failed:', e.message);
+    }
   }
 
   const blob = await fetch(dataUrl).then((r) => r.blob());
@@ -439,12 +585,12 @@ async function capture(tab) {
   let uploadResult;
   try {
     uploadResult = await withRetry(() =>
-      uploadBlobWithSignedUrl(blob, session, tab.url, cloudRunUrl, apiKey, sessionCtx)
+      uploadBlobWithSignedUrl(blob, session, tab.url, cloudRunUrl, token, sessionCtx, semanticData)
     );
   } catch (uploadErr) {
     console.error('[Hammer SW] all retries failed, queuing:', uploadErr.message);
     const base64 = await blobToBase64(blob);
-    await queueAdd(base64, session, tab.url);
+    await queueAdd(base64, session, tab.url, semanticData);
     await showNotification('Upload queued', 'No connection — will retry when online.');
     return null;
   }
@@ -472,7 +618,37 @@ async function capture(tab) {
   await showNotification('Screenshot uploaded ✓', uploadResult.path || 'Saved to GCS');
   console.log('[Hammer SW] upload ✓ | path:', uploadResult.path,
               '| isFirst:', sessionCtx.isFirstInSession);
+              
+  if (settings?.instantClipboardLinks && uploadResult.readUrl) {
+    try {
+      await setupOffscreenDocument('offscreen.html');
+      const res = await chrome.runtime.sendMessage({
+        type: 'WRITE_CLIPBOARD',
+        text: uploadResult.readUrl
+      });
+      if (res?.ok) {
+        await showNotification('Link Copied', 'Screenshot link is in your clipboard.');
+      } else {
+        console.warn('[Hammer SW] Clipboard write failed:', res?.error);
+      }
+    } catch (e) {
+      console.warn('[Hammer SW] Could not communicate with offscreen doc:', e.message);
+    }
+  }
+
   return uploadResult;
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Offscreen Document Helper
+// ─────────────────────────────────────────────────────────────────
+async function setupOffscreenDocument(path) {
+  if (await chrome.offscreen.hasDocument()) return;
+  await chrome.offscreen.createDocument({
+    url: path,
+    reasons: ['CLIPBOARD', 'DOM_PARSER'],
+    justification: 'Write link to clipboard and crop images using canvas'
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -481,23 +657,26 @@ async function capture(tab) {
 //      so the backend can stamp the uploads doc correctly.
 // 5.15: userId removed from body.
 // ─────────────────────────────────────────────────────────────────
-async function uploadBlobWithSignedUrl(blob, session, tabUrl, cloudRunUrl, apiKey, sessionCtx = {}) {
+async function uploadBlobWithSignedUrl(blob, session, tabUrl, cloudRunUrl, token, sessionCtx = {}, semanticData = null) {
   const controller1 = new AbortController();
   const t1 = setTimeout(() => controller1.abort(), 15_000);
   let signedUrlResponse;
   try {
+    const bodyObj = {
+      project:           session.projectId,
+      tool:              session.tool  ?? '',
+      stage:             session.stage ?? '',
+      // 6.1 — session fields for backend to stamp on the uploads doc
+      isFirstInSession:  sessionCtx.isFirstInSession  ?? false,
+      sessionStart:      sessionCtx.sessionStart       ?? null,
+      sessionId:         sessionCtx.sessionId          ?? null
+    };
+    if (semanticData) bodyObj.semanticData = semanticData;
+
     const res = await fetch(`${cloudRunUrl}/upload-url`, {
       method:  'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Api-Key': apiKey },
-      body:    JSON.stringify({
-        project:           session.projectId,
-        tool:              session.tool  ?? '',
-        stage:             session.stage ?? '',
-        // 6.1 — session fields for backend to stamp on the uploads doc
-        isFirstInSession:  sessionCtx.isFirstInSession  ?? false,
-        sessionStart:      sessionCtx.sessionStart       ?? null,
-        sessionId:         sessionCtx.sessionId          ?? null
-      }),
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body:    JSON.stringify(bodyObj),
       signal: controller1.signal
     });
     clearTimeout(t1);
@@ -509,17 +688,17 @@ async function uploadBlobWithSignedUrl(blob, session, tabUrl, cloudRunUrl, apiKe
   } catch (err) {
     clearTimeout(t1);
     console.warn('[Hammer SW] /upload-url failed, using proxy:', err.message);
-    return uploadViaProxy(blob, session, tabUrl, cloudRunUrl, apiKey, sessionCtx);
+    return uploadViaProxy(blob, session, tabUrl, cloudRunUrl, token, sessionCtx, semanticData);
   }
 
   try {
     await xhrPut(signedUrlResponse.signedUrl, blob);
   } catch (err) {
     console.warn('[Hammer SW] XHR PUT failed, using proxy:', err.message);
-    return uploadViaProxy(blob, session, tabUrl, cloudRunUrl, apiKey, sessionCtx);
+    return uploadViaProxy(blob, session, tabUrl, cloudRunUrl, token, sessionCtx, semanticData);
   }
 
-  return { path: signedUrlResponse.path };
+  return { path: signedUrlResponse.path, readUrl: signedUrlResponse.readUrl };
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -527,7 +706,7 @@ async function uploadBlobWithSignedUrl(blob, session, tabUrl, cloudRunUrl, apiKe
 // 6.1: sessionCtx fields added to FormData.
 // 5.15: userId removed.
 // ─────────────────────────────────────────────────────────────────
-async function uploadViaProxy(blob, session, tabUrl, cloudRunUrl, apiKey, sessionCtx = {}) {
+async function uploadViaProxy(blob, session, tabUrl, cloudRunUrl, token, sessionCtx = {}, semanticData = null) {
   const controller = new AbortController();
   const timeoutId  = setTimeout(() => controller.abort(), 15_000);
 
@@ -535,6 +714,9 @@ async function uploadViaProxy(blob, session, tabUrl, cloudRunUrl, apiKey, sessio
   formData.append('file',               blob, 'screenshot.png');
   formData.append('projectId',          session.projectId);
   formData.append('tool',               session.tool  ?? '');
+  if (semanticData) {
+    formData.append('semanticData', JSON.stringify(semanticData));
+  }
   formData.append('stage',              session.stage ?? '');
   formData.append('tabUrl',             tabUrl ?? '');
   formData.append('isFirstInSession',   String(sessionCtx.isFirstInSession ?? false));
@@ -544,7 +726,7 @@ async function uploadViaProxy(blob, session, tabUrl, cloudRunUrl, apiKey, sessio
   try {
     const response = await fetch(`${cloudRunUrl}/capture`, {
       method:  'POST',
-      headers: { 'X-Api-Key': apiKey },
+      headers: { 'Authorization': `Bearer ${token}` },
       body:    formData,
       signal:  controller.signal
     });
@@ -597,13 +779,13 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 
   const { settings } = await chrome.storage.local.get('settings');
   const cloudRunUrl = settings?.cloudRunUrl?.trim() || FALLBACK_API_BASE;
-  const apiKey      = settings?.apiKey?.trim() || '';
+  const token       = settings?.firebaseToken?.trim() || '';
 
   let enabled = false;
-  if (apiKey && cloudRunUrl) {
+  if (token && cloudRunUrl) {
     try {
       const res = await fetch(`${cloudRunUrl}/config`, {
-        headers: { 'X-Api-Key': apiKey }
+        headers: { 'Authorization': `Bearer ${token}` }
       });
       if (res.ok) {
         const data = await res.json();

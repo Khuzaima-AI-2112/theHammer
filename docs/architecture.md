@@ -5,8 +5,8 @@ _Optimal answers to every open question in `arch_questions.md`, scoped to a smal
 
 > **Final Calls recorded 2026-06-16**
 > - **1B** — Export trigger: `hammer-export-trigger` as a dedicated Cloud Run Service (HTTP-triggered, not a Job)
-> - **2A** — Firestore location: flat top-level collection (`uploads`, `session_events`, etc.) with `projectId` field
-> - **3A** — SPA auth: Cloud IAP identity token (not Firebase Auth or custom JWT)
+> - **2A** — Firestore location: flat top-level collections with `workspaceId` and `projectId` fields
+> - **3A** — Authentication: Firebase Authentication (B2B SaaS model)
 
 ---
 
@@ -132,72 +132,53 @@ Store `EXTENSION_ID` in Secret Manager. Lock via CRX key — generate once with 
 
 ---
 
-### 3.2 API Key Architecture
+### 3.2 API Key Architecture (Deprecated)
 
-**Q: Secret Manager or Firestore `api_keys` collection?**
-**A: Firestore `api_keys` collection.** Secret Manager is for static credentials, not a dynamic multi-user key store.
-
-**Q: Hashed at rest?**
-**A: Yes — SHA-256 of the raw key. Raw key shown once at issuance, never stored.**
-
-```
-Issuance: rawKey = crypto.randomBytes(32).toString('hex')
-          keyHash = SHA-256(rawKey)
-          Firestore: { keyHash, userId, role, createdAt, isActive: true }
-          Return rawKey to admin UI ONCE
-
-Middleware: hash incoming key → query api_keys by keyHash where isActive == true
-```
-
-**Q: Key rotation?**
-**A: Automated quarterly via Cloud Scheduler + Cloud Function.** 7-day grace period, old key stays active until grace expires.
+**Note:** API Keys and the `api_keys` collection were fully deprecated in Sprint 23 in favor of Firebase Authentication ID tokens. See Section 3.3 for the current authentication model.
 
 ---
 
-### 3.3 Admin Portal Authentication — Final Call 3A
+### 3.3 Authentication & Workspaces — Final Call 3A
 
-**Final Call 3A — Cloud IAP identity token.**
+**Final Call 3A — Firebase Authentication (B2B SaaS model).**
 
-Cloud IAP is placed in front of `hammer-portal` at the HTTPS Load Balancer level. The SPA and all its API calls use the IAP-injected identity token.
+The Hammer uses Firebase Authentication to manage identity across the Admin Portal and Browser Extension, supporting a B2B SaaS architecture.
 
 **How it works end-to-end:**
 
-1. User hits `https://app.thehammer.io` — IAP intercepts, redirects to Google OAuth if no valid session
-2. On success, IAP injects `X-Goog-Authenticated-User-Email` and `X-Goog-IAP-JWT-Assertion` headers into every request reaching `hammer-portal` and `hammer-api`
-3. `hammer-api` reads `X-Goog-Authenticated-User-Email`, looks up the user's role in Firestore `users` collection, and applies role-based route guards
-4. The SPA calls `hammer-api/api/*` routes using the IAP JWT (`X-Goog-IAP-JWT-Assertion`) as the Bearer token
+1. User hits `https://app.thehammer.io` or uses the Chrome Extension OAuth flow.
+2. Firebase Authentication handles sign-up and sign-in (Google OAuth, Email/Password).
+3. The client (Portal or Extension) retrieves a Firebase ID Token.
+4. The client injects `Authorization: Bearer <idToken>` into every API request.
+5. `hammer-api` verifies the token using the Firebase Admin SDK (`firebase-admin.auth().verifyIdToken()`).
+6. After identity verification, the backend looks up the user's workspace context.
 
-**What this eliminates from Sprint 9:**
-- Custom session management code
-- Auth middleware for the portal's login/logout flow
-- Firebase Auth dependency for the SPA
-- Sprint 9.2 scope reduces from "implement auth middleware" to "read IAP header and check Firestore role"
-
-**IAP does NOT protect the Chrome extension flow.** The extension continues to use the `X-Api-Key` header mechanism — IAP is for human browser sessions only.
+**B2B SaaS Workspaces:**
+- Users sign up and create a **Workspace**.
+- They can invite other users (Admins, Instructional Designers, Regular Users) to their Workspace.
+- All projects, uploads, and data are strictly isolated by `workspaceId`.
+- The Chrome Extension utilizes `chrome.identity.launchWebAuthFlow` to securely log users into Firebase and retrieve their ID Token.
 
 ```javascript
-// hammer-api middleware — role check after IAP validates identity
-async function requireRole(minRole) {
-  return async (req, res, next) => {
-    const email = req.headers['x-goog-authenticated-user-email']?.replace('accounts.google.com:', '');
-    if (!email) return res.status(401).json({ error: 'IAP identity required' });
-    const snap = await db.collection('users').where('email', '==', email).limit(1).get();
+// hammer-api middleware — Firebase Auth + Workspace check
+const admin = require('firebase-admin');
+async function requireAuth(req, res, next) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader?.startsWith('Bearer ')) return res.status(401).json({ error: 'Missing token' });
+  const idToken = authHeader.split('Bearer ')[1];
+  
+  try {
+    const decodedToken = await admin.auth().verifyIdToken(idToken);
+    const snap = await db.collection('users').where('email', '==', decodedToken.email).limit(1).get();
     if (snap.empty) return res.status(403).json({ error: 'User not provisioned' });
-    const { role } = snap.docs[0].data();
-    if (!ROLE_HIERARCHY[role] >= ROLE_HIERARCHY[minRole]) return res.status(403).json({ error: 'Insufficient role' });
-    req.user = { email, role, userId: snap.docs[0].id };
+    const userDoc = snap.docs[0].data();
+    req.hammerUser = { email: decodedToken.email, userId: snap.docs[0].id, role: userDoc.role, workspaceId: userDoc.currentWorkspaceId };
     next();
-  };
+  } catch (error) {
+    res.status(401).json({ error: 'Invalid token' });
+  }
 }
 ```
-
-**IAP setup checklist (pre-Sprint 5):**
-- [ ] Enable IAP API: `gcloud services enable iap.googleapis.com`
-- [ ] Create OAuth consent screen (internal, Google Workspace)
-- [ ] Create OAuth 2.0 credentials for IAP
-- [ ] Grant `roles/iap.httpsResourceAccessor` to each provisioned user's Google account
-- [ ] Attach IAP to the HTTPS LB backend for `hammer-portal`
-- [ ] Verify `X-Goog-Authenticated-User-Email` arrives in Cloud Run by checking Cloud Logging
 
 ---
 
@@ -213,15 +194,13 @@ All collections are top-level. No subcollections under `projects/{id}/`. Every d
 
 | Collection | Key fields | Notes |
 |---|---|---|
-| `projects` | `id`, `name`, `adminId`, `createdAt` | One doc per project |
-| `users` | `id`, `email`, `role`, `createdAt` | Role: `admin` \| `analyst` \| `instructional_designer` \| `user` |
-| `project_memberships` | `projectId`, `userId`, `admittedAt`, `admittedBy` | Join table |
-| `uploads` | `projectId`, `userId`, `tool`, `gcsPath`, `uploadedAt`, `sessionId` | Core capture record |
-| `session_events` | `projectId`, `userId`, `sessionId`, `sessionStart`, `sessionEnd`, `firstCapturePath`, `lastCapturePath`, `deleteAfter` | TTL: +365 days |
-| `inactivity_events` | `projectId`, `userId`, `sessionId`, `triggeredAt`, `resolvedAt`, `deleteAfter` | TTL: +365 days |
-| `reports` | `projectId`, `analystId`, `type`, `status`, `gcsPath`, `generatedAt` | status: `pending`\|`processing`\|`done`\|`error` |
-| `storyboards` | `projectId`, `designerId`, `slides[]`, `status`, `exportGcsPath`, `createdAt` | |
-| `api_keys` | `keyHash`, `userId`, `role`, `createdAt`, `isActive`, `lastUsed` | SHA-256 hash only |
+| `workspaces` | `id`, `name`, `ownerId`, `createdAt` | Top-level B2B tenant |
+| `workspace_invites` | `workspaceId`, `email`, `role`, `status` | status: `pending`\|`accepted` |
+| `projects` | `id`, `workspaceId`, `name`, `adminId`, `createdAt` | Scoped to workspace |
+| `users` | `id`, `email`, `role`, `currentWorkspaceId` | Base user profile |
+| `project_memberships` | `projectId`, `userId`, `admittedAt` | Project-level access |
+| `uploads` | `workspaceId`, `projectId`, `userId`, `tool`, `gcsPath` | Core capture record |
+| `session_events` | `workspaceId`, `projectId`, `userId`, `sessionId` | TTL: +365 days |
 
 **Why flat over subcollections:**
 - Cross-project admin queries (e.g., all `uploads` for a user across all projects) are simple `where('userId', '==', uid)` — no `collectionGroup` index required
@@ -334,7 +313,7 @@ Propagate `X-Cloud-Trace-Context` and `traceparent` across all four services.
 
 1. **Roll back Cloud Run revision:** `gcloud run services update-traffic hammer-api --to-revisions=PREV=100`
 2. **Flush stuck export:** Query `status == 'processing' AND startedAt < now-30min` → set `status = 'failed'` → re-enqueue
-3. **Revoke compromised API key:** `db.collection('api_keys').where('keyHash','==',hash).update({ isActive: false })`
+3. **Revoke compromised user session:** Disable the user in Firebase Auth Console and update their `users` document `isActive` flag.
 
 ---
 
@@ -358,7 +337,7 @@ infra/
   firestore.tf       — PITR + backup schedule + TTL policies
   iam.tf             — 5 SAs + WIF pool
   secret_manager.tf  — secret names + rotation
-  load_balancer.tf   — HTTPS LB + NEGs + Cloud Armor + IAP + cert
+  load_balancer.tf   — HTTPS LB + NEGs + Cloud Armor + cert
   monitoring.tf      — 8 alerts + 4 SLO objects
   dns.tf             — Cloud DNS zone
 ```
@@ -402,194 +381,7 @@ Two GCP projects: `hammer-dev` and `hammer-prod`. Terraform workspaces per envir
 | **Total** | **~$30–45/month** |
 
 Vision API / OCR (Sprint 6S) is the largest unknown cost driver. Benchmark before Sprint 6S ships. Set a GCP Billing budget alert at 3× the monthly estimate with auto-notify at 80% and 100%.
-# The Hammer — Firestore Schema (Sprint 5, schemaVersion: 1)
 
-> Architecture decision: **flat top-level collections** (Final Call 2A in `arch_decisions.md`).  
-> Every cross-project document carries a `projectId` field. No subcollections. All new doc types include `schemaVersion: 1`.
-
----
-
-## Collections
-
-### `projects`
-
-One document per project created by an admin.
-
-| Field | Type | Notes |
-|---|---|---|
-| `id` | string | Auto-generated Firestore doc ID |
-| `name` | string | Display name, max 128 chars |
-| `adminId` | string | `users` doc ID of creating admin |
-| `memberCount` | number | Maintained by Firestore transaction on member add/remove |
-| `createdAt` | string | ISO 8601 timestamp |
-| `updatedAt` | string | ISO 8601 timestamp; set on every PATCH |
-| `schemaVersion` | number | Always `1` |
-
-**Example documents:**
-
-```json
-{
-  "id": "proj_abc123",
-  "name": "Acme Q3 GTM Audit",
-  "adminId": "usr_zyx987",
-  "memberCount": 3,
-  "createdAt": "2026-06-16T14:00:00.000Z",
-  "updatedAt": "2026-06-16T15:30:00.000Z",
-  "schemaVersion": 1
-}
-```
-
-```json
-{
-  "id": "proj_def456",
-  "name": "Beta Launch Onboarding",
-  "adminId": "usr_zyx987",
-  "memberCount": 1,
-  "createdAt": "2026-06-10T09:00:00.000Z",
-  "updatedAt": "2026-06-10T09:00:00.000Z",
-  "schemaVersion": 1
-}
-```
-
-```json
-{
-  "id": "proj_ghi789",
-  "name": "Enterprise Pilot — EMEA",
-  "adminId": "usr_zyx987",
-  "memberCount": 0,
-  "createdAt": "2026-06-15T11:00:00.000Z",
-  "updatedAt": "2026-06-15T11:00:00.000Z",
-  "schemaVersion": 1
-}
-```
-
----
-
-### `users`
-
-One document per provisioned user (created by admin via portal).
-
-| Field | Type | Notes |
-|---|---|---|
-| `id` | string | Auto-generated Firestore doc ID |
-| `email` | string | Google account email (matches IAP `X-Goog-Authenticated-User-Email` sans prefix) |
-| `role` | string | `admin` \| `analyst` \| `instructional_designer` \| `user` |
-| `createdAt` | string | ISO 8601 timestamp |
-| `createdBy` | string | `users` doc ID of admin who provisioned this user |
-| `schemaVersion` | number | Always `1` |
-
-**Example documents:**
-
-```json
-{
-  "id": "usr_zyx987",
-  "email": "alice@example.com",
-  "role": "admin",
-  "createdAt": "2026-06-01T08:00:00.000Z",
-  "createdBy": "usr_zyx987",
-  "schemaVersion": 1
-}
-```
-
-```json
-{
-  "id": "usr_bob111",
-  "email": "bob@example.com",
-  "role": "analyst",
-  "createdAt": "2026-06-10T10:00:00.000Z",
-  "createdBy": "usr_zyx987",
-  "schemaVersion": 1
-}
-```
-
-```json
-{
-  "id": "usr_carol222",
-  "email": "carol@example.com",
-  "role": "user",
-  "createdAt": "2026-06-12T14:00:00.000Z",
-  "createdBy": "usr_zyx987",
-  "schemaVersion": 1
-}
-```
-
----
-
-### `project_memberships`
-
-Join table between `projects` and `users`. Written atomically with `project.memberCount` increment (Firestore transaction, task 5.6).
-
-| Field | Type | Notes |
-|---|---|---|
-| `id` | string | `{projectId}_{userId}` — deterministic, prevents duplicate membership |
-| `projectId` | string | Foreign key to `projects` |
-| `userId` | string | Foreign key to `users` |
-| `role` | string | Role within this project (mirrors `users.role` at admission time; can diverge) |
-| `admittedAt` | string | ISO 8601 timestamp |
-| `admittedBy` | string | `users` doc ID of admin who ran `POST /admin/projects/:id/members` |
-| `schemaVersion` | number | Always `1` |
-
-**Example documents:**
-
-```json
-{
-  "id": "proj_abc123_usr_bob111",
-  "projectId": "proj_abc123",
-  "userId": "usr_bob111",
-  "role": "analyst",
-  "admittedAt": "2026-06-16T14:05:00.000Z",
-  "admittedBy": "usr_zyx987",
-  "schemaVersion": 1
-}
-```
-
-```json
-{
-  "id": "proj_abc123_usr_carol222",
-  "projectId": "proj_abc123",
-  "userId": "usr_carol222",
-  "role": "user",
-  "admittedAt": "2026-06-16T14:06:00.000Z",
-  "admittedBy": "usr_zyx987",
-  "schemaVersion": 1
-}
-```
-
-```json
-{
-  "id": "proj_def456_usr_carol222",
-  "projectId": "proj_def456",
-  "userId": "usr_carol222",
-  "role": "user",
-  "admittedAt": "2026-06-16T15:00:00.000Z",
-  "admittedBy": "usr_zyx987",
-  "schemaVersion": 1
-}
-```
-
----
-
-### `uploads` (existing — confirmed flat, no subcollections)
-
-Core capture record written by `POST /capture`. Established in Sprint 4.  
-`schemaVersion: 1` added to all new docs written from Sprint 5 onward (existing docs without it are grandfathered).
-
-| Field | Type | Notes |
-|---|---|---|
-| `path` | string | GCS object path |
-| `bucket` | string | GCS bucket name |
-| `size` | number | File size in bytes |
-| `projectId` | string | Foreign key to `projects` |
-| `userId` | string | Foreign key to `users` |
-| `tool` | string | Extension tool name (e.g. `"gtm"`, `"ga4"`) |
-| `tabUrl` | string | Captured tab URL (max 500 chars) |
-| `uploadedAt` | string | ISO 8601 timestamp |
-| `sessionId` | string | Links to `session_events` doc (added Sprint 6) |
-| `schemaVersion` | number | `1` on all docs written from Sprint 5 onward |
-
-**Composite indexes** (declared in `infra/firestore.indexes.json`):
-- `(projectId ASC, tool ASC, uploadedAt DESC)` — powers `GET /admin/projects/:id/activity?tool=`
-- `(projectId ASC, userId ASC, uploadedAt DESC)` — powers Sprint 6 inactivity gap detection
 
 ---
 
@@ -759,7 +551,7 @@ Analyst and Admin views are intentionally aligned so they can speak about the sa
 
 Not all users will have inactivity prompts turned on. To keep behavior predictable and auditable:
 
-- A per‑user entitlement flag (e.g., `inactivityPromptEnabled`) is stored in Firestore (on `users` or `api_keys`).
+- A per‑user entitlement flag (e.g., `inactivityPromptEnabled`) is stored in Firestore on the `users` document.
 - The extension only schedules `chrome.alarms` and emits `/inactivity-events` **when this flag is true**.
 - True active time is computed for all users, but inactivity‑event–based calculations are more accurate when the flag is enabled.
 

@@ -47,6 +47,8 @@
 
 ### 3. Timing-safe comparisons must not short-circuit on length before the safe comparison runs
 
+*(Note: API Keys were deprecated in Sprint 23 in favor of Firebase Auth ID tokens, but this principle of constant-time comparison remains critical for any backend secret validation).*
+
 **What happened:** The API key check performed `crypto.timingSafeEqual(expBuf, provBuf) && provided.length === expected.length`. The separate `provided.length === expected.length` check runs in non-constant time and reveals whether the attacker's key length matches the expected length, which narrows the brute-force space.
 
 **Root cause:** The constant-time comparison was added, but a secondary length check was left alongside it without recognising that it leaks timing information.
@@ -198,6 +200,38 @@ Run this before starting any new sprint:
 **What happened:** A Cloud Build deployment failed with `generic::invalid_argument: invalid value for 'build.substitutions': key in the template "BACKEND_URL" is not a valid built-in substitution`.
 **Root cause:** Shell variables like `$BACKEND_URL` were used in an inline bash script within `cloudbuild.yaml`. Cloud Build evaluates anything starting with `$` as a Cloud Build substitution variable *before* passing the script to bash. Since `$BACKEND_URL` isn't a native substitution, Cloud Build aborted the build.
 **Rule going forward:**
-- Whenever writing inline shell scripts inside `cloudbuild.yaml`, escape all bash variable references with a double dollar sign (`$$`).
-- Example: Use `$$STATUS` and `$$TOKEN`, not `$STATUS` and `$TOKEN`.
 - Single dollar signs (`$`) should exclusively be used for Cloud Build built-ins (like `$PROJECT_ID` or `$COMMIT_SHA`) or explicitly defined custom substitutions.
+
+---
+
+## Sprint 5–9 Lessons Learned
+
+### 12. Firestore Transactions Require All Reads Before Writes
+
+**What happened:** During Sprint 9, an update to role synchronization in `backend/src/routes/admin/users.js` attempted to perform a `tx.update(userRef)` and then query `db.collection('api_keys')` within the same transaction using `tx.get(query)`. This caused a transaction failure.
+**Root cause:** Firestore transactions strictly require all read operations (`get`) to be performed before any write operations (`set`, `update`, `delete`).
+**Rule going forward:**
+- Always structure Firestore transactions in two distinct phases: gather all required data via `tx.get()` first, process the business logic, and then apply all mutations via `tx.set()`, `tx.update()`, and `tx.delete()` at the very end.
+
+### 13. Binary Authorization Blocks Ad-Hoc Developer Deployments
+
+**What happened:** Task 9.12 called for enforcing Binary Authorization on the Cloud Run instances to ensure only images built by Cloud Build could be deployed. However, it was realized that this blocks the team's ability to run `gcloud run deploy` directly from a developer desktop.
+**Root cause:** Binary Authorization works by requiring a cryptographic attestation (signature) from a designated attestor (e.g., Cloud Build) before an image can be deployed to the environment. Desktop-built images lack this attestation.
+**Rule going forward:**
+- When strict CI/CD enforcement is desired but ad-hoc deployments are still required for velocity or troubleshooting, Binary Authorization enforcement should be kept in "dry run" mode, or disabled entirely for the target environment, until the team is ready to fully deprecate laptop deployments.
+
+### 14. Firebase Admin SDK Bypasses All Firestore Security Rules
+
+**What happened:** When auditing `firestore.rules` for strict access control (Task 9.11), the rules were set to `allow read, write: if false;`, which appeared completely locked down. However, the backend Node.js application (using `firebase-admin` with Application Default Credentials) could still read and write freely.
+**Root cause:** The Firebase Admin SDK operates with elevated service account privileges that bypass all client-side security rules by design.
+**Rule going forward:**
+- `firestore.rules` should only be relied upon to restrict untrusted client applications (web/mobile SDKs). 
+- Any backend service using the Admin SDK must enforce its own strict authorization and role-based access control (RBAC) in its route handlers (e.g., `requireAdmin` middleware), because the database layer will not reject its requests.
+
+### 15. Cloud IAP is Too Heavy for Small B2B SaaS Portals
+
+**What happened:** During the Sprint 20 implementation to add Workspaces and B2B SaaS Multi-Tenancy, we tried to rely on Google Cloud IAP for identity. However, provisioning Cloud IAP required complex setups (OAuth Consent Screens, configuring Backend Services in the Load Balancer, and assigning GCP IAM roles to standard users). The user found this excessively "tricky" and lacked the permissions or desire to manage IAM roles for external end-users.
+**Root cause:** Cloud IAP is fundamentally an enterprise zero-trust proxy designed for internal corporate applications where users already exist in a Google Workspace directory. It is not designed to be the customer-facing identity provider for a multi-tenant B2B SaaS application.
+**Rule going forward:**
+- Use Firebase Authentication for any customer-facing or B2B SaaS identity needs. It provides drop-in UI widgets, handles multi-provider sign-ins natively, and does not require touching GCP IAM or Load Balancer configurations.
+- Reserve Cloud IAP exclusively for internal administrative tools or strict enterprise intra-company access.

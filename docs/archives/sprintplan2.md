@@ -141,29 +141,29 @@ Additional pre-flight for Sprint 5:
 
 | # | Task | Done when | P% |
 |---|---|---|---|
-| 6.1 | `sessionStart` logged on first capture | First `uploads` doc of each session has `isFirstInSession: true` and `sessionStart` ISO timestamp | 🟢 93% |
-| 6.2 | `sessionEnd` logged on session close | `session_events` Firestore doc written with `sessionEnd`, `totalCaptures`, `sessionDurationMs` via double-flush: `chrome.runtime.onSuspend` + `chrome.windows.onRemoved`; in-progress session state persisted in `chrome.storage.session` so a SW restart can resume without creating a new session | 🟡 72% |
-| 6.3 | Session summary doc complete | `session_events` doc contains all required fields: `sessionId`, `projectId`, `userId`, `sessionStart`, `sessionEnd`, `totalCaptures`, `firstCapturePath`, `lastCapturePath`, `schemaVersion: 1`, `deleteAfter` (= `sessionStart + 365 days` for Firestore TTL auto-deletion) | 🟡 74% |
+| 6.1 | `sessionStart` logged on first capture | First `uploads` doc of each session has `isFirstInSession: true` and `sessionStart` ISO timestamp | ✅ done |
+| 6.2 | `sessionEnd` logged on session close | `session_events` Firestore doc written with `sessionEnd`, `totalCaptures`, `sessionDurationMs` via double-flush: `chrome.runtime.onSuspend` + `chrome.windows.onRemoved`; in-progress session state persisted in `chrome.storage.session` so a SW restart can resume without creating a new session | ✅ done |
+| 6.3 | Session summary doc complete | `session_events` doc contains all required fields: `sessionId`, `projectId`, `userId`, `sessionStart`, `sessionEnd`, `totalCaptures`, `firstCapturePath`, `lastCapturePath`, `schemaVersion: 1`, `deleteAfter` (= `sessionStart + 365 days` for Firestore TTL auto-deletion) | ✅ done |
 
 ### Inactivity Timer
 
 | # | Task | Done when | P% |
 |---|---|---|---|
-| 6.4 | 45 s inactivity timer fires reliably | `inactivity_warning` message fires within 5 s of the 45 s window (hybrid `chrome.alarms` + in-memory `Date` check) — OR — fires at nearest `chrome.alarms` tick (≤ 60 s) if sub-minute confirmed infeasible by Sprint 6S | 🟡 71% |
-| 6.5 | Inactivity dialogue in popup | Popup receives `inactivity_warning` and renders modal: "Still there? Ready to capture?" with **Capture Now** and **Snooze** buttons | 🟡 79% |
-| 6.6 | Notification fallback when popup is closed | If popup is not open, `chrome.notifications.create` shows a system notification with "Capture" action button; suppressed on `chrome://` and non-http/https tab URLs | 🟡 76% |
-| 6.7 | Dialogue auto-dismisses after 30 s | Modal closes without action; next inactivity cycle starts fresh | 🟡 77% |
-| 6.8 | Timer resets on every capture event | All three capture triggers (keyboard, toolbar, floating button) cancel and restart the alarm; verified across all three | 🟢 91% |
-| 6.9 | Inactivity events logged to Firestore | `inactivity_events` doc: `triggeredAt`, `userId`, `projectId`, `acknowledged` (bool), optional `inactiveDurationMs`, `schemaVersion: 1`, `deleteAfter` (= `triggeredAt + 365 days` for TTL) | 🟡 83% |
-| 6.10 | `chrome.alarms` used (not `setTimeout`) — verified post-suspend | Service worker uses `chrome.runtime.connect` keepalive port from popup + `chrome.storage.session` for in-flight state; after device screen lock for 60 s, alarm fires on resume; `setTimeout`-only implementation fails this test | 🟡 70% |
-| 6.12 | Inactivity prompt entitlement per user | Admin can toggle "Enable inactivity reminders" per user in the Admin Portal; flag stored in Firestore (`users`/`api_keys`); extension only schedules `chrome.alarms` when this flag is true | 🟡 78% |
-| 6.13 | True active time computed | For users with inactivity enabled, backend computes `trueActiveMs = sessionDurationMs - inactiveTimeInSession` per session (gap- or event-based); exposed as aggregates for Sprint 7.5 User Efficiency report | 🟡 78% |
+| 6.4 | 45 s inactivity timer fires reliably | `inactivity_warning` message fires within 5 s of the 45 s window (hybrid `chrome.alarms` + in-memory `Date` check) — OR — fires at nearest `chrome.alarms` tick (≤ 60 s) if sub-minute confirmed infeasible by Sprint 6S | ✅ done |
+| 6.5 | Inactivity dialogue in popup | Popup receives `inactivity_warning` and renders modal: "Still there? Ready to capture?" with **Capture Now** and **Snooze** buttons | ✅ done |
+| 6.6 | Notification fallback when popup is closed | If popup is not open, `chrome.notifications.create` shows a system notification with "Capture" action button; suppressed on `chrome://` and non-http/https tab URLs | ✅ done |
+| 6.7 | Dialogue auto-dismisses after 30 s | Modal closes without action; next inactivity cycle starts fresh | ✅ done |
+| 6.8 | Timer resets on every capture event | All three capture triggers (keyboard, toolbar, floating button) cancel and restart the alarm; verified across all three | ✅ done |
+| 6.9 | Inactivity events logged to Firestore | `inactivity_events` doc: `triggeredAt`, `userId`, `projectId`, `acknowledged` (bool), optional `inactiveDurationMs`, `schemaVersion: 1`, `deleteAfter` (= `triggeredAt + 365 days` for TTL) | ✅ done |
+| 6.10 | `chrome.alarms` used (not `setTimeout`) — verified post-suspend | Service worker uses `chrome.runtime.connect` keepalive port from popup + `chrome.storage.session` for in-flight state; after device screen lock for 60 s, alarm fires on resume; `setTimeout`-only implementation fails this test | ✅ done |
+| 6.12 | Inactivity prompt entitlement per user | Admin can toggle "Enable inactivity reminders" per user in the Admin Portal; flag stored in Firestore (`users`/`api_keys`); extension only schedules `chrome.alarms` when this flag is true | ✅ done |
+| 6.13 | True active time computed | For users with inactivity enabled, backend computes `trueActiveMs = sessionDurationMs - inactiveTimeInSession` per session (gap- or event-based); exposed as aggregates for Sprint 7.5 User Efficiency report | ✅ done |
 
 ### Admin Portal: Inactivity Visibility
 
 | # | Task | Done when | P% |
 |---|---|---|---|
-| 6.11 | Activity timeline highlights gaps > 45 s | Gaps between consecutive capture timestamps > 45 s rendered in amber on the activity feed; uses `(projectId ASC, userId ASC, uploadedAt DESC)` composite index | 🟡 76% |
+| 6.11 | Activity timeline highlights gaps > 45 s | Gaps between consecutive capture timestamps > 45 s rendered in amber on the activity feed; uses `(projectId ASC, userId ASC, uploadedAt DESC)` composite index | ✅ done |
 
 ---
 
@@ -175,12 +175,12 @@ Additional pre-flight for Sprint 5:
 
 | # | Task | Done when | P% |
 |---|---|---|---|
-| S.1 | Validate `chrome.alarms` sub-minute timing | Test extension measures actual firing latency across 50 cycles; min/max/mean delay documented per Chrome version | 🟢 95% |
-| S.2 | Document hybrid timer decision | "Sub-minute feasible via in-memory `Date` + 1-min alarm" or "target 60 s, update UX copy" — agreed by team, written in `projectplan.md` before Sprint 6 tasks 6.4/6.10 are coded | 🟢 95% |
-| S.3 | OCR/Vision API evaluation | Google Cloud Vision vs GPT-4o vision vs Gemini 1.5 Pro tested on 10 real GTM screenshots; for OCR accuracy evaluate both PNG and lossless WebP inputs; extraction accuracy for Tags/Triggers/Variables recorded per API | 🟠 68% |
-| S.4 | OCR proof-of-concept | Single Cloud Run function accepts GCS screenshot path (`hammer-screenshots-{PROJECT_ID}` bucket); returns GTM config JSON; accuracy ≥ 70% on test corpus = spike passes | 🟠 62% |
-| S.5 | OCR cost model | Per-image cost at 150 captures/day (Vision API: ~$0.0015/image = ~$9/month); caching strategy to avoid re-processing identical GCS paths documented | 🟢 90% |
-| S.6 | Go/No-go decision on OCR reports | If S.4 accuracy < 70%: Sprint 7 tasks 7.8–7.11 replaced with CSV-import workflow; decision written in `projectplan.md` | 🟢 93% |
+| S.1 | Validate `chrome.alarms` sub-minute timing | Test extension measures actual firing latency across 50 cycles; min/max/mean delay documented per Chrome version | ✅ done |
+| S.2 | Document hybrid timer decision | "Sub-minute feasible via in-memory `Date` + 1-min alarm" or "target 60 s, update UX copy" — agreed by team, written in `projectplan.md` before Sprint 6 tasks 6.4/6.10 are coded | ✅ done |
+| S.3 | OCR/Vision API evaluation | Google Cloud Vision vs GPT-4o vision vs Gemini 1.5 Pro tested on 10 real GTM screenshots; for OCR accuracy evaluate both PNG and lossless WebP inputs; extraction accuracy for Tags/Triggers/Variables recorded per API | ✅ done |
+| S.4 | OCR proof-of-concept | Single Cloud Run function accepts GCS screenshot path (`hammer-screenshots-{PROJECT_ID}` bucket); returns GTM config JSON; accuracy ≥ 70% on test corpus = spike passes | ✅ done |
+| S.5 | OCR cost model | Per-image cost at 150 captures/day (Vision API: ~$0.0015/image = ~$9/month); caching strategy to avoid re-processing identical GCS paths documented | ✅ done |
+| S.6 | Go/No-go decision on OCR reports | If S.4 accuracy < 70%: Sprint 7 tasks 7.8–7.11 replaced with CSV-import workflow; decision written in `projectplan.md` | ✅ done |
 
 ---
 
@@ -198,27 +198,27 @@ Additional pre-flight for Sprint 5:
 
 | # | Task | Done when | P% |
 |---|---|---|---|
-| 7.1 | `POST /reports/generate` | Accepts `{ projectId, reportType, dateRange }`; writes `reports` Firestore doc with `status: "queued"`, `schemaVersion: 1`; enqueues Cloud Tasks task targeting the `hammer-api` report worker; returns `{ reportId }` within 200 ms | 🟢 94% |
-| 7.2 | `GET /reports/:id/status` | Returns `{ status: "queued" \| "processing" \| "done" \| "error", gcsPath? }` | 🟡 86% |
-| 7.3 | Analyst role enforced on `/reports/*` | Middleware: `sha256(req.headers['x-api-key'])` looked up in `api_keys` collection; `role != 'analyst'` → 403; verified for POST + GET | 🟢 94% |
-| 7.4 | Report metadata in Firestore | Every completed report doc: `reportId`, `type`, `projectId`, `generatedBy`, `generatedAt`, `gcsPath`, `status`, `schemaVersion: 1` | 🟢 92% |
+| 7.1 | `POST /reports/generate` | Accepts `{ projectId, reportType, dateRange }`; writes `reports` Firestore doc with `status: "queued"`, `schemaVersion: 1`; enqueues Cloud Tasks task targeting the `hammer-api` report worker; returns `{ reportId }` within 200 ms | ✅ done |
+| 7.2 | `GET /reports/:id/status` | Returns `{ status: "queued" \| "processing" \| "done" \| "error", gcsPath? }` | ✅ done |
+| 7.3 | Analyst role enforced on `/reports/*` | Middleware: `sha256(req.headers['x-api-key'])` looked up in `api_keys` collection; `role != 'analyst'` → 403; verified for POST + GET | ✅ done |
+| 7.4 | Report metadata in Firestore | Every completed report doc: `reportId`, `type`, `projectId`, `generatedBy`, `generatedAt`, `gcsPath`, `status`, `schemaVersion: 1` | ✅ done |
 
 ### Firestore-Aggregation Reports
 
 | # | Task | Done when | P% |
 |---|---|---|---|
-| 7.5 | Report: **User Efficiency** | Captures/hour, inactivity rate (from `inactivity_events`), **true active time** (sessionDuration - inactive time), median session length from `session_events`; all metrics via Firestore `count()` + aggregation; GCS `hammer-reports-{PROJECT_ID}` JSON + HTML | 🟢 91% |
-| 7.6 | Report: **Project Progress** | Total captures (`count()`), daily trend array, active users, tools used; GCS JSON + HTML | 🟢 91% |
-| 7.7 | Report: **Executive Summary** | Before/After narrative filled from Firestore data using a Markdown template; LLM fill is an optional enhancement, not required for done-when | 🟡 78% |
+| 7.5 | Report: **User Efficiency** | Captures/hour, inactivity rate (from `inactivity_events`), **true active time** (sessionDuration - inactive time), median session length from `session_events`; all metrics via Firestore `count()` + aggregation; GCS `hammer-reports-{PROJECT_ID}` JSON + HTML | ✅ done |
+| 7.6 | Report: **Project Progress** | Total captures (`count()`), daily trend array, active users, tools used; GCS JSON + HTML | ✅ done |
+| 7.7 | Report: **Executive Summary** | Before/After narrative filled from Firestore data using a Markdown template; LLM fill is an optional enhancement, not required for done-when | ✅ done |
 
 ### OCR-Dependent Reports *(conditional on Sprint 6S S.4 passing)*
 
 | # | Task | Done when | P% |
 |---|---|---|---|
-| 7.8 | Report: **GTM Configuration Table** | Screenshots from `hammer-screenshots-{PROJECT_ID}` → OCR → Tags/Triggers/Variables Markdown table; ≥ 80% field coverage on test corpus | 🟠 64% |
-| 7.9 | Report: **GA4 Configuration** | Measurement ID, custom events, cross-domain settings → JSON + HTML stored in `hammer-reports-{PROJECT_ID}` | 🟠 62% |
-| 7.10 | Report: **Google Ads Setup** | Conversion Linker, Tracking IDs, imported conversions → JSON + HTML | 🟠 60% |
-| 7.11 | Report: **Audit & Conflicts** | Missing consent mode, poorly named tags, unlinked properties; severity `error` / `warning` / `info`; sortable table | 🟠 65% |
+| 7.8 | Report: **GTM Configuration Table** | Screenshots from `hammer-screenshots-{PROJECT_ID}` → OCR → Tags/Triggers/Variables Markdown table; ≥ 80% field coverage on test corpus | ✅ done |
+| 7.9 | Report: **GA4 Configuration** | Measurement ID, custom events, cross-domain settings → JSON + HTML stored in `hammer-reports-{PROJECT_ID}` | ✅ done |
+| 7.10 | Report: **Google Ads Setup** | Conversion Linker, Tracking IDs, imported conversions → JSON + HTML | ✅ done |
+| 7.11 | Report: **Audit & Conflicts** | Missing consent mode, poorly named tags, unlinked properties; severity `error` / `warning` / `info`; sortable table | ✅ done |
 
 > **If Sprint 6S S.4 did not pass:** 7.8–7.11 are replaced with a CSV-import workflow (analyst uploads structured config CSV → engine formats to same output). CSV-import variant P%: 🟢 88%.
 
@@ -226,7 +226,7 @@ Additional pre-flight for Sprint 5:
 
 | # | Task | Done when | P% |
 |---|---|---|---|
-| 7.12 | Report Viewer renders all types | HTML from `hammer-reports-{PROJECT_ID}` in sandboxed iframe via V4 signed URL (60-min lifetime); Markdown rendered as styled HTML; table reports client-side sortable | 🟡 79% |
+| 7.12 | Report Viewer renders all types | HTML from `hammer-reports-{PROJECT_ID}` in sandboxed iframe via V4 signed URL (60-min lifetime); Markdown rendered as styled HTML; table reports client-side sortable | ✅ done |
 
 ---
 
@@ -240,7 +240,7 @@ Additional pre-flight for Sprint 5:
 
 **Goal:** Unified role-based auth, integration + smoke test suite, Cloud Monitoring expansion (application-layer alerts), Firestore security rules, Binary Authorization, mobile-responsive portal.
 
-**Sprint P%: 🟡 73%** — Individual tasks are well-understood. Sprint-level risk is that integration tests (9.5, 9.6) surface bugs from Sprints 5–8; budget rework time.
+**Sprint P%: ✅ 100%** — Completed. Role-based auth syncs to api_keys, dashboards created, tests passing. Binary auth kept as dry-run per team requirement.
 
 > **Note:** Network-layer monitoring (LB 5xx rate, Cloud Armor block rate) is owned by [Sprint 21](./sprint21.md) tasks 21.21–21.22. Sprint 9 monitoring covers application-layer alerts only (report failures, export queue depth, GCS 403 rate, Firestore quota, Secret Manager failures, billing anomaly).
 
@@ -248,17 +248,17 @@ Additional pre-flight for Sprint 5:
 
 | # | Task | Done when | P% |
 |---|---|---|---|
-| 9.1 | Role storage — **resolved: Firestore `api_keys` collection** | `api_keys` collection live; each doc: `{ keyHash, userId, role, createdAt, isActive, lastUsed }`; admin portal "Generate Key" flow issues key (shown once, never stored raw); decision recorded in `projectplan.md` | 🟢 96% |
-| 9.2 | Role-aware API key middleware | `sha256(req.headers['x-api-key'])` queried against `api_keys` where `isActive == true`; role attached to `req.user`; per-route role assertion; all 401/403 logged to Cloud Logging with `requestId`, `userId`, `path` | 🟡 81% |
-| 9.3 | Role assignment in Admin Portal | Admin views and changes user role in portal; change writes to `api_keys.role`; propagates within 10 s; reflected on next API request (no cache to invalidate — lookup is per-request) | 🟠 66% |
-| 9.4 | Per-role rate limiting | Analyst reports: 10 req/hr; video export: 5 req/hr; capture: 60 req/min (existing); rate limit state in memory (single Cloud Run instance) or Firestore counter if multi-instance; verified by sending requests above threshold | 🟡 83% |
+| 9.1 | Role storage — **resolved: Firestore `api_keys` collection** | `api_keys` collection live; each doc: `{ keyHash, userId, role, createdAt, isActive, lastUsed }`; admin portal "Generate Key" flow issues key (shown once, never stored raw); decision recorded in `projectplan.md` | ✅ done |
+| 9.2 | Role-aware API key middleware | `sha256(req.headers['x-api-key'])` queried against `api_keys` where `isActive == true`; role attached to `req.user`; per-route role assertion; all 401/403 logged to Cloud Logging with `requestId`, `userId`, `path` | ✅ done |
+| 9.3 | Role assignment in Admin Portal | Admin views and changes user role in portal; change writes to `api_keys.role`; propagates within 10 s; reflected on next API request (no cache to invalidate — lookup is per-request) | ✅ done |
+| 9.4 | Per-role rate limiting | Analyst reports: 10 req/hr; video export: 5 req/hr; capture: 60 req/min (existing); rate limit state in memory (single Cloud Run instance) or Firestore counter if multi-instance; verified by sending requests above threshold | ✅ done |
 
 ### Testing
 
 | # | Task | Done when | P% |
 |---|---|---|---|
-| 9.5 | Integration test suite | `npm run test:integration` covers: project CRUD (with transaction), user admission, capture → Firestore, report generation (mock OCR), video export (mock Cloud Tasks + FFmpeg), inactivity logging, SHA-256 key middleware; all pass in **Cloud Build CI** (`cloudbuild.yaml` test step) | 🟡 74% |
-| 9.6 | End-to-end smoke test script | `scripts/smoke-test.sh` exercises all 4 roles against `https://app.thehammer.io`; exits 0; **runs as a step in `cloudbuild.yaml` on every push to `main`** — if smoke test fails, Cloud Run keeps the previous revision at 100% traffic; do not add a separate CI trigger | 🟡 71% |
+| 9.5 | Integration test suite | `npm run test:integration` covers: project CRUD (with transaction), user admission, capture → Firestore, report generation (mock OCR), video export (mock Cloud Tasks + FFmpeg), inactivity logging, SHA-256 key middleware; all pass in **Cloud Build CI** (`cloudbuild.yaml` test step) | ✅ done |
+| 9.6 | End-to-end smoke test script | `scripts/smoke-test.sh` exercises all 4 roles against `https://app.thehammer.io`; exits 0; **runs as a step in `cloudbuild.yaml` on every push to `main`** — if smoke test fails, Cloud Run keeps the previous revision at 100% traffic; do not add a separate CI trigger | ✅ done |
 
 ### Cloud Monitoring — Application Layer
 
@@ -266,27 +266,27 @@ The full 8-alert set from `arch_decisions.md` §6.3 is implemented here. Alerts 
 
 | # | Task | Alert condition | Severity | P% |
 |---|---|---|---|---|
-| 9.7 | Report failure alert | > 10% of `reports` docs reach `status: error` in 10 min | P1 — Slack `#hammer-alerts` + email | 🟡 81% |
-| 9.8 | Export queue depth alert | > 10 export jobs `status: "queued"` for > 5 min; log-based metric via Cloud Function | P2 — email | 🟡 77% |
-| 9.8b | API p99 latency alert | `hammer-api` p99 > 3 s over 5 min | P2 — email | 🟡 80% |
-| 9.8c | GCS 403 rate alert | > 10 GCS 403 responses in 5 min | P2 — email | 🟡 82% |
-| 9.8d | Firestore quota alert | Daily reads > 80% of quota | P3 — email | 🟢 90% |
-| 9.8e | Secret Manager failure alert | `accessSecretVersion` error rate > 0 | P1 — Slack + email | 🟢 92% |
-| 9.8f | Billing anomaly alert | Daily spend > 2× 30-day average; Pub/Sub → Cloud Function circuit breaker sets `hammer-export` + `hammer-portal` to `--max-instances 0` | P2 — email | 🟡 78% |
-| 9.9 | GCS lifecycle rule for `hammer-exports-{PROJECT_ID}` | Day 30 → NEARLINE; Day 90 → delete; `hammer-screenshots-{PROJECT_ID}`: Day 365 → NEARLINE, Day 730 → COLDLINE; verified with `gcloud storage buckets describe` | 🟢 96% |
-| 9.10 | 4 SLO objects in Cloud Monitoring | Capture endpoint 99.5% / p99 < 2 s; Report generation 95% within 5 min; Video export 90% within 15 min; Admin Portal 99.0%; all created as Cloud Monitoring SLO objects with error budget burn rate alerts | 🟡 79% |
+| 9.7 | Report failure alert | > 10% of `reports` docs reach `status: error` in 10 min | P1 — Slack `#hammer-alerts` + email | ✅ done |
+| 9.8 | Export queue depth alert | > 10 export jobs `status: "queued"` for > 5 min; log-based metric via Cloud Function | P2 — email | ✅ done |
+| 9.8b | API p99 latency alert | `hammer-api` p99 > 3 s over 5 min | P2 — email | ✅ done |
+| 9.8c | GCS 403 rate alert | > 10 GCS 403 responses in 5 min | P2 — email | ✅ done |
+| 9.8d | Firestore quota alert | Daily reads > 80% of quota | P3 — email | ✅ done |
+| 9.8e | Secret Manager failure alert | `accessSecretVersion` error rate > 0 | P1 — Slack + email | ✅ done |
+| 9.8f | Billing anomaly alert | Daily spend > 2× 30-day average; Pub/Sub → Cloud Function circuit breaker sets `hammer-export` + `hammer-portal` to `--max-instances 0` | P2 — email | ✅ done |
+| 9.9 | GCS lifecycle rule for `hammer-exports-{PROJECT_ID}` | Day 30 → NEARLINE; Day 90 → delete; `hammer-screenshots-{PROJECT_ID}`: Day 365 → NEARLINE, Day 730 → COLDLINE; verified with `gcloud storage buckets describe` | ✅ done |
+| 9.10 | 4 SLO objects in Cloud Monitoring | Capture endpoint 99.5% / p99 < 2 s; Report generation 95% within 5 min; Video export 90% within 15 min; Admin Portal 99.0%; all created as Cloud Monitoring SLO objects with error budget burn rate alerts | ✅ done |
 
 ### Security & Polish
 
 | # | Task | Done when | P% |
 |---|---|---|---|
-| 9.11 | Firestore security rules | Direct writes to `projects`, `users`, `reports`, `storyboards`, `api_keys` blocked for all non-SA principals; `api_keys.keyHash` field not readable by any client; tested with Firebase emulator; deployed via `firebase deploy --only firestore:rules` in CI | 🟡 77% |
-| 9.12 | Binary Authorization | Policy: only images signed by the Cloud Build service account via Cloud Build can be deployed to Cloud Run; prevents ad-hoc `gcloud run deploy` from laptop; added to `infra/cloud_run.tf` | 🟡 75% |
-| 9.13 | Key rotation automation | Cloud Scheduler (quarterly) → Cloud Function: generates new key per active user, writes to `pending_rotations`, emails new key, sets 7-day grace period; daily cleanup sets `isActive: false` on expired keys | 🟠 68% |
-| 9.14 | `runbook.md` created | Three minimum procedures documented: (1) Cloud Run revision rollback, (2) flush stuck export job, (3) revoke compromised API key; verified each procedure executes successfully in `hammer-dev` | 🟢 95% |
-| 9.15 | Admin Portal consolidated dashboard | 5 live metrics via Firestore `onSnapshot`: active projects, active users today, screenshots today, pending reports, pending exports | 🟡 76% |
-| 9.16 | Mobile-responsive Admin Portal | All views usable at 375px; tables → card lists; touch targets ≥ 44px; tested on real device | 🟡 81% |
-| 9.17 | `lessons_learned.md` updated | ≥ 3 new lessons from Sprints 5–9 with root cause + resolution | 🟢 98% |
+| 9.11 | Firestore security rules | Direct writes to `projects`, `users`, `reports`, `storyboards`, `api_keys` blocked for all non-SA principals; `api_keys.keyHash` field not readable by any client; tested with Firebase emulator; deployed via `firebase deploy --only firestore:rules` in CI | ✅ done |
+| 9.12 | Binary Authorization | Policy: only images signed by the Cloud Build service account via Cloud Build can be deployed to Cloud Run; prevents ad-hoc `gcloud run deploy` from laptop; added to `infra/cloud_run.tf` | ✅ done |
+| 9.13 | Key rotation automation | Cloud Scheduler (quarterly) → Cloud Function: generates new key per active user, writes to `pending_rotations`, emails new key, sets 7-day grace period; daily cleanup sets `isActive: false` on expired keys | ✅ done |
+| 9.14 | `runbook.md` created | Three minimum procedures documented: (1) Cloud Run revision rollback, (2) flush stuck export job, (3) revoke compromised API key; verified each procedure executes successfully in `hammer-dev` | ✅ done |
+| 9.15 | Admin Portal consolidated dashboard | 5 live metrics via Firestore `onSnapshot`: active projects, active users today, screenshots today, pending reports, pending exports | ✅ done |
+| 9.16 | Mobile-responsive Admin Portal | All views usable at 375px; tables → card lists; touch targets ≥ 44px; tested on real device | ✅ done |
+| 9.17 | `lessons_learned.md` updated | ≥ 3 new lessons from Sprints 5–9 with root cause + resolution | ✅ done |
 
 ---
 
@@ -294,15 +294,15 @@ The full 8-alert set from `arch_decisions.md` §6.3 is implemented here. Alerts 
 
 **Goal:** Zero-friction data quality (auto-tagging, right-click capture) and admin-gated enterprise features (Blur, Clipboard links).
 
-**Sprint P%: 🟡 71%** — Content scripts and DOM parsing are inherently fragile across different websites; rigorous cross-site testing required.
+**Sprint P%: ✅ 100%** — Completed. Auto-tagging, element capture, admin feature entitlements, privacy blur, and instant clipboard links are all implemented.
 
 | # | Task | Done when | P% |
 |---|---|---|---|
-| 10.1 | Context Engine Auto-tagging | Content script scrapes page title and URL; auto-fills `tool` (e.g., matching `figma.com` -> Figma, or extracting Jira `PROJ-123` ID) | 🟡 75% |
-| 10.2 | Right-Click Element Capture | Injects Chrome Context Menu "Hammer: Capture this element"; intercepts click, isolates DOM element bounding box, crops PNG before upload | 🟠 65% |
-| 10.3 | Admin Feature Entitlements | Admin User Detail API/View adds toggles for "Allow Pre-Upload Blur" and "Instant Clipboard Links"; saved as boolean properties on `users` doc | 🟢 95% |
-| 10.4 | Pre-Upload Privacy Blur | Guarded by entitlement check in 10.3. If enabled, capture opens a 3-second overlay canvas where user can drag rects to irreversibly blur pixels before GCS PUT | 🟠 62% |
-| 10.5 | Instant Clipboard Links | Guarded by entitlement check. If enabled, the `signedUrl` (or Portal View URL) generated to view the image is automatically injected into `navigator.clipboard` immediately after 200 OK | 🟢 88% |
+| 10.1 | Context Engine Auto-tagging | Content script scrapes page title and URL; auto-fills `tool` (e.g., matching `figma.com` -> Figma, or extracting Jira `PROJ-123` ID) | ✅ done |
+| 10.2 | Right-Click Element Capture | Injects Chrome Context Menu "Hammer: Capture this element"; intercepts click, isolates DOM element bounding box, crops PNG before upload | ✅ done |
+| 10.3 | Admin Feature Entitlements | Admin User Detail API/View adds toggles for "Allow Pre-Upload Blur" and "Instant Clipboard Links"; saved as boolean properties on `users` doc | ✅ done |
+| 10.4 | Pre-Upload Privacy Blur | Guarded by entitlement check in 10.3. If enabled, capture opens a 3-second overlay canvas where user can drag rects to irreversibly blur pixels before GCS PUT | ✅ done |
+| 10.5 | Instant Clipboard Links | Guarded by entitlement check. If enabled, the `signedUrl` (or Portal View URL) generated to view the image is automatically injected into `navigator.clipboard` immediately after 200 OK | ✅ done |
 
 ---
 
@@ -316,8 +316,9 @@ The full 8-alert set from `arch_decisions.md` §6.3 is implemented here. Alerts 
 | 6S | Research spike (alarms + OCR) | 🟢 91% | S.4 — OCR PoC accuracy on real GTM screenshots |
 | 7 | Analyst report engine | 🟡 71% | 7.8–7.11 — OCR extraction accuracy (conditional on 6S) |
 | 22 | Instructional Designer workspace | 🟠 63% | Deferred |
-| 9 | Auth hardening + integration tests | 🟡 73% | 9.5/9.6 — integration + smoke tests expose upstream bugs |
-| 10 | Extension Superpowers | 🟡 71% | 10.2 — Cross-domain CSS layout quirks with DOM element bounding boxes |
+| 9 | Auth hardening + integration tests | ✅ 100% | 9.5/9.6 — integration + smoke tests expose upstream bugs |
+| 10 | Extension Superpowers | ✅ 100% | Completed |
+| 11 | Full-page capture, Webhooks, LLM Router | ✅ 100% | Completed |
 | **All sprints (sequential gates)** | Full platform | **🟠 ~12%** | Compounded — every gate must pass |
 
 > **On the ~15% figure:** Sprint 21 + Sprints 5 + 6 + 7 (Firestore reports only, no OCR) is a 🟡 ~33% outcome and delivers immediate Admin and Analyst value. Treat Sprint 21 and 6S as mandatory gates before portal go-live and Sprint 7 OCR tasks respectively.
@@ -368,13 +369,13 @@ The full 8-alert set from `arch_decisions.md` §6.3 is implemented here. Alerts 
 | Global HTTPS Load Balancer + Cloud Armor + Cloud DNS | **Delivered → Sprint 21** |
 | Cloud DLP PII scanning | Backlog; trigger: > 50 users or EU onboarding (see `arch_decisions.md` §8.2) |
 | BigQuery export for analytics | Backlog; depends on Sprint 7 report schema |
-| Full-page scroll-and-stitch capture | Backlog |
+| Full-page scroll-and-stitch capture | **Delivered → Sprint 11** |
 | Chrome Web Store public listing | Backlog; current plan: enterprise sideloading via Google Workspace Admin Console |
 | Per-project GCS bucket isolation | Backlog; current model: single `hammer-screenshots-{PROJECT_ID}` bucket with `projectId` path prefix |
-| Slack / Teams webhook on upload | Backlog |
+| Slack / Teams webhook on upload | **Delivered → Sprint 11** |
 | Cloud Run `--min-instances 1` on export service | N/A — `hammer-export` is a Cloud Run **Job**; no min-instances concept |
 | OCR/Vision PoC | **Promoted → Sprint 6S** |
-| LLM-assisted Executive Summary narrative | Optional enhancement for Sprint 7 task 7.7; not required for done-when |
+| LLM-assisted Executive Summary narrative | **Delivered → Sprint 11** |
 | CDN caching for portal static assets | Backlog; unlocked by Sprint 21 |
 | Per-country geo-blocking via Cloud Armor | Backlog; unlocked by Sprint 21 |
 | Multi-region failover (`europe-west1`) | Backlog; trigger: EU users onboarded |

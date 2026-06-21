@@ -1,6 +1,6 @@
 # The Hammer
 
-A Chrome extension that captures a screenshot of the active tab and uploads it to Google Cloud Storage. Captures are categorized by project, tool, and user.
+A Chrome extension that captures a screenshot of the active tab and uploads it to Google Cloud Storage. Captures are securely isolated by B2B Workspaces, and categorized by project and tool. Identity is managed via Firebase Authentication.
 
 ## Project Structure
 
@@ -48,4 +48,4 @@ Deployments are handled via GitHub Actions to Google Cloud. Do not run manual de
 * `thehammer` (Prod)
 * `hammer-dev` (Dev)
 
-Refer to `docs/architecture.md` for complete details on infrastructure, authentication (Cloud IAP), and GCP topology.
+Refer to `docs/architecture.md` for complete details on infrastructure, Firebase Authentication, Workspaces, and GCP topology.

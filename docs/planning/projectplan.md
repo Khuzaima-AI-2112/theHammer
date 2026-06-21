@@ -15,9 +15,9 @@ A Chrome extension that captures a screenshot of the active tab and uploads it t
 - Automatic file naming: `{project}/{tool}/{yyyy}/{mm}/{dd}/{name}_{timestamp}.png`
 - Upload to Google Cloud Storage with zero manual steps
 - Lightweight backend on Google Cloud (Cloud Run, min instances 0)
-- Internal team use: 5 users, ~30 images/day each (~150/day total)
-- Estimated cost: under $1/month
-- **New:** Session-scoped assignment of **Project** and **User** via dropdowns, backed by an admin-managed configuration
+- **B2B SaaS Multi-Tenant**: Admins can sign up, create Workspaces, and invite team members. All projects are strictly scoped to a Workspace.
+- **Session-scoped assignment:**
+  At extension startup, the user selects a **Project** from dropdowns populated by their Workspace. These selections apply to all captures in the current session.
 
 ---
 
@@ -56,7 +56,7 @@ Google Cloud Storage
 | Backend | Cloud Run (Node.js 20 + Express, containerized) | HTTP endpoint, scales to zero, full control over runtime |
 | Container registry | Artifact Registry | Standard GCP container storage |
 | Storage | Google Cloud Storage (Standard class) | ~$0.02/GB-month, lifecycle rules |
-| Auth | API key via `X-Api-Key` header + Secret Manager | Practical for small team; upgradeable to IAP |
+| Auth | Firebase Authentication | B2B SaaS model, Google OAuth, Email/Password, JWTs |
 | Metadata (v2) | Firestore | Optional: upload history, per-project views |
 
 ---
@@ -71,18 +71,45 @@ All new Firestore document types created in Sprint 5 must include `schemaVersion
 
 | Collection | Purpose | Document ID | Notes |
 |---|---|---|---|
-| `projects` | Admin-created project records used across portal, extension, and reporting | `projectId` (e.g. `proj_website_redesign`) | Stores summary fields including `memberCount` |
-| `users` | Directory of people who can capture, administer, analyze, or design | `userId` (e.g. `user_alice_chen`) | Profile record; API keys live separately in Sprint 9 |
-| `project_memberships` | Join table linking users to projects with a role | deterministic membership ID such as `{projectId}__{userId}` | Flat collection; not a subcollection under `projects` |
-| `uploads` | Existing screenshot metadata collection | existing upload document ID | Remains flat; queried by `projectId`, `userId`, `tool`, `uploadedAt` |
+| `workspaces` | B2B tenant representation | `workspaceId` | Top-level grouping |
+| `workspace_invites`| Invitations to join a workspace | Auto-generated | Manages pending/accepted state |
+| `projects` | Admin-created project records within a workspace | `projectId` (e.g. `proj_website_redesign`) | Scoped by `workspaceId` |
+| `users` | Global directory of all registered users | `userId` (e.g. `user_alice_chen`) | Base profile information |
+| `project_memberships` | Join table linking users to projects with a role | deterministic membership ID | Flat collection |
+| `uploads` | Existing screenshot metadata collection | existing upload document ID | Contains `workspaceId` and `projectId` |
 
-### Schema — `projects`
+### Schema — `workspaces`
 
-Each project document represents one admin-managed project visible in the Admin Portal and selectable by assigned users.
+Each workspace represents a distinct B2B tenant.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `projectId` | string | Yes | Stable identifier duplicated from the document ID for API responses |
+| `workspaceId` | string | Yes | Stable identifier duplicated from the document ID |
+| `name` | string | Yes | Human-readable workspace name |
+| `ownerId` | string | Yes | `userId` of the workspace creator |
+| `createdAt` | timestamp | Yes | Creation timestamp |
+| `schemaVersion` | number | Yes | Must be `1` |
+
+Example documents:
+
+```json
+{
+  "workspaceId": "ws_alpha_corp",
+  "name": "Alpha Corp",
+  "ownerId": "user_alice_chen",
+  "createdAt": "2026-06-18T13:00:00Z",
+  "schemaVersion": 1
+}
+```
+
+### Schema — `projects`
+
+Each project document represents one admin-managed project visible in the Admin Portal and selectable by assigned users within a specific workspace.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `projectId` | string | Yes | Stable identifier duplicated from the document ID |
+| `workspaceId` | string | Yes | Foreign key to `workspaces` |
 | `name` | string | Yes | Human-readable project name |
 | `description` | string | No | Optional admin-entered summary |
 | `status` | string | Yes | Initial values: `active` or `archived` |
@@ -97,6 +124,7 @@ Example documents:
 ```json
 {
   "projectId": "proj_website_redesign",
+  "workspaceId": "ws_alpha_corp",
   "name": "Website Redesign",
   "description": "Capture redesign work across Figma, Jira, and QA.",
   "status": "active",
@@ -111,6 +139,7 @@ Example documents:
 ```json
 {
   "projectId": "proj_gtm_migration",
+  "workspaceId": "ws_alpha_corp",
   "name": "GTM Migration",
   "description": "Migration from legacy tags to new GTM container structure.",
   "status": "active",
@@ -122,31 +151,19 @@ Example documents:
 }
 ```
 
-```json
-{
-  "projectId": "proj_q4_enablement",
-  "name": "Q4 Enablement",
-  "description": "Instructional content and rollout assets for Q4 sales enablement.",
-  "status": "archived",
-  "memberCount": 1,
-  "createdAt": "2026-06-18T13:20:00Z",
-  "createdBy": "admin@thehammer.io",
-  "updatedAt": "2026-06-18T13:45:00Z",
-  "schemaVersion": 1
-}
-```
-
 ### Schema — `users`
 
-Each user document stores the human profile used by the Admin Portal and future role-aware workflows. This collection represents people, not credentials.
+Each user document stores the human profile used by the Admin Portal and future role-aware workflows.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `userId` | string | Yes | Stable identifier duplicated from document ID |
 | `email` | string | Yes | Primary email address |
 | `displayName` | string | Yes | Human-readable display name |
-| `defaultRole` | string | Yes | Initial values: `admin`, `user`, `analyst`, `instructional_designer` |
+| `role` | string | Yes | Role across the workspace (`admin`, `user`, etc.) |
+| `currentWorkspaceId` | string | Yes | The active workspace for this user |
 | `isActive` | boolean | Yes | Soft-activation flag |
+| `inactivityTimerSeconds` | number | No | Custom inactivity timer (default 45) |
 | `createdAt` | timestamp | Yes | Creation timestamp |
 | `updatedAt` | timestamp | Yes | Last profile update timestamp |
 | `schemaVersion` | number | Yes | Must be `1` |
@@ -158,8 +175,10 @@ Example documents:
   "userId": "user_alice_chen",
   "email": "alice@thehammer.io",
   "displayName": "Alice Chen",
-  "defaultRole": "admin",
+  "role": "admin",
+  "currentWorkspaceId": "ws_alpha_corp",
   "isActive": true,
+  "inactivityTimerSeconds": 30,
   "createdAt": "2026-06-18T13:00:00Z",
   "updatedAt": "2026-06-18T13:00:00Z",
   "schemaVersion": 1
@@ -171,34 +190,23 @@ Example documents:
   "userId": "user_ben_singh",
   "email": "ben@thehammer.io",
   "displayName": "Ben Singh",
-  "defaultRole": "analyst",
+  "role": "analyst",
+  "currentWorkspaceId": "ws_alpha_corp",
   "isActive": true,
+  "inactivityTimerSeconds": 45,
   "createdAt": "2026-06-18T13:05:00Z",
   "updatedAt": "2026-06-18T13:05:00Z",
   "schemaVersion": 1
 }
 ```
 
-```json
-{
-  "userId": "user_chloe_martin",
-  "email": "chloe@thehammer.io",
-  "displayName": "Chloe Martin",
-  "defaultRole": "instructional_designer",
-  "isActive": false,
-  "createdAt": "2026-06-18T13:15:00Z",
-  "updatedAt": "2026-06-18T13:40:00Z",
-  "schemaVersion": 1
-}
-```
-
 ### Schema — `project_memberships`
 
-`project_memberships` is a flat join collection, not a nested subcollection. This is intentional so membership queries work in both directions (`project -> users` and `user -> projects`) without introducing subcollection drift, while still supporting the Sprint 5.6 transaction requirement.
+`project_memberships` is a flat join collection mapping users to specific projects within a workspace.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `membershipId` | string | Yes | Stable identifier duplicated from document ID, recommended format `{projectId}__{userId}` |
+| `membershipId` | string | Yes | Recommended format `{projectId}__{userId}` |
 | `projectId` | string | Yes | Foreign key to `projects.projectId` |
 | `userId` | string | Yes | Foreign key to `users.userId` |
 | `role` | string | Yes | User's role within that specific project |
@@ -227,18 +235,6 @@ Example documents:
   "userId": "user_ben_singh",
   "role": "analyst",
   "createdAt": "2026-06-18T13:06:00Z",
-  "createdBy": "admin@thehammer.io",
-  "schemaVersion": 1
-}
-```
-
-```json
-{
-  "membershipId": "proj_gtm_migration__user_chloe_martin",
-  "projectId": "proj_gtm_migration",
-  "userId": "user_chloe_martin",
-  "role": "instructional_designer",
-  "createdAt": "2026-06-18T13:16:00Z",
   "createdBy": "admin@thehammer.io",
   "schemaVersion": 1
 }

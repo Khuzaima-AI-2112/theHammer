@@ -19,7 +19,7 @@ const express = require('express');
 const { Timestamp } = require('firebase-admin/firestore');
 const { Storage } = require('@google-cloud/storage');
 const { db } = require('../../lib/firestore');
-const { requireAdmin } = require('../../middleware/requireAdmin');
+const { requireAdmin } = require('../../middleware/requireAuth');
 
 const router    = express.Router({ mergeParams: true });
 const MAX_LIMIT = 500;

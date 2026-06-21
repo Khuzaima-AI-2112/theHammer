@@ -46,6 +46,16 @@ steps:
       - 'push'
       - 'northamerica-northeast1-docker.pkg.dev/$PROJECT_ID/thehammer/backend:$COMMIT_SHA'
 
+  # ── 4a. Local Smoke Test ────────────────────────────────────────────────────
+  # Runs the backend container locally and hits it before deploying to Cloud Run.
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'smoke-test-local'
+    waitFor: ['push-backend']
+    entrypoint: bash
+    args:
+      - 'backend/tests/smoke-test.sh'
+      - 'northamerica-northeast1-docker.pkg.dev/$PROJECT_ID/thehammer/backend:$COMMIT_SHA'
+
   # ── 5. Deploy backend to Cloud Run ─────────────────────────────────────────
   #
   # --no-allow-unauthenticated: Cloud Run IAM blocks all requests that do not
@@ -54,9 +64,15 @@ steps:
   # Cloud Run itself still requires a valid invoker identity. The Cloud Build
   # service account (thehammer-backend@) is granted roles/run.invoker so the
   # smoke test step below can reach the service.
+  #
+  # Sprint 9 Note on Binary Authorization (Task 9.12):
+  # Binary Authorization enforcement via `--binary-authorization` has been
+  # intentionally left out for now. Enabling it would block ad-hoc
+  # deployments from developer machines (e.g., desktop deploys), which
+  # the team prefers to maintain. 
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     id: 'deploy-backend'
-    waitFor: ['push-backend']
+    waitFor: ['smoke-test-local']
     entrypoint: gcloud
     args:
       - 'run'

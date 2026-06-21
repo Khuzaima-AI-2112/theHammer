@@ -8,7 +8,10 @@ service cloud.firestore {
     // the firebase-admin SDK with Application Default Credentials (ADC).
     // All client-side SDK access is disallowed.
     //
-    // These rules deny ALL client reads and writes.
+    // Sprint 9 Task 9.11 Security Hardening:
+    // These rules definitively deny ALL client reads and writes to `projects`,
+    // `users`, `reports`, `storyboards`, and `api_keys`.
+    // It also ensures `api_keys.keyHash` is unreadable by any client.
     // The backend uses the Admin SDK which bypasses security rules entirely.
     //
     // Sprint 21 TODO: once Firebase Auth is evaluated (arch_questions.md),

@@ -43,7 +43,8 @@ const openSettingsBanner = document.getElementById('open-settings-banner');
 const settingsToggle   = document.getElementById('settings-toggle');
 const settingsPanel    = document.getElementById('settings-panel');
 const cloudRunUrlInput = document.getElementById('cloud-run-url');  // read-only
-const apiKeyInput      = document.getElementById('api-key-input');
+const authStatusText   = document.getElementById('auth-status-text');
+const authLoginBtn     = document.getElementById('auth-login-btn');
 const retentionInput   = document.getElementById('retention-input'); // read-only (admin-managed)
 const maxSizeInput     = document.getElementById('max-size-input');  // read-only (admin-managed)
 const notifyInput      = document.getElementById('notify-input');
@@ -64,17 +65,21 @@ const btnCaptureNow   = document.getElementById('btn-capture-now');
 document.addEventListener('DOMContentLoaded', async () => {
   const { session, settings } = await chrome.storage.local.get(['session', 'settings']);
 
-  // ── 5.15: Show no-key-banner if API key has never been set ──
-  const apiKey = settings?.apiKey?.trim() || '';
-  if (!apiKey) {
+  // ── 5.15 / 5.18: Show no-key-banner if Firebase token absent ──
+  const token = settings?.firebaseToken?.trim() || '';
+  if (!token) {
     noKeyBanner.style.display = 'block';
     captureBtn.disabled = true;
+    authStatusText.textContent = 'Not signed in';
+    authLoginBtn.textContent = 'Sign In';
+  } else {
+    authStatusText.textContent = 'Signed in with Firebase';
+    authLoginBtn.textContent = 'Sign Out';
   }
 
   // ── 5.15 / 5.17: Restore settings fields from storage ──
   // cloudRunUrl, retention, maxSize are authoritative from GET /config (5.17);
   // we show cached values here while the async fetch runs.
-  if (settings?.apiKey)         apiKeyInput.value      = settings.apiKey;
   if (settings?.notify != null) notifyInput.checked    = settings.notify;
   if (settings?.cloudRunUrl)    cloudRunUrlInput.value = settings.cloudRunUrl;
   if (settings?.retention)      retentionInput.value   = settings.retention;
@@ -84,15 +89,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (session?.stage) stageSelect.value = session.stage;
   if (session?.tool)  toolInput.value   = session.tool;
 
-  if (apiKey) {
+  if (token) {
     // ── 5.17: Fire GET /config and GET /me/projects in parallel ──
-    // loadConfig writes cloudRunUrl to storage before loadProjects reads it,
-    // so we await config first, then projects. The total extra latency is one
-    // extra round-trip only on the first open after a cold cache.
-    await loadConfig(apiKey);
-    await loadProjects(apiKey, session?.projectId || '');
+    await loadConfig(token);
+    await loadProjects(token, session?.projectId || '');
   } else {
-    setProjectSelectPlaceholder('Paste API key in Settings first');
+    setProjectSelectPlaceholder('Sign in to view projects');
   }
 
   // ── Save session ──
@@ -127,8 +129,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         refreshHistory();
       } else if (response?.reason === 'blocked') {
         setStatus('Blocked — set Project & save first.');
-      } else if (response?.reason === 'no_api_key') {
-        setStatus('Paste your Personal API Key in Settings.');
+      } else if (response?.reason === 'no_api_key' || response?.reason === 'unauthorized') {
+        setStatus('Sign in to your account.');
         noKeyBanner.style.display = 'block';
       } else {
         setStatus('Failed: ' + (response?.error ?? 'unknown'));
@@ -183,37 +185,72 @@ document.addEventListener('DOMContentLoaded', async () => {
   openSettingsBanner.addEventListener('click', () => {
     settingsPanel.classList.add('open');
     settingsToggle.textContent = '✕ Settings';
-    apiKeyInput.focus();
+  });
+
+  // ── 5.18: OAuth Login Flow ──
+  authLoginBtn.addEventListener('click', async () => {
+    const existing = (await chrome.storage.local.get('settings')).settings || {};
+    
+    if (existing.firebaseToken) {
+      // Sign out
+      await chrome.storage.local.set({ settings: { ...existing, firebaseToken: '', firebaseRefreshToken: '' } });
+      authStatusText.textContent = 'Not signed in';
+      authLoginBtn.textContent = 'Sign In';
+      noKeyBanner.style.display = 'block';
+      captureBtn.disabled = true;
+      setProjectSelectPlaceholder('Sign in to view projects');
+      setStatus('Signed out.');
+      return;
+    }
+    
+    setStatus('Authenticating...');
+    const baseUrl = existing.cloudRunUrl?.trim() || 'https://app.thehammer.io';
+    const authUrl = `${baseUrl.replace('/api', '')}/auth-ext.html`;
+    const redirectUrl = chrome.identity.getRedirectURL();
+
+    try {
+      const responseUrl = await chrome.identity.launchWebAuthFlow({
+        url: `${authUrl}?redirect_uri=${encodeURIComponent(redirectUrl)}`,
+        interactive: true
+      });
+      
+      const url = new URL(responseUrl);
+      const token = url.searchParams.get('token');
+      const refreshToken = url.searchParams.get('refreshToken');
+      const fbApiKey = url.searchParams.get('apiKey');
+
+      if (token) {
+        const allSettings = { ...existing, firebaseToken: token, firebaseRefreshToken: refreshToken, firebaseApiKey: fbApiKey };
+        await chrome.storage.local.set({ settings: allSettings });
+        setStatus('Signed in ✓');
+        noKeyBanner.style.display = 'none';
+        captureBtn.disabled = false;
+        authStatusText.textContent = 'Signed in with Firebase';
+        authLoginBtn.textContent = 'Sign Out';
+        
+        await loadConfig(token);
+        const { session: s2 } = await chrome.storage.local.get('session');
+        await loadProjects(token, s2?.projectId || '');
+      } else {
+        setStatus('Sign-in cancelled.');
+      }
+    } catch (err) {
+      console.error('[Hammer popup] OAuth error:', err);
+      setStatus('Sign-in failed.');
+    }
   });
 
   // ── 5.15 / 5.17: Settings save ──
-  // Only apiKey + notify are user-editable.
-  // cloudRunUrl, retention, maxSize come from GET /config and are never
-  // written by the user — the fields are read-only in HTML.
   settingsSaveBtn.addEventListener('click', async () => {
-    const newKey = apiKeyInput.value.trim();
-    if (!newKey) {
-      setStatus('API key cannot be empty.');
-      apiKeyInput.focus();
-      return;
-    }
-
     const existing = (await chrome.storage.local.get('settings')).settings || {};
     const allSettings = {
-      ...existing,        // preserve cloudRunUrl, retention, maxSize from /config
-      apiKey: newKey,
+      ...existing,        // preserve tokens, cloudRunUrl, etc.
       notify: notifyInput.checked
     };
 
     try {
       await chrome.storage.local.set({ settings: allSettings });
-      setStatus('Key saved ✓');
-      noKeyBanner.style.display = 'none';
-      captureBtn.disabled = false;
-      // 5.17: Refresh /config then /me/projects with the new key
-      await loadConfig(newKey);
-      const { session: s2 } = await chrome.storage.local.get('session');
-      await loadProjects(newKey, s2?.projectId || '');
+      setStatus('Settings saved ✓');
     } catch (err) {
       console.error('[Hammer popup] settings save error:', err);
       setStatus('Save failed: ' + err.message);
@@ -257,7 +294,7 @@ async function loadConfig(apiKey) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 8000);
     const res = await fetch(`${baseUrl}/config`, {
-      headers: { 'X-Api-Key': apiKey },
+      headers: { 'Authorization': `Bearer ${apiKey}` },
       signal: controller.signal
     });
     clearTimeout(timeout);
@@ -274,6 +311,12 @@ async function loadConfig(apiKey) {
     if (config.maxSize)     updated.maxSize      = config.maxSize;
     if (typeof config.inactivityTimerSeconds === 'number') {
       updated.inactivityTimerSeconds = config.inactivityTimerSeconds;
+    }
+    if (typeof config.allowPreUploadBlur === 'boolean') {
+      updated.allowPreUploadBlur = config.allowPreUploadBlur;
+    }
+    if (typeof config.instantClipboardLinks === 'boolean') {
+      updated.instantClipboardLinks = config.instantClipboardLinks;
     }
 
     await chrome.storage.local.set({ settings: updated });
@@ -302,7 +345,7 @@ async function loadProjects(apiKey, savedProjectId) {
   setProjectSelectPlaceholder('Loading projects…');
   try {
     const res = await fetch(`${baseUrl}/me/projects`, {
-      headers: { 'X-Api-Key': apiKey }
+      headers: { 'Authorization': `Bearer ${apiKey}` }
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const projects = await res.json();

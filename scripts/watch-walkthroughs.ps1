@@ -14,15 +14,23 @@ $Watcher.Filter = "walkthrough.md"
 $Watcher.IncludeSubdirectories = $true
 $Watcher.EnableRaisingEvents = $true
 
-Write-Host "🔨 The Hammer - Walkthrough Watcher" -ForegroundColor Cyan
+Write-Host "Hammer - Walkthrough Watcher" -ForegroundColor Cyan
 Write-Host "Watching for new walkthroughs in: $BrainDir"
 Write-Host "Will save copies to: $DestDir"
-Write-Host "Press Ctrl+C to stop.`n"
+Write-Host "Press Ctrl+C to stop."
+
+# Keep track of last trigger time to debounce multiple events
+$Global:LastEventTime = [DateTime]::MinValue
 
 # The action to execute when a walkthrough.md is modified or created
 $Action = {
     $Path = $Event.SourceEventArgs.FullPath
-    $ChangeType = $Event.SourceEventArgs.ChangeType
+    
+    $Now = Get-Date
+    if (($Now - $Global:LastEventTime).TotalSeconds -lt 2) {
+        return # Skip if triggered within the last 2 seconds
+    }
+    $Global:LastEventTime = $Now
     
     # Small debounce to ensure file is fully written before copying
     Start-Sleep -Milliseconds 500
@@ -31,11 +39,10 @@ $Action = {
     $DestPath = Join-Path $DestDir "walkthrough_$Timestamp.md"
     
     try {
-        # Copy the file to the destination
         Copy-Item -Path $Path -Destination $DestPath -Force
-        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Saved new walkthrough: walkthrough_$Timestamp.md" -ForegroundColor Green
+        Write-Host "Saved new walkthrough: walkthrough_$Timestamp.md" -ForegroundColor Green
     } catch {
-        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Failed to copy walkthrough: $_" -ForegroundColor Red
+        Write-Host "Failed to copy walkthrough" -ForegroundColor Red
     }
 }
 
@@ -53,5 +60,5 @@ try {
     Unregister-Event -SourceIdentifier $createdJob.Name
     Unregister-Event -SourceIdentifier $changedJob.Name
     $Watcher.Dispose()
-    Write-Host "`nWatcher stopped." -ForegroundColor Yellow
+    Write-Host "Watcher stopped." -ForegroundColor Yellow
 }

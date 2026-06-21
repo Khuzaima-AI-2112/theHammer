@@ -68,6 +68,35 @@ app.use((req, res, next) => {
   return limiter(req, res, next);
 });
 
+// ── Per-Role Rate Limiters ─────────────────────────────────────────
+const analystReportLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 10, // 10 requests per hour
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.hammerUser?.id || req.ip,
+  handler: (_req, res, _next, options) => {
+    res.status(options.statusCode).json({
+      error: 'Analyst report rate limit exceeded (10/hr)',
+      retryAfter: Math.ceil(options.windowMs / 1000)
+    });
+  }
+});
+
+const videoExportLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 5, // 5 requests per hour
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.hammerUser?.id || req.ip,
+  handler: (_req, res, _next, options) => {
+    res.status(options.statusCode).json({
+      error: 'Video export rate limit exceeded (5/hr)',
+      retryAfter: Math.ceil(options.windowMs / 1000)
+    });
+  }
+});
+
 app.use(express.json());
 
 // ── GCS ──────────────────────────────────────────────────────────
@@ -114,13 +143,7 @@ function keysEqual(provided, expected) {
 // Auth middleware
 // ─────────────────────────────────────────────────────────────────
 
-function requireApiKey(req, res, next) {
-  const expected = process.env.API_KEY;
-  const provided = req.headers['x-api-key'];
-  if (!expected || !provided) return res.status(401).json({ error: 'Missing API key' });
-  if (!keysEqual(provided, expected)) return res.status(401).json({ error: 'Invalid API key' });
-  next();
-}
+const { requireAuth } = require('./middleware/requireAuth');
 
 function requireMultipart(req, res, next) {
   const ct = req.headers['content-type'] || '';
@@ -153,6 +176,7 @@ async function firestoreWrite(objectPath, fields) {
         tool:       fields.tool,
         tabUrl:     fields.tabUrl,
         uploadedAt: fields.uploadedAt,
+        hasSemanticData: fields.hasSemanticData || false,
         schemaVersion: 1
       },
       { merge: false }
@@ -160,6 +184,24 @@ async function firestoreWrite(objectPath, fields) {
     console.log('[hammer-api] Firestore write ✓ | doc:', docId);
   } catch (err) {
     console.error('[hammer-api] Firestore write error (non-fatal):', err.message);
+  }
+}
+
+async function dispatchWebhook(projectId, payload) {
+  try {
+    const snap = await db.collection('projects').doc(projectId).get();
+    if (snap.exists) {
+      const p = snap.data();
+      if (p.webhookUrl) {
+        fetch(p.webhookUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        }).catch(err => console.error('[hammer-api] Webhook dispatch error:', err.message));
+      }
+    }
+  } catch(err) {
+    console.error('[hammer-api] Webhook fetch project error:', err.message);
   }
 }
 
@@ -171,7 +213,7 @@ async function firestoreWrite(objectPath, fields) {
 app.get('/health', (_req, res) => res.json({ status: 'ok' }));
 
 // ─ POST /upload-url ───────────────────────────────────────────────
-app.post('/upload-url', requireApiKey, async (req, res, next) => {
+app.post('/upload-url', requireAuth('user'), async (req, res, next) => {
   try {
     const { project, tool, name } = req.body || {};
     const missing = [];
@@ -181,20 +223,53 @@ app.post('/upload-url', requireApiKey, async (req, res, next) => {
     if (missing.length > 0) return res.status(400).json({ error: 'Missing required fields', missing });
     if (!BUCKET_NAME) return res.status(500).json({ error: 'Server misconfiguration: GCS_BUCKET not set' });
 
+    // Enforce Tenant Isolation
+    const projSnap = await db.collection('projects').doc(project).get();
+    if (!projSnap.exists || projSnap.data().workspaceId !== req.hammerUser.workspaceId) {
+      return res.status(403).json({ error: 'Forbidden: Project not found or belongs to another workspace' });
+    }
+
     const objectPath = buildObjectPath(sanitize(project), sanitize(name), sanitize(tool, 32));
-    const [signedUrl] = await gcs.bucket(BUCKET_NAME).file(objectPath).getSignedUrl({
+    
+    if (req.body.semanticData) {
+      const jsonPath = objectPath.replace(/\.png$/, '.json');
+      const jsonFile = gcs.bucket(BUCKET_NAME).file(jsonPath);
+      jsonFile.save(JSON.stringify(req.body.semanticData), {
+        contentType: 'application/json'
+      }).catch(err => console.error('[hammer-api] Semantic data write error:', err.message));
+    }
+
+    const file = gcs.bucket(BUCKET_NAME).file(objectPath);
+    const [signedUrl] = await file.getSignedUrl({
       version: 'v4', action: 'write',
       expires: Date.now() + 10 * 60 * 1000,
       contentType: 'image/png'
     });
-    return res.json({ signedUrl, path: objectPath });
+    const [readUrl] = await file.getSignedUrl({
+      version: 'v4', action: 'read',
+      expires: Date.now() + 15 * 60 * 1000
+    });
+    
+    dispatchWebhook(sanitize(project), {
+      text: `New screenshot capture initiated`,
+      attachments: [{
+        title: 'Capture Details',
+        fields: [
+          { title: 'Tool', value: tool || 'Unknown', short: true },
+          { title: 'Name', value: name || 'Unknown', short: true },
+          { title: 'Link', value: readUrl, short: false }
+        ]
+      }]
+    });
+
+    return res.json({ signedUrl, readUrl, path: objectPath });
   } catch (err) {
     return res.status(err.code === 403 ? 403 : 502).json({ error: 'Failed to generate signed URL', detail: err.message });
   }
 });
 
 // ─ POST /capture ──────────────────────────────────────────────────
-app.post('/capture', requireApiKey, requireMultipart, upload.single('file'), async (req, res, next) => {
+app.post('/capture', requireAuth('user'), requireMultipart, upload.single('file'), async (req, res, next) => {
   try {
     const { projectId, userId, tool, tabUrl } = req.body || {};
     const missing = [];
@@ -204,6 +279,12 @@ app.post('/capture', requireApiKey, requireMultipart, upload.single('file'), asy
     if (!req.file)             return res.status(400).json({ error: 'Missing required field: file' });
     if (req.file.size === 0)   return res.status(400).json({ error: 'file must not be empty (0 bytes)' });
     if (!BUCKET_NAME) return res.status(500).json({ error: 'Server misconfiguration: GCS_BUCKET not set' });
+
+    // Enforce Tenant Isolation
+    const projSnap = await db.collection('projects').doc(projectId).get();
+    if (!projSnap.exists || projSnap.data().workspaceId !== req.hammerUser.workspaceId) {
+      return res.status(403).json({ error: 'Forbidden: Project not found or belongs to another workspace' });
+    }
 
     const safeProject  = sanitize(projectId);
     const safeUser     = sanitize(userId);
@@ -221,20 +302,52 @@ app.post('/capture', requireApiKey, requireMultipart, upload.single('file'), asy
       }
     });
 
+    const hasSemanticData = !!req.body.semanticData;
+    if (hasSemanticData) {
+      try {
+        const parsed = typeof req.body.semanticData === 'string' ? JSON.parse(req.body.semanticData) : req.body.semanticData;
+        const jsonPath = objectPath.replace(/\.png$/, '.json');
+        const jsonFile = gcs.bucket(BUCKET_NAME).file(jsonPath);
+        jsonFile.save(JSON.stringify(parsed), {
+          contentType: 'application/json'
+        }).catch(err => console.error('[hammer-api] Semantic data write error:', err.message));
+      } catch (e) {
+        console.error('[hammer-api] Could not parse semanticData');
+      }
+    }
+
     await firestoreWrite(objectPath, {
       path: objectPath, bucket: BUCKET_NAME, size: req.file.size,
       projectId: safeProject, userId: safeUser, tool: safeTool,
-      tabUrl: safeTabUrl, uploadedAt
+      tabUrl: safeTabUrl, uploadedAt, hasSemanticData
     });
 
-    return res.json({ success: true, path: objectPath, size: req.file.size });
+    const [readUrl] = await blob.getSignedUrl({
+      version: 'v4', action: 'read',
+      expires: Date.now() + 15 * 60 * 1000
+    });
+
+    dispatchWebhook(safeProject, {
+      text: `New screenshot captured`,
+      attachments: [{
+        title: 'Capture Details',
+        fields: [
+          { title: 'Tool', value: safeTool || 'Unknown', short: true },
+          { title: 'User', value: safeUser || 'Unknown', short: true },
+          { title: 'URL', value: safeTabUrl || 'Unknown', short: false },
+          { title: 'Link', value: readUrl, short: false }
+        ]
+      }]
+    });
+
+    return res.json({ success: true, path: objectPath, size: req.file.size, readUrl });
   } catch (err) {
     return next(err);
   }
 });
 
 // ─ POST /session-events ───────────────────────────────────────────
-app.post('/session-events', requireApiKey, async (req, res, next) => {
+app.post('/session-events', requireAuth('user'), async (req, res, next) => {
   try {
     const body = req.body || {};
     const missing = [];
@@ -311,7 +424,7 @@ app.post('/session-events', requireApiKey, async (req, res, next) => {
 });
 
 // ─ POST /inactivity-events ────────────────────────────────────────
-app.post('/inactivity-events', requireApiKey, async (req, res, next) => {
+app.post('/inactivity-events', requireAuth('user'), async (req, res, next) => {
   try {
     const body = req.body || {};
     const missing = [];
@@ -323,17 +436,7 @@ app.post('/inactivity-events', requireApiKey, async (req, res, next) => {
     
     if (missing.length > 0) return res.status(400).json({ error: 'Missing required fields', missing });
 
-    let resolvedUserId = null;
-    try {
-      const rawKey = req.headers['x-api-key'];
-      if (rawKey) {
-        const keyHash = sha256(rawKey);
-        const keySnap = await db.collection('api_keys').where('keyHash', '==', keyHash).where('isActive', '==', true).limit(1).get();
-        if (!keySnap.empty) {
-          resolvedUserId = keySnap.docs[0].data().userId;
-        }
-      }
-    } catch(err) {}
+    const resolvedUserId = req.hammerUser.uid;
 
     const docId = sanitize(body.eventId, 64);
     await db.collection('inactivity_events').doc(docId).set({
@@ -357,11 +460,15 @@ app.post('/inactivity-events', requireApiKey, async (req, res, next) => {
 // Admin routers (Sprint 5)
 // All route-level auth is handled inside each router via requireRole().
 // ─────────────────────────────────────────────────────────────────
+module.exports = { app, sanitize, buildObjectPath, sha256, analystReportLimiter, videoExportLimiter };
+
 app.use('/',       require('./routes/admin/me'));
 app.use('/admin',  require('./routes/admin/projects'));
 app.use('/admin',  require('./routes/admin/users'));
 app.use('/admin',  require('./routes/admin/activity'));
 app.use('/admin',  require('./routes/admin/reports'));
+app.use('/admin',  require('./routes/admin/dashboard'));
+app.use('/admin',  require('./routes/admin/workspaces'));
 
 // ─────────────────────────────────────────────────────────────────
 // Internal Worker Endpoints
@@ -396,5 +503,3 @@ if (require.main === module) {
     console.log(`[hammer-api] EXTENSION_ID=${EXTENSION_ID || '(not set — CORS for extension disabled)'}`);
   });
 }
-
-module.exports = { app, sanitize, buildObjectPath, sha256 };

@@ -201,10 +201,10 @@
       <input id="tool-input" type="text" placeholder="e.g. Figma, Jira, Notion" maxlength="64" />
     </div>
 
-    <!-- 5.15: shown when Personal API Key has not been set -->
+    <!-- 5.15: shown when User has not signed in -->
     <div id="no-key-banner">
-      Paste your <strong>Personal API Key</strong> in Settings to start capturing.
-      <button id="open-settings-banner">Open Settings</button>
+      Sign in to The Hammer to start capturing.
+      <button id="open-settings-banner">Sign In</button>
     </div>
 
     <div class="row">
@@ -228,8 +228,9 @@
         <p id="url-error">URL must start with https://</p>
       </div>
       <div class="field">
-        <label for="api-key-input">Personal API Key</label>
-        <input id="api-key-input" type="password" placeholder="Paste your key here" autocomplete="off" />
+        <label>Account</label>
+        <div id="auth-status-text" style="font-size: 12px; margin-bottom: 8px;">Not signed in</div>
+        <button id="auth-login-btn" style="width:100%; padding: 6px 0; background: #e6e4df; border:none; border-radius:4px; cursor:pointer;">Sign In</button>
       </div>
       <div class="field">
         <label for="retention-input">Retention (days) <span style="font-weight:400;text-transform:none;font-size:10px">admin-managed</span></label>
@@ -243,7 +244,7 @@
         <input id="notify-input" type="checkbox" style="width:auto" />
         <label for="notify-input" style="text-transform:none;font-size:12px;margin-bottom:0">Show upload notifications</label>
       </div>
-      <button id="settings-save-btn">Save Key</button>
+      <button id="settings-save-btn">Close Settings</button>
     </div>
 
     <p id="status"></p>

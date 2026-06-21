@@ -17,7 +17,7 @@
 const express  = require('express');
 const { FieldValue, Timestamp } = require('firebase-admin/firestore');
 const { db }   = require('../../lib/firestore');
-const { requireAdmin } = require('../../middleware/requireAdmin');
+const { requireAdmin } = require('../../middleware/requireAuth');
 
 const router = express.Router({ mergeParams: true });
 
@@ -34,6 +34,8 @@ function serializeUser(snap) {
     lastActiveAt: d.lastActiveAt instanceof Timestamp ? d.lastActiveAt.toDate().toISOString() : d.lastActiveAt,
     inactivityPromptEnabled: d.inactivityPromptEnabled,
     inactivityTimerSeconds: d.inactivityTimerSeconds ?? 45,
+    allowPreUploadBlur: d.allowPreUploadBlur ?? false,
+    instantClipboardLinks: d.instantClipboardLinks ?? false,
     schemaVersion: d.schemaVersion,
   };
 }
@@ -107,6 +109,8 @@ router.post('/users', requireAdmin, async (req, res, next) => {
       createdAt:     now,
       lastActiveAt:  now,
       inactivityTimerSeconds: 45,
+      allowPreUploadBlur: false,
+      instantClipboardLinks: false,
       schemaVersion: 1,
     });
     const snap = await ref.get();
@@ -219,7 +223,7 @@ router.delete('/projects/:id/members/:userId', requireAdmin, async (req, res, ne
 });
 
 // ─── PATCH /admin/users/:id ────────────────────────────────────────────────
-// Update user configuration (e.g., inactivityPromptEnabled, inactivityTimerSeconds)
+// Update user configuration (e.g., role, inactivityPromptEnabled, inactivityTimerSeconds)
 router.patch('/users/:id', requireAdmin, async (req, res, next) => {
   try {
     const userId = req.params.id;
@@ -230,21 +234,44 @@ router.patch('/users/:id', requireAdmin, async (req, res, next) => {
     if (typeof req.body?.inactivityTimerSeconds === 'number' && req.body.inactivityTimerSeconds > 0) {
       updates.inactivityTimerSeconds = req.body.inactivityTimerSeconds;
     }
+    if (typeof req.body?.allowPreUploadBlur === 'boolean') {
+      updates.allowPreUploadBlur = req.body.allowPreUploadBlur;
+    }
+    if (typeof req.body?.instantClipboardLinks === 'boolean') {
+      updates.instantClipboardLinks = req.body.instantClipboardLinks;
+    }
+    if (req.body?.role && VALID_ROLES.includes(req.body.role)) {
+      updates.role = req.body.role;
+    }
     
     if (Object.keys(updates).length === 0) {
       return res.status(400).json({ error: 'no valid fields to update' });
     }
 
     const userRef = db.collection('users').doc(userId);
-    const snap = await userRef.get();
-    if (!snap.exists) return res.status(404).json({ error: 'user not found' });
-
     updates.updatedAt = nowISO();
-    await userRef.update(updates);
+
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(userRef);
+      if (!snap.exists) throw Object.assign(new Error('user not found'), { status: 404 });
+
+      let keysToUpdate = [];
+      if (updates.role) {
+        const keysQuery = db.collection('api_keys').where('userId', '==', userId);
+        const keysSnap = await tx.get(keysQuery);
+        keysSnap.forEach(k => keysToUpdate.push(k.ref));
+      }
+
+      tx.update(userRef, updates);
+      keysToUpdate.forEach(ref => tx.update(ref, { role: updates.role, updatedAt: updates.updatedAt }));
+    });
 
     const updatedSnap = await userRef.get();
     return res.json(serializeUser(updatedSnap));
-  } catch (err) { next(err); }
+  } catch (err) { 
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    next(err); 
+  }
 });
 
 module.exports = router;

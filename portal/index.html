@@ -7,6 +7,13 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300..700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  
+  <!-- Firebase SDK -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/ui/6.1.0/firebase-ui-auth.js"></script>
+  <link type="text/css" rel="stylesheet" href="https://www.gstatic.com/firebasejs/ui/6.1.0/firebase-ui-auth.css" />
+  
   <style>
     /* ── Design Tokens ─────────────────────────────────────────── */
     :root, [data-theme="dark"] {
@@ -666,16 +673,22 @@
     .modal.wide { max-width: 460px; }
 
     /* ── Responsive ───────────────────────────────────────────── */
+    .mobile-menu-btn { display: none; background: none; border: none; color: var(--color-text); cursor: pointer; padding: var(--space-2); margin-left: -var(--space-2); }
     @media (max-width: 768px) {
       .app-layout { grid-template-columns: 1fr; grid-template-rows: auto auto 1fr; }
       .sidebar { display: none; }
-      .sidebar.mobile-open { display: flex; position: fixed; inset: 0; z-index: 200; width: 260px; }
+      .sidebar.mobile-open { display: flex; position: fixed; inset: 0; top: 60px; z-index: 200; width: 100%; border-right: none; background: var(--color-surface); }
+      .mobile-menu-btn { display: block; }
       .topbar { padding: var(--space-3) var(--space-4); }
-      .page-header { padding: var(--space-5) var(--space-4) var(--space-4); }
+      .page-header { padding: var(--space-5) var(--space-4) var(--space-4); flex-direction: column; align-items: flex-start; }
+      .page-header .btn { width: 100%; justify-content: center; margin-top: var(--space-2); }
       .page-body { padding: var(--space-4); }
       .stats-bar { padding: var(--space-3) var(--space-4); flex-wrap: wrap; }
-      .toolbar { padding: var(--space-3) var(--space-4); }
-      .search-input { width: 160px; }
+      .toolbar { padding: var(--space-3) var(--space-4); flex-direction: column; align-items: stretch; gap: var(--space-3); }
+      .toolbar-left { flex-direction: column; align-items: stretch; }
+      .search-input-wrap, .search-input { width: 100%; }
+      .table-wrap { width: 100%; overflow-x: auto; }
+      .stat-chip { flex: 1 1 calc(50% - var(--space-1)); }
     }
   </style>
 </head>
@@ -708,13 +721,27 @@
 <div class="modal-backdrop" id="createModal" role="dialog" aria-modal="true" aria-labelledby="createModalTitle">
   <div class="modal">
     <div class="modal-title" id="createModalTitle">New Project</div>
-    <div class="modal-desc">Create a project to start organizing uploads and admitting users.</div>
-    <label class="form-label" for="projectNameInput">Project name</label>
-    <input class="form-input" id="projectNameInput" type="text" placeholder="e.g. ACME Corp GTM Audit Q3" maxlength="128" autocomplete="off"/>
+    <div class="modal-desc">Create or edit a project.</div>
+    <div class="form-group">
+      <label class="form-label" for="projectNameInput">Project name</label>
+      <input class="form-input" id="projectNameInput" type="text" placeholder="e.g. ACME Corp GTM Audit Q3" maxlength="128" autocomplete="off"/>
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="projectWebhookInput">Slack / Teams Webhook URL (optional)</label>
+      <input class="form-input" id="projectWebhookInput" type="url" placeholder="https://hooks.slack.com/services/..." autocomplete="off"/>
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="projectLlmModelSelect">LLM Model for Reports</label>
+      <select class="form-input filter-select" id="projectLlmModelSelect" style="width:100%">
+        <option value="gemini-1.5-flash">Gemini 1.5 Flash (Fast, cheaper)</option>
+        <option value="gemini-1.5-pro">Gemini 1.5 Pro (Complex reasoning)</option>
+        <option value="claude-3-5-sonnet@20240620">Claude 3.5 Sonnet (Vertex AI)</option>
+      </select>
+    </div>
     <div class="form-error" id="createError" aria-live="polite"></div>
     <div class="modal-actions">
       <button class="btn btn-ghost" id="createCancelBtn" type="button">Cancel</button>
-      <button class="btn btn-primary" id="createSubmitBtn" type="button">Create project</button>
+      <button class="btn btn-primary" id="createSubmitBtn" type="button">Save project</button>
     </div>
   </div>
 </div>
@@ -829,6 +856,9 @@
   <!-- Topbar -->
   <header class="topbar">
     <div class="topbar-left">
+      <button class="mobile-menu-btn" onclick="document.getElementById('sidebar').classList.toggle('mobile-open')" aria-label="Toggle menu">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+      </button>
       <a href="#" class="topbar-logo" aria-label="The Hammer">
         <svg width="28" height="28" viewBox="0 0 28 28" fill="none" aria-hidden="true">
           <rect width="28" height="28" rx="6" fill="var(--color-primary)" opacity="0.12"/>
@@ -856,7 +886,11 @@
   <!-- Sidebar -->
   <nav class="sidebar" id="sidebar" aria-label="Main navigation">
     <div class="sidebar-section-label">Portal</div>
-    <button class="sidebar-item active" data-view="projects" onclick="showView('projects')">
+    <button class="sidebar-item active" data-view="dashboard" onclick="showView('dashboard')">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+      Dashboard
+    </button>
+    <button class="sidebar-item" data-view="projects" onclick="showView('projects')">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg>
       Projects
     </button>
@@ -880,6 +914,10 @@
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
       User Profile
     </button>
+    <button class="sidebar-item" data-view="workspace" onclick="showView('workspace')">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+      Workspace Settings
+    </button>
     <div class="sidebar-section-label" style="margin-top:var(--space-4)">Sprint</div>
     <button class="sidebar-item" onclick="window.open('https://github.com/cfroszte/thehammer/blob/main/sprintplan2.md','_blank')">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>
@@ -891,9 +929,49 @@
   <main class="main" id="main">
 
     <!-- ═══════════════════════════════════════════════════════════
+         DASHBOARD VIEW
+         ═══════════════════════════════════════════════════════════ -->
+    <section class="view active" id="view-dashboard" aria-label="Dashboard">
+      <div class="page-header">
+        <div class="page-header-left">
+          <h1>Dashboard</h1>
+          <p>Live metrics across all projects.</p>
+        </div>
+        <button class="btn btn-ghost" onclick="loadDashboard()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+          Refresh
+        </button>
+      </div>
+      <div class="page-body">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:var(--space-4)">
+          <div class="stat-chip" style="flex-direction:column;align-items:flex-start;padding:var(--space-4)">
+            <span class="stat-chip-label">Active Projects</span>
+            <span class="stat-chip-value" id="dashActiveProjects" style="font-size:var(--text-xl)">—</span>
+          </div>
+          <div class="stat-chip" style="flex-direction:column;align-items:flex-start;padding:var(--space-4)">
+            <span class="stat-chip-label">Active Users Today</span>
+            <span class="stat-chip-value" id="dashActiveUsers" style="font-size:var(--text-xl)">—</span>
+          </div>
+          <div class="stat-chip" style="flex-direction:column;align-items:flex-start;padding:var(--space-4)">
+            <span class="stat-chip-label">Captures Today</span>
+            <span class="stat-chip-value" id="dashCaptures" style="font-size:var(--text-xl)">—</span>
+          </div>
+          <div class="stat-chip" style="flex-direction:column;align-items:flex-start;padding:var(--space-4)">
+            <span class="stat-chip-label">Pending Reports</span>
+            <span class="stat-chip-value" id="dashPendingReports" style="font-size:var(--text-xl)">—</span>
+          </div>
+          <div class="stat-chip" style="flex-direction:column;align-items:flex-start;padding:var(--space-4)">
+            <span class="stat-chip-label">Pending Exports</span>
+            <span class="stat-chip-value" id="dashPendingExports" style="font-size:var(--text-xl)">—</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════════════
          PROJECTS VIEW  (5.9 — already implemented)
          ═══════════════════════════════════════════════════════════ -->
-    <section class="view active" id="view-projects" aria-label="Projects">
+    <section class="view" id="view-projects" aria-label="Projects">
       <div class="page-header">
         <div class="page-header-left">
           <h1>Projects</h1>
@@ -1022,6 +1100,7 @@
               <th id="membershipHeader">Admitted</th>
               <th>Last active</th>
               <th>Inactivity (s)</th>
+              <th>Features</th>
               <th id="usersActionHeader"></th>
             </tr>
           </thead>
@@ -1182,6 +1261,10 @@
     <section class="view" id="view-profile" aria-label="User Profile">
       <div class="page-header">
         <div class="page-header-left"><h1>My Profile</h1><p>View your API keys and configuration.</p></div>
+        <button class="btn btn-ghost" style="color: var(--color-error);" onclick="firebase.auth().signOut()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+          Sign Out
+        </button>
       </div>
       <div class="page-body" style="max-width: 600px">
         <div class="form-group">
@@ -1192,6 +1275,49 @@
           </div>
           <div style="font-size:var(--text-xs);color:var(--color-text-muted);margin-top:var(--space-2)">
             Copy this key into the Chrome extension. Generating a new key invalidates the old one. (Backend support coming in Sprint 9)
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════════════
+         WORKSPACE SETTINGS VIEW
+         ═══════════════════════════════════════════════════════════ -->
+    <section class="view" id="view-workspace" aria-label="Workspace Settings">
+      <div class="page-header">
+        <div class="page-header-left"><h1>Workspace Settings</h1><p>Manage your organization and team members.</p></div>
+      </div>
+      <div class="page-body" style="max-width: 600px">
+        <div class="form-group">
+          <label class="form-label">Create Workspace</label>
+          <div style="display:flex;gap:var(--space-2)">
+            <input class="form-input" id="wsNameInput" type="text" placeholder="Workspace Name">
+            <button class="btn btn-primary" onclick="createWorkspace()" id="createWsBtn">Create</button>
+          </div>
+        </div>
+        
+        <hr style="border:none; border-top:1px solid var(--color-border); margin: var(--space-6) 0;" />
+
+        <div class="form-group">
+          <label class="form-label">Invite Member</label>
+          <div style="display:flex;gap:var(--space-2)">
+            <input class="form-input" id="wsInviteEmail" type="email" placeholder="user@example.com">
+            <select class="form-input filter-select" id="wsInviteRole">
+              <option value="user">User</option>
+              <option value="instructional_designer">Instructional Designer</option>
+              <option value="admin">Admin</option>
+            </select>
+            <button class="btn btn-primary" onclick="inviteToWorkspace()" id="inviteWsBtn">Invite</button>
+          </div>
+        </div>
+
+        <hr style="border:none; border-top:1px solid var(--color-border); margin: var(--space-6) 0;" />
+
+        <div class="form-group">
+          <label class="form-label">Join Workspace</label>
+          <div style="display:flex;gap:var(--space-2)">
+            <input class="form-input" id="wsJoinToken" type="text" placeholder="Invitation Token">
+            <button class="btn btn-primary" onclick="joinWorkspace()" id="joinWsBtn">Join</button>
           </div>
         </div>
       </div>
@@ -1239,7 +1365,25 @@ const API_BASE = window.HAMMER_API_BASE
 // hammer-api. In dev, we get 401 because we hit *.run.app directly.
 // ═══════════════════════════════════════════════════════════════
 
+// ── Firebase Initialization ─────────────────────────────────────
+const firebaseConfig = {
+  // TODO: Replace with your actual Firebase Web config
+  apiKey: "YOUR_API_KEY",
+  authDomain: "thehammer.firebaseapp.com",
+  projectId: "thehammer",
+  storageBucket: "thehammer.firebasestorage.app",
+  messagingSenderId: "YOUR_SENDER_ID",
+  appId: "YOUR_APP_ID"
+};
+firebase.initializeApp(firebaseConfig);
+
+let ui = new firebaseui.auth.AuthUI(firebase.auth());
+let idToken = null;
 let currentUser = null;  // { email, role, userId, provisioned }
+
+// ═══════════════════════════════════════════════════════════════
+// AUTH GUARD
+// ═══════════════════════════════════════════════════════════════
 
 async function runAuthGuard() {
   const gate     = document.getElementById('authGate');
@@ -1250,6 +1394,10 @@ async function runAuthGuard() {
   function showGateError(html) {
     spinner.style.display = 'none';
     status.style.display  = 'none';
+    
+    const existing = gate.querySelector('.gate-error-block');
+    if (existing) existing.remove();
+
     const block = document.createElement('div');
     block.className = 'gate-error-block';
     block.innerHTML = html;
@@ -1260,7 +1408,6 @@ async function runAuthGuard() {
     currentUser = user;
     gate.classList.add('hidden');
     appLayout.classList.add('ready');
-    // Populate topbar identity chip
     const emailEl  = document.getElementById('userEmail');
     const avatarEl = document.getElementById('userAvatar');
     if (user && user.email) {
@@ -1269,61 +1416,96 @@ async function runAuthGuard() {
     }
   }
 
-  try {
-    const res = await fetch(`${API_BASE}/me`, { credentials: 'include' });
+  firebase.auth().onAuthStateChanged(async (user) => {
+    if (user) {
+      status.textContent = 'Verifying identity…';
+      status.style.display = 'block';
+      spinner.style.display = 'block';
+      
+      const existingError = gate.querySelector('.gate-error-block');
+      if (existingError) existingError.remove();
+      const existingUi = document.getElementById('firebaseui-auth-container');
+      if (existingUi) existingUi.style.display = 'none';
 
-    if (res.status === 401) {
-      // Dev mode: IAP not tunnelled. Allow access but show a dev banner.
-      console.warn('[hammer-portal] /me → 401: IAP not active on this URL. Dev mode — revealing app.');
-      revealApp({ email: 'dev@local', role: 'admin', provisioned: false });
-      showToast('Dev mode: IAP not active. Auth is bypassed.', 'error');
-      return;
+      try {
+        idToken = await user.getIdToken();
+        const res = await fetch(`${API_BASE}/me`, {
+          headers: { 'Authorization': `Bearer ${idToken}` }
+        });
+
+        const body = await res.json().catch(() => ({}));
+
+        if (!res.ok) {
+          showGateError(`
+            <h2>Access denied</h2>
+            <p>The server returned an unexpected error (HTTP ${res.status}).</p>
+            <button class="btn btn-ghost" onclick="firebase.auth().signOut()">Sign Out</button>
+          `);
+          return;
+        }
+
+        if (!body.provisioned) {
+          showGateError(`
+            <h2>Account not provisioned</h2>
+            <p>You're signed in as <span class="gate-email">${esc(user.email || 'unknown')}</span></p>
+            <p>but this account hasn't been added to The Hammer yet.</p>
+            <button class="btn btn-ghost" onclick="firebase.auth().signOut()">Sign Out</button>
+          `);
+          return;
+        }
+
+        if (body.role !== 'admin') {
+          showGateError(`
+            <h2>Insufficient role</h2>
+            <p>The Admin Portal requires the <strong>admin</strong> role.</p>
+            <button class="btn btn-ghost" onclick="firebase.auth().signOut()">Sign Out</button>
+          `);
+          return;
+        }
+
+        revealApp(body);
+      } catch (err) {
+        showGateError(`
+          <h2>Cannot reach API</h2>
+          <p>Check your network connection.</p>
+          <button class="btn btn-ghost" onclick="location.reload()">Retry</button>
+        `);
+      }
+    } else {
+      idToken = null;
+      spinner.style.display = 'none';
+      status.style.display = 'none';
+      gate.classList.remove('hidden');
+      appLayout.classList.remove('ready');
+
+      const existingError = gate.querySelector('.gate-error-block');
+      if (existingError) existingError.remove();
+
+      let uiContainer = document.getElementById('firebaseui-auth-container');
+      if (!uiContainer) {
+        uiContainer = document.createElement('div');
+        uiContainer.id = 'firebaseui-auth-container';
+        gate.appendChild(uiContainer);
+      }
+      uiContainer.style.display = 'block';
+
+      ui.start('#firebaseui-auth-container', {
+        signInOptions: [
+          firebase.auth.GoogleAuthProvider.PROVIDER_ID,
+          firebase.auth.EmailAuthProvider.PROVIDER_ID
+        ],
+        signInFlow: 'popup',
+        callbacks: {
+          signInSuccessWithAuthResult: function(authResult, redirectUrl) {
+            return false;
+          }
+        }
+      });
     }
-
-    const body = await res.json().catch(() => ({}));
-
-    if (!res.ok) {
-      showGateError(`
-        <h2>Access denied</h2>
-        <p>The server returned an unexpected error (HTTP ${res.status}).<br>
-           Check that <code>hammer-api</code> is reachable and try again.</p>
-        <button class="btn btn-ghost" onclick="location.reload()">Retry</button>
-      `);
-      return;
-    }
-
-    if (!body.provisioned) {
-      showGateError(`
-        <h2>Account not provisioned</h2>
-        <p>You're signed in as</p>
-        <span class="gate-email">${esc(body.email || 'unknown')}</span>
-        <p>but this account hasn't been added to The Hammer yet.<br>
-           Ask your administrator to provision your account.</p>
-      `);
-      return;
-    }
-
-    if (body.role !== 'admin') {
-      showGateError(`
-        <h2>Insufficient role</h2>
-        <p>The Admin Portal requires the <strong>admin</strong> role.<br>
-           Your current role is <strong>${esc(body.role)}</strong>.<br>
-           Contact your administrator.</p>
-      `);
-      return;
-    }
-
-    revealApp(body);
-
-  } catch (err) {
-    console.error('[hammer-portal] /me fetch failed:', err);
-    showGateError(`
-      <h2>Cannot reach API</h2>
-      <p>Could not connect to <code>${esc(API_BASE || '(same origin)')}</code>.<br>
-         Check your network and that <code>hammer-api</code> is deployed.</p>
-      <button class="btn btn-ghost" onclick="location.reload()">Retry</button>
-    `);
-  }
+  });
+  
+  // Return a dummy promise since onAuthStateChanged is async event-driven
+  return new Promise(() => {}); 
 }
 
 // ── View Routing ───────────────────────────────────────────────
@@ -1334,10 +1516,51 @@ function showView(name) {
   const btn  = document.querySelector(`[data-view="${name}"]`);
   if (view) view.classList.add('active');
   if (btn)  btn.classList.add('active');
+  
+  // Close mobile sidebar if open
+  document.getElementById('sidebar').classList.remove('mobile-open');
+
   // Lazy-load data on first navigation to each view
+  if (name === 'dashboard' && !dashboardLoaded) loadDashboard();
   if (name === 'users'    && allUsers.length === 0)    loadUsers();
   if (name === 'activity' && activityProjectsLoaded === false) populateActivityProjectSelect();
   if (name === 'settings') loadSettings();
+}
+
+async function createWorkspace() {
+  const name = document.getElementById('wsNameInput').value.trim();
+  if (!name) return showToast('Workspace name is required', 'error');
+  try {
+    const res = await apiFetch('/admin/workspaces', { method: 'POST', body: JSON.stringify({ name }) });
+    showToast(`Workspace '${res.workspace.name}' created! Please log in again to refresh context.`, 'success');
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+async function inviteToWorkspace() {
+  const email = document.getElementById('wsInviteEmail').value.trim();
+  const role = document.getElementById('wsInviteRole').value;
+  if (!email) return showToast('Email is required', 'error');
+  try {
+    const res = await apiFetch('/admin/workspaces/invites', { method: 'POST', body: JSON.stringify({ email, role }) });
+    showToast(`Invitation created! Token: ${res.invite.token}`, 'success');
+    document.getElementById('wsInviteEmail').value = '';
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+async function joinWorkspace() {
+  const token = document.getElementById('wsJoinToken').value.trim();
+  if (!token) return showToast('Token is required', 'error');
+  try {
+    const res = await apiFetch('/admin/workspaces/join', { method: 'POST', body: JSON.stringify({ token }) });
+    showToast(`Joined workspace successfully! Re-login required.`, 'success');
+    document.getElementById('wsJoinToken').value = '';
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
 }
 
 // ── State ──────────────────────────────────────────────────────
@@ -1346,6 +1569,7 @@ let sortKey       = 'createdAt';
 let sortDir       = 'desc';
 let pendingDelete = null;
 
+let dashboardLoaded = false;
 let allUsers      = [];
 let usersLoaded   = false;
 let addMemberCtx  = null;   // { projectId, projectName }
@@ -1358,9 +1582,13 @@ let knownTools    = new Set();
 
 // ── API ────────────────────────────────────────────────────────
 async function apiFetch(path, options = {}) {
+  const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
+  if (idToken) {
+    headers['Authorization'] = `Bearer ${idToken}`;
+  }
+  
   const res = await fetch(`${API_BASE}${path}`, {
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+    headers,
     ...options
   });
   if (!res.ok) {
@@ -1369,6 +1597,24 @@ async function apiFetch(path, options = {}) {
   }
   if (res.status === 204) return null;
   return res.json();
+}
+
+// ═══════════════════════════════════════════════════════════════
+// DASHBOARD VIEW
+// ═══════════════════════════════════════════════════════════════
+
+async function loadDashboard() {
+  try {
+    const stats = await apiFetch('/admin/dashboard/stats');
+    document.getElementById('dashActiveProjects').textContent = stats.activeProjects ?? '—';
+    document.getElementById('dashActiveUsers').textContent = stats.activeUsersToday ?? '—';
+    document.getElementById('dashCaptures').textContent = stats.capturesToday ?? '—';
+    document.getElementById('dashPendingReports').textContent = stats.pendingReports ?? '—';
+    document.getElementById('dashPendingExports').textContent = stats.pendingExports ?? '—';
+    dashboardLoaded = true;
+  } catch (err) {
+    showToast(`Failed to load dashboard stats: ${err.message}`, 'error');
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1481,11 +1727,14 @@ function renderProjects(list) {
       <td class="muted">${lastCapture}</td>
       <td>
         <div class="actions-cell">
-          <button class="btn-icon add" onclick="openAddMemberModal('${esc(p.projectId)}','${esc(p.name)}')"
+          <button class="btn-icon" onclick="openEditProjectModal('${esc(p.id || p.projectId)}')" aria-label="Edit project" title="Edit project">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+          </button>
+          <button class="btn-icon add" onclick="openAddMemberModal('${esc(p.id || p.projectId)}','${esc(p.name)}')"
             aria-label="Add member to ${esc(p.name)}" title="Add member">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M16 11c1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3 1.34 3 3 3zm-8 0c1.66 0 3-1.34 3-3S9.66 5 8 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg>
           </button>
-          <button class="btn-icon" onclick="openDeleteModal('${esc(p.projectId)}','${esc(p.name)}')"
+          <button class="btn-icon" onclick="openDeleteModal('${esc(p.id || p.projectId)}','${esc(p.name)}')"
             aria-label="Delete project ${esc(p.name)}" title="Delete project">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
           </button>
@@ -1509,9 +1758,29 @@ function updateStats(list) {
   document.getElementById('statLastCapture').textContent = captures.length ? fmtRelative(captures[0]) : '—';
 }
 
-// ── Create Modal ───────────────────────────────────────────────
+// ── Create/Edit Modal ───────────────────────────────────────────────
+let editProjectId = null;
+
 function openCreateModal() {
+  editProjectId = null;
+  document.getElementById('createModalTitle').textContent = 'New Project';
   document.getElementById('projectNameInput').value = '';
+  document.getElementById('projectWebhookInput').value = '';
+  document.getElementById('projectLlmModelSelect').value = 'gemini-1.5-flash';
+  document.getElementById('createError').textContent = '';
+  document.getElementById('createSubmitBtn').disabled = false;
+  openModal('createModal');
+  setTimeout(() => document.getElementById('projectNameInput').focus(), 60);
+}
+
+function openEditProjectModal(id) {
+  const p = allProjects.find(x => x.id === id || x.projectId === id);
+  if(!p) return;
+  editProjectId = p.id || p.projectId;
+  document.getElementById('createModalTitle').textContent = 'Edit Project';
+  document.getElementById('projectNameInput').value = p.name || '';
+  document.getElementById('projectWebhookInput').value = p.webhookUrl || '';
+  document.getElementById('projectLlmModelSelect').value = p.llmModel || 'gemini-1.5-flash';
   document.getElementById('createError').textContent = '';
   document.getElementById('createSubmitBtn').disabled = false;
   openModal('createModal');
@@ -1519,26 +1788,42 @@ function openCreateModal() {
 }
 
 async function submitCreate() {
-  const nameInput = document.getElementById('projectNameInput');
-  const errorEl   = document.getElementById('createError');
+  const name = document.getElementById('projectNameInput').value.trim();
+  const webhookUrl = document.getElementById('projectWebhookInput').value.trim();
+  const llmModel = document.getElementById('projectLlmModelSelect').value;
+  const errorEl = document.getElementById('createError');
   const submitBtn = document.getElementById('createSubmitBtn');
-  const name = nameInput.value.trim();
+  
   if (!name) { errorEl.textContent = 'Project name is required.'; return; }
   if (name.length < 2) { errorEl.textContent = 'Name must be at least 2 characters.'; return; }
-  errorEl.textContent = ''; submitBtn.disabled = true; submitBtn.textContent = 'Creating…';
+  errorEl.textContent = ''; submitBtn.disabled = true; submitBtn.textContent = 'Saving…';
+  
   try {
-    const project = await apiFetch('/admin/projects', { method: 'POST', body: JSON.stringify({ name }) });
+    if (editProjectId) {
+      const project = await apiFetch(`/admin/projects/${encodeURIComponent(editProjectId)}`, { 
+        method: 'PATCH', 
+        body: JSON.stringify({ name, webhookUrl, llmModel }) 
+      });
+      showToast(`Project updated.`, 'success');
+      const idx = allProjects.findIndex(p => (p.id || p.projectId) === editProjectId);
+      if (idx !== -1) allProjects[idx] = { ...allProjects[idx], name, webhookUrl, llmModel };
+    } else {
+      const project = await apiFetch('/admin/projects', { 
+        method: 'POST', 
+        body: JSON.stringify({ name, webhookUrl, llmModel }) 
+      });
+      showToast(`Project "${name}" created.`, 'success');
+      allProjects.unshift({ ...project, memberCount: 0 });
+    }
     closeModal('createModal');
-    showToast(`Project "${name}" created.`, 'success');
-    allProjects.unshift({ ...project, memberCount: 0 });
     renderProjects(filtered(allProjects));
     updateStats(allProjects);
     populateProjectFilter();
     populateActivityProjectSelect();
   } catch (err) {
-    errorEl.textContent = err.message || 'Failed to create project.';
+    errorEl.textContent = err.message || 'Failed to save project.';
   } finally {
-    submitBtn.disabled = false; submitBtn.textContent = 'Create project';
+    submitBtn.disabled = false; submitBtn.textContent = 'Save project';
   }
 }
 
@@ -1763,7 +2048,14 @@ function renderUsers(list, activeProjectId) {
           </div>
         </div>
       </td>
-      <td><span class="role-badge ${roleCls}">${esc(u.role || 'user')}</span></td>
+      <td>
+        <select class="filter-select" style="padding: 2px 4px; height: auto;" onchange="updateUserRole('${esc(u.id || u.userId)}', this.value)">
+          <option value="user" ${u.role === 'user' || !u.role ? 'selected' : ''}>user</option>
+          <option value="analyst" ${u.role === 'analyst' ? 'selected' : ''}>analyst</option>
+          <option value="instructional_designer" ${u.role === 'instructional_designer' ? 'selected' : ''}>instructional_designer</option>
+          <option value="admin" ${u.role === 'admin' ? 'selected' : ''}>admin</option>
+        </select>
+      </td>
       <td class="muted">${admitted}</td>
       <td class="muted">${lastActive}</td>
       <td>
@@ -1775,6 +2067,16 @@ function renderUsers(list, activeProjectId) {
             value="${u.inactivityTimerSeconds || 45}" min="10"
             onchange="updateUserTimer('${esc(u.id || u.userId)}', this.value)"
             ${u.inactivityPromptEnabled ? '' : 'disabled'} />
+        </div>
+      </td>
+      <td>
+        <div style="display:flex;flex-direction:column;gap:var(--space-1);font-size:10px">
+          <label style="display:flex;align-items:center;gap:var(--space-1);cursor:pointer">
+            <input type="checkbox" onchange="updateUserFeature('${esc(u.id || u.userId)}', 'allowPreUploadBlur', this.checked)" ${u.allowPreUploadBlur ? 'checked' : ''}> Blur
+          </label>
+          <label style="display:flex;align-items:center;gap:var(--space-1);cursor:pointer">
+            <input type="checkbox" onchange="updateUserFeature('${esc(u.id || u.userId)}', 'instantClipboardLinks', this.checked)" ${u.instantClipboardLinks ? 'checked' : ''}> Links
+          </label>
         </div>
       </td>
       <td><div class="actions-cell">${actionBtn}</div></td>
@@ -1807,6 +2109,34 @@ async function updateUserTimer(userId, seconds) {
     showToast('User timer updated', 'success');
   } catch (err) {
     showToast('Failed to update user timer: ' + err.message, 'error');
+    loadUsers();
+  }
+}
+
+async function updateUserFeature(userId, feature, enabled) {
+  try {
+    const payload = {};
+    payload[feature] = enabled;
+    await apiFetch('/admin/users/' + encodeURIComponent(userId), {
+      method: 'PATCH',
+      body: JSON.stringify(payload)
+    });
+    showToast(`Feature ${feature} updated`, 'success');
+  } catch (err) {
+    showToast(`Failed to update feature: ` + err.message, 'error');
+    loadUsers();
+  }
+}
+
+async function updateUserRole(userId, newRole) {
+  try {
+    await apiFetch('/admin/users/' + encodeURIComponent(userId), {
+      method: 'PATCH',
+      body: JSON.stringify({ role: newRole })
+    });
+    showToast('User role updated successfully', 'success');
+  } catch (err) {
+    showToast('Failed to update user role: ' + err.message, 'error');
     loadUsers();
   }
 }
@@ -2217,10 +2547,10 @@ function viewReport(reportId, gcsPath) {
 
 // ── Boot ───────────────────────────────────────────────────────
 // Auth guard runs first; on success it reveals the app layout
-// and then we boot the default data load (projects).
+// and then we boot the default data load (dashboard).
 runAuthGuard().then(() => {
   if (document.getElementById('appLayout').classList.contains('ready')) {
-    loadProjects();
+    loadDashboard();
   }
 });
 </script>

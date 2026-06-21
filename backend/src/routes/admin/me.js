@@ -38,7 +38,7 @@ const crypto   = require('crypto');
 const express  = require('express');
 const { Timestamp } = require('firebase-admin/firestore');
 const { db }   = require('../../lib/firestore');
-const { extractIAPEmail, requireAdmin } = require('../../middleware/requireAdmin');
+const { requireAuth, requireAdmin } = require('../../middleware/requireAuth');
 
 const router = express.Router();
 
@@ -50,64 +50,21 @@ function sha256hex(str) {
   return crypto.createHash('sha256').update(str).digest('hex');
 }
 
-/**
- * Resolve an X-Api-Key header to a Firestore user record.
- * Looks up sha256(key) in the api_keys collection (isActive == true).
- * Returns the user Firestore document snapshot, or null if not found/invalid.
- *
- * NOTE: The full role-aware api-key middleware lands in Sprint 9 (task 9.2).
- * This inline lookup is intentionally minimal — it only resolves the userId
- * so we can query project_memberships. No role assertion is made here.
- */
-async function resolveApiKeyUser(req) {
-  const raw = req.headers['x-api-key'];
-  if (!raw || typeof raw !== 'string') return null;
-
-  const keyHash = sha256hex(raw);
-  const keySnap = await db.collection('api_keys')
-    .where('keyHash', '==', keyHash)
-    .where('isActive', '==', true)
-    .limit(1)
-    .get();
-
-  if (keySnap.empty) return null;
-
-  const keyDoc = keySnap.docs[0].data();
-  const userSnap = await db.collection('users').doc(keyDoc.userId).get();
-  return userSnap.exists ? userSnap : null;
-}
-
 // ─────────────────────────────────────────────────────────────────
-// GET /me  —  Sprint 5.13
+// GET /me  —  Sprint 5.13 / Sprint 20
 // ─────────────────────────────────────────────────────────────────
 
-router.get('/me', async (req, res, next) => {
+router.get('/me', requireAuth('user'), async (req, res, next) => {
   try {
-    const email = extractIAPEmail(req);
-    if (!email) {
-      return res.status(401).json({ error: 'unauthenticated' });
-    }
-
-    const snap = await db.collection('users')
-      .where('email', '==', email.toLowerCase())
-      .limit(1)
-      .get();
-
-    if (snap.empty) {
-      return res.status(403).json({ error: 'not provisioned', email });
-    }
-
-    const doc = snap.docs[0];
-    const d   = doc.data();
+    const d = req.hammerUser;
     return res.json({
-      id:          doc.id,
+      id:          d.id,
+      uid:         d.uid,
       email:       d.email,
       displayName: d.displayName ?? null,
       role:        d.role,
+      workspaceId: d.workspaceId,
       provisioned: true,
-      lastActiveAt: d.lastActiveAt instanceof Timestamp
-        ? d.lastActiveAt.toDate().toISOString()
-        : d.lastActiveAt ?? null,
     });
   } catch (err) {
     next(err);
@@ -120,14 +77,9 @@ router.get('/me', async (req, res, next) => {
 // is a member of, ordered by project name ascending.
 // ─────────────────────────────────────────────────────────────────
 
-router.get('/me/projects', async (req, res, next) => {
+router.get('/me/projects', requireAuth('user'), async (req, res, next) => {
   try {
-    const userSnap = await resolveApiKeyUser(req);
-    if (!userSnap) {
-      return res.status(401).json({ error: 'missing or invalid API key' });
-    }
-
-    const userId = userSnap.id;
+    const userId = req.hammerUser.id;
 
     // Fetch all memberships for this user
     const membSnap = await db.collection('project_memberships')
@@ -208,31 +160,34 @@ function readConfig(d) {
     defaultCaptureQuality: d.defaultCaptureQuality  ?? CONFIG_DEFAULTS.defaultCaptureQuality,
     backendUrl:            d.backendUrl             ?? CONFIG_DEFAULTS.backendUrl,
     inactivityPromptEnabled: d.inactivityPromptEnabled ?? false,
+    allowPreUploadBlur: d.allowPreUploadBlur ?? false,
+    instantClipboardLinks: d.instantClipboardLinks ?? false,
     schemaVersion:         d.schemaVersion          ?? 1,
   };
 }
 
-router.get('/config', async (req, res, next) => {
+router.get('/config', requireAuth('user'), async (req, res, next) => {
   try {
-    const userSnap = await resolveApiKeyUser(req);
-    if (!userSnap) {
-      return res.status(401).json({ error: 'missing or invalid API key' });
-    }
-
     const snap = await db.collection('config').doc('global').get();
 
-    let configData = { ...CONFIG_DEFAULTS, inactivityPromptEnabled: false };
+    let configData = { ...CONFIG_DEFAULTS, inactivityPromptEnabled: false, allowPreUploadBlur: false, instantClipboardLinks: false };
     if (snap.exists) {
       configData = readConfig(snap.data());
     }
 
     // Per-user entitlement overrides global entitlement if it is explicitly set
-    const userData = userSnap.data();
+    const userData = req.hammerUser;
     if (typeof userData.inactivityPromptEnabled === 'boolean') {
       configData.inactivityPromptEnabled = userData.inactivityPromptEnabled;
     }
     if (typeof userData.inactivityTimerSeconds === 'number') {
       configData.inactivityTimerSeconds = userData.inactivityTimerSeconds;
+    }
+    if (typeof userData.allowPreUploadBlur === 'boolean') {
+      configData.allowPreUploadBlur = userData.allowPreUploadBlur;
+    }
+    if (typeof userData.instantClipboardLinks === 'boolean') {
+      configData.instantClipboardLinks = userData.instantClipboardLinks;
     }
 
     if (!snap.exists) {

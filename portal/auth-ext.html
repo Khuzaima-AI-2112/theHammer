@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>The Hammer - Extension Login</title>
+  <meta charset="utf-8">
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/ui/6.1.0/firebase-ui-auth.js"></script>
+  <link type="text/css" rel="stylesheet" href="https://www.gstatic.com/firebasejs/ui/6.1.0/firebase-ui-auth.css" />
+  <style>
+    body { font-family: system-ui, sans-serif; background: #f7f6f2; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+    #msg { font-weight: 600; margin-bottom: 20px; color: #01696f; }
+  </style>
+</head>
+<body>
+  <div id="msg">Authenticating with The Hammer...</div>
+  <div id="firebaseui-auth-container"></div>
+  <script>
+    const firebaseConfig = {
+      // TODO: Replace with your actual Firebase Web config
+      apiKey: "YOUR_API_KEY",
+      authDomain: "thehammer.firebaseapp.com",
+      projectId: "thehammer",
+      storageBucket: "thehammer.firebasestorage.app",
+      messagingSenderId: "YOUR_SENDER_ID",
+      appId: "YOUR_APP_ID"
+    };
+    firebase.initializeApp(firebaseConfig);
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const redirectUri = urlParams.get('redirect_uri');
+
+    firebase.auth().onAuthStateChanged(async (user) => {
+      if (user) {
+        document.getElementById('msg').innerText = 'Redirecting back to extension...';
+        const idToken = await user.getIdToken();
+        const refreshToken = user.refreshToken;
+        
+        if (redirectUri) {
+          window.location.href = `${redirectUri}?token=${encodeURIComponent(idToken)}&refreshToken=${encodeURIComponent(refreshToken)}&apiKey=${encodeURIComponent(firebaseConfig.apiKey)}`;
+        } else {
+          document.getElementById('msg').innerText = 'Successfully signed in! You can close this window.';
+        }
+      } else {
+        document.getElementById('msg').innerText = 'Please sign in to continue';
+        let ui = firebaseui.auth.AuthUI.getInstance() || new firebaseui.auth.AuthUI(firebase.auth());
+        ui.start('#firebaseui-auth-container', {
+          signInOptions: [
+            firebase.auth.GoogleAuthProvider.PROVIDER_ID,
+            firebase.auth.EmailAuthProvider.PROVIDER_ID
+          ],
+          signInFlow: 'popup',
+          callbacks: {
+            signInSuccessWithAuthResult: () => false
+          }
+        });
+      }
+    });
+  </script>
+</body>
+</html>

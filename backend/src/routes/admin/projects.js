@@ -22,7 +22,7 @@
 const express  = require('express');
 const { FieldValue, Timestamp } = require('firebase-admin/firestore');
 const { db }   = require('../../lib/firestore');
-const { requireAdmin } = require('../../middleware/requireAdmin');
+const { requireAdmin } = require('../../middleware/requireAuth');
 
 const router = express.Router();
 
@@ -35,6 +35,8 @@ function serializeDoc(snap) {
     name:        d.name,
     adminId:     d.adminId,
     memberCount: d.memberCount ?? 0,
+    webhookUrl:  d.webhookUrl ?? '',
+    llmModel:    d.llmModel ?? 'gemini-1.5-flash',
     createdAt:   d.createdAt instanceof Timestamp ? d.createdAt.toDate().toISOString() : d.createdAt,
     updatedAt:   d.updatedAt instanceof Timestamp ? d.updatedAt.toDate().toISOString() : d.updatedAt,
     schemaVersion: d.schemaVersion,
@@ -45,12 +47,17 @@ function serializeDoc(snap) {
 router.post('/projects', requireAdmin, async (req, res, next) => {
   try {
     const name = (req.body?.name ?? '').trim();
+    const webhookUrl = (req.body?.webhookUrl ?? '').trim();
+    const llmModel = (req.body?.llmModel ?? 'gemini-1.5-flash').trim();
     if (!name || name.length > 128) {
       return res.status(400).json({ error: 'name must be 1–128 characters' });
     }
     const now = nowISO();
     const ref = await db.collection('projects').add({
+      workspaceId: req.hammerUser.workspaceId,
       name,
+      webhookUrl,
+      llmModel,
       adminId:       req.hammerUser.id,
       memberCount:   0,
       createdAt:     now,
@@ -65,7 +72,7 @@ router.post('/projects', requireAdmin, async (req, res, next) => {
 // 5.3  GET /admin/projects
 router.get('/projects', requireAdmin, async (req, res, next) => {
   try {
-    const snap = await db.collection('projects').orderBy('createdAt', 'desc').get();
+    const snap = await db.collection('projects').where('workspaceId', '==', req.hammerUser.workspaceId).orderBy('createdAt', 'desc').get();
     const projects = snap.docs.map(serializeDoc);
     return res.json({ projects, total: projects.length });
   } catch (err) { next(err); }
@@ -76,6 +83,9 @@ router.get('/projects/:id', requireAdmin, async (req, res, next) => {
   try {
     const snap = await db.collection('projects').doc(req.params.id).get();
     if (!snap.exists) return res.status(404).json({ error: 'project not found' });
+    if (snap.data().workspaceId !== req.hammerUser.workspaceId) {
+      return res.status(403).json({ error: 'forbidden: project belongs to another workspace' });
+    }
     return res.json(serializeDoc(snap));
   } catch (err) { next(err); }
 });
@@ -84,13 +94,18 @@ router.get('/projects/:id', requireAdmin, async (req, res, next) => {
 router.patch('/projects/:id', requireAdmin, async (req, res, next) => {
   try {
     const name = (req.body?.name ?? '').trim();
+    const webhookUrl = (req.body?.webhookUrl ?? '').trim();
+    const llmModel = (req.body?.llmModel ?? 'gemini-1.5-flash').trim();
     if (!name || name.length > 128) {
       return res.status(400).json({ error: 'name must be 1–128 characters' });
     }
     const ref  = db.collection('projects').doc(req.params.id);
     const snap = await ref.get();
     if (!snap.exists) return res.status(404).json({ error: 'project not found' });
-    await ref.update({ name, updatedAt: nowISO() });
+    if (snap.data().workspaceId !== req.hammerUser.workspaceId) {
+      return res.status(403).json({ error: 'forbidden: project belongs to another workspace' });
+    }
+    await ref.update({ name, webhookUrl, llmModel, updatedAt: nowISO() });
     const updated = await ref.get();
     return res.json(serializeDoc(updated));
   } catch (err) { next(err); }
@@ -104,6 +119,9 @@ router.delete('/projects/:id', requireAdmin, async (req, res, next) => {
     const projectRef = db.collection('projects').doc(id);
     const snap       = await projectRef.get();
     if (!snap.exists) return res.status(404).json({ error: 'project not found' });
+    if (snap.data().workspaceId !== req.hammerUser.workspaceId) {
+      return res.status(403).json({ error: 'forbidden: project belongs to another workspace' });
+    }
 
     const membersSnap = await db.collection('project_memberships')
       .where('projectId', '==', id)
