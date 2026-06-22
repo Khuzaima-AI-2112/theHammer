@@ -26,7 +26,6 @@ A Chrome extension that captures a screenshot of the active tab and uploads it t
 ```
 Chrome Extension (MV3)
   ├── Popup (select session Project/User from dropdowns; set tool name)
-  ├── Admin View (configure allowed Projects and Users)
   ├── Service Worker (keyboard shortcut, toolbar button, message relay)
   ├── Content Script (floating page button)
   └── chrome.tabs.captureVisibleTab() → PNG data URL
@@ -39,7 +38,12 @@ Cloud Run (Node.js / Express — containerized)
          ↓
 Google Cloud Storage
   └── {project}/{tool}/{yyyy}/{mm}/{dd}/{name}_{timestamp}.png
+         
+Portal SPA (Web Admin)
+  ├── Firebase Auth (Login)
+  └── Firestore (Configure Workspaces, Projects, and Users)
 ```
+
 
 ---
 
@@ -47,17 +51,17 @@ Google Cloud Storage
 
 | Layer | Choice | Reason |
 |---|---|---|
-| Extension | Chrome MV3 (TypeScript) | MV2 fully deprecated as of Chrome 138 |
+| Extension | Chrome MV3 (JavaScript) | MV2 fully deprecated as of Chrome 138 |
 | Capture API | `chrome.tabs.captureVisibleTab()` | Returns PNG data URL of visible tab area |
 | Permissions | `activeTab`, `storage`, `scripting`, `notifications` | Minimum privilege; no install warning |
 | Keyboard shortcut | `chrome.commands` API | Activates `activeTab` permission on all 3 triggers |
-| Settings storage | `chrome.storage.local` | Persists across service worker restarts |
-| Admin config storage | `chrome.storage.local` (Projects/Users), optional Firestore later | Keeps all state inside extension for v1; can be centralized later |
+| Settings storage | `chrome.storage.local` | Persists user session choices across service worker restarts |
+| Admin config storage | Firestore | Centralized DB for Workspaces, Projects, and Users |
 | Backend | Cloud Run (Node.js 20 + Express, containerized) | HTTP endpoint, scales to zero, full control over runtime |
 | Container registry | Artifact Registry | Standard GCP container storage |
 | Storage | Google Cloud Storage (Standard class) | ~$0.02/GB-month, lifecycle rules |
 | Auth | Firebase Authentication | B2B SaaS model, Google OAuth, Email/Password, JWTs |
-| Metadata (v2) | Firestore | Optional: upload history, per-project views |
+| Metadata | Firestore | Tracks user profiles, project memberships, and upload history |
 
 ---
 
@@ -338,7 +342,7 @@ Cloud Run scales to zero when idle — no instance runs between sessions, so cos
 - Signed URL uploads (Phase 2) require V4 signing; V2 has a known CORS bug
 - Cloud Run cold starts are typically 500ms–2s with a lightweight Node.js image; acceptable for internal tools
 - Container image must be pushed to Artifact Registry before deploying to Cloud Run
-- **New:** Admin-managed lists of Projects and Users live in the extension for v1; changing them requires access to the admin view (or editing storage via DevTools). Centralization via Firestore is explicitly a v2 concern.
+- Admin-managed lists of Projects and Users are centralized in Firestore and managed via the Portal SPA. (The legacy internal extension admin view is deprecated).
 
 ---
 
@@ -360,14 +364,19 @@ Cloud Run scales to zero when idle — no instance runs between sessions, so cos
 
 ```
 thehammer/
+├── portal/
+│   ├── index.html         ← Admin SPA web client
+│   ├── auth-ext.html      ← Extension auth relay
+│   ├── Dockerfile
+│   └── nginx.conf
 ├── extension/
 │   ├── manifest.json
-│   ├── service-worker.ts
+│   ├── service-worker.js
 │   ├── popup.html         ← includes Project/User dropdowns
-│   ├── popup.ts           ← reads Projects/Users config + session values
-│   ├── admin.html         ← admin UI: manage Projects/Users
-│   ├── admin.ts           ← CRUD for Projects/Users config
-│   ├── content.ts
+│   ├── popup.js           ← reads Projects/Users config + session values
+│   ├── admin.html         ← (deprecated) legacy admin UI
+│   ├── admin.js           ← (deprecated) legacy admin CRUD logic
+│   ├── content.js
 │   └── icons/
 ├── backend/
 │   ├── src/
@@ -378,9 +387,14 @@ thehammer/
 │   ├── .dockerignore
 │   └── package.json
 ├── infra/
-│   └── deploy.ps1          ← docker build + push + gcloud run deploy
-├── projectplan.md
-└── sprintplan.md
+│   ├── deploy.ps1          ← docker build + push + gcloud run deploy
+│   ├── setup.ps1 / .sh     ← GCP + Firebase provisioning scripts
+│   ├── verify.ps1 / .sh    ← Env verification scripts
+│   ├── cors.json           ← GCS CORS settings
+│   └── lifecycle.json      ← GCS object lifecycle settings
+└── docs/
+    └── planning/
+        └── projectplan.md
 ```
 
 ---
