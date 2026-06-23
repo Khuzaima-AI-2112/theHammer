@@ -292,3 +292,21 @@ Run this before starting any new sprint:
 **Root cause:** `admin.users.test.js` and `admin.projects.test.js` both hardcoded the exact same mock user (`test-admin-id` / `admin@test.com`) in their `beforeAll` hooks. Because Jest runs test files concurrently in separate processes that share the same Firestore Emulator instance, the `afterAll` hook of one test file deleted the shared admin user out from under the other test file, causing intermittent `401` errors during authentication.
 **Rule going forward:**
 - Always scope mock document IDs to the specific test file (e.g., `test-admin-id-users` and `test-admin-id-projects`). Never use generic shared IDs like `user-1` across multiple test files when running against a shared emulator database.
+
+### 24. Cloud Build nested Docker containers are isolated from localhost
+
+**What happened:** A local smoke test script in Cloud Build ran `docker run -d -p 8080:8080 "$IMAGE_URL"` and then attempted to `curl http://localhost:8080`. The curl command failed immediately with `HTTP 000` (Connection Refused), even though the Docker logs showed the server booting perfectly.
+**Root cause:** Cloud Build steps run in their own Docker container attached to a custom bridge network (`cloudbuild`). When the step container spawns a *nested* container mapping port 8080, that port is exposed to the underlying VM host, NOT the step container's `localhost`.
+**Rule going forward:**
+- When running temporary Docker containers for testing within Cloud Build, attach them to the native Cloud Build network instead of mapping host ports: `docker run -d --name my-app --network cloudbuild "$IMAGE_URL"`. Then, ping the container by its name: `curl http://my-app:8080`.
+
+### 25. Domain Restricted Sharing blocks public Cloud Run deployments
+
+**What happened:** A final pipeline smoke test attempted to ping the newly deployed `thehammer-portal` and received a `403 Forbidden` error. The deployment logs showed: `Setting IAM policy failed, try "gcloud beta run services add-iam-policy-binding ... --member=allUsers"`.
+**Root cause:** The Google Cloud Organization has "Domain Restricted Sharing" enforced by default, which categorically prevents any IAM bindings to `allUsers`. Consequently, new Cloud Run services default to Private, rejecting all unauthenticated requests.
+**Rule going forward:**
+- When smoke-testing Cloud Run services in a CI pipeline under DRS, you cannot rely on public access. You must pass an Identity Token in the `Authorization` header.
+- Because Cloud Build service accounts lack the `Service Account Token Creator` role required to run `gcloud auth print-identity-token`, you must fetch the token directly from the hidden Metadata Server, scoped to the exact Cloud Run audience URL:
+  ```bash
+  TOKEN=$(curl -s -H "Metadata-Flavor: Google" "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity?audience=$CLOUD_RUN_URL")
+  ```
