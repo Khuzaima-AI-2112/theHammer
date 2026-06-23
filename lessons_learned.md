@@ -250,3 +250,24 @@ Run this before starting any new sprint:
 **Root cause:** Allowing periods without specifically guarding against consecutive periods (`..`) inadvertently preserves path traversal logic if those sanitized strings are later concatenated into file system or bucket paths.
 **Rule going forward:**
 - Explicitly strip or replace directory traversal sequences (`..`) in path sanitization logic before or after applying character allowlists. E.g., `.replace(/\.\./g, '_')`.
+
+### 18. Cloud Build cross-container emulator communication requires a single step
+
+**What happened:** A Cloud Build pipeline attempted to start the Firestore Emulator in a background step (`gcr.io/google.com/cloudsdktool/cloud-sdk`) and then run Jest tests in a subsequent step (`node:20-alpine`). The tests failed to connect to the emulator (`ECONNREFUSED 127.0.0.1:8080`) and ultimately crashed.
+**Root cause:** Cloud Build executes each step in a separate, isolated Docker container. While steps share a workspace volume (`/workspace`), they do *not* share a `localhost` network stack by default. A service listening on `127.0.0.1` in one container is completely inaccessible from another container.
+**Rule going forward:**
+- If tests require a local emulator, run the emulator and the tests within the *same* Cloud Build step using `firebase emulators:exec`. Ensure the chosen container image has both the language runtime (Node.js) and the emulator dependencies (Java) installed.
+
+### 19. Firebase Emulator Suite requires Java 21+
+
+**What happened:** Cloud Build failed with `firebase-tools no longer supports Java version before 21` when attempting to start the Firestore Emulator.
+**Root cause:** Recent versions of `firebase-tools` upgraded their underlying emulator binaries to require Java 21 or higher. Using older JDKs causes an immediate startup crash.
+**Rule going forward:**
+- When provisioning CI environments or Docker images for Firebase emulators, explicitly install `openjdk21-jre` (or higher), rather than relying on `default-jre` or older LTS versions. E.g., `apk add --no-cache openjdk21-jre`.
+
+### 20. Global Backend Architecture changes require a full Test Suite audit
+
+**What happened:** Several tests failed with `app.address is not a function`, `Value for argument "data" is not a valid Firestore document` and `401 Unauthorized`.
+**Root cause:** The backend implementation was updated to export `{ app }` instead of `app`, enforce Tenant Isolation by expecting a `workspaceId` on both users and projects, and enforce `requireAuth('user')` on API routes. However, the test files were not updated in lockstep: they were still expecting the old `app` export, their mock users lacked `workspaceId` fields, and they were still sending `x-api-key` instead of valid mock Dev tokens.
+**Rule going forward:**
+- When introducing global or structural changes (tenant isolation, auth strategies, module exports), do not consider the work "done" until a full repo-wide search confirms no old patterns remain, and run the *entire* test suite locally. Mock data in `beforeAll` hooks must be meticulously updated to satisfy new database constraints.
