@@ -211,8 +211,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
       
       setStatus('Authenticating...');
-      const baseUrl = existing.cloudRunUrl?.trim() || 'https://app.thehammer.io';
-      const authUrl = `${baseUrl.replace('/api', '')}/auth-ext.html`;
+      const authUrl = 'http://localhost:3000/auth-ext.html';
       const redirectUrl = chrome.identity.getRedirectURL();
 
       const responseUrl = await chrome.identity.launchWebAuthFlow({
@@ -250,10 +249,19 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // ── 5.15 / 5.17: Settings save ──
   settingsSaveBtn.addEventListener('click', async () => {
+    const urlVal = cloudRunUrlInput.value.trim();
+    if (urlVal && !urlVal.startsWith('http')) {
+      document.getElementById('url-error').style.display = 'block';
+      return;
+    } else {
+      document.getElementById('url-error').style.display = 'none';
+    }
+
     settingsSaveBtn.disabled = true;
     const existing = (await chrome.storage.local.get('settings')).settings || {};
     const allSettings = {
-      ...existing,        // preserve tokens, cloudRunUrl, etc.
+      ...existing,        // preserve tokens, etc.
+      cloudRunUrl: urlVal || existing.cloudRunUrl,
       notify: notifyInput.checked
     };
 
@@ -293,7 +301,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 //   { cloudRunUrl?: string, retention?: number, maxSize?: number }
 // All fields are optional; backend may return a subset.
 // ─────────────────────────────────────────────────────────────────
-const CONFIG_FALLBACK_URL = 'https://app.thehammer.io/api';
+const CONFIG_FALLBACK_URL = 'https://thehammer-backend-282689937365.northamerica-northeast1.run.app/api';
 
 async function loadConfig(apiKey) {
   // Use the stored cloudRunUrl if present; otherwise use the hard-coded default.

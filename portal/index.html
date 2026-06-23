@@ -1333,7 +1333,7 @@
 // HAMMER_API_BASE: set by Cloud Run env injection or leave '' for same-origin.
 // Dev: window.HAMMER_API_BASE = 'https://hammer-api-xxxx-uc.a.run.app'
 const API_BASE = window.HAMMER_API_BASE
-  || (location.hostname === 'localhost' ? 'http://localhost:8080' : '');
+  || 'https://thehammer-backend-282689937365.northamerica-northeast1.run.app/api';
 
 // ── Theme Toggle ───────────────────────────────────────────────
 (function() {
@@ -1367,13 +1367,12 @@ const API_BASE = window.HAMMER_API_BASE
 
 // ── Firebase Initialization ─────────────────────────────────────
 const firebaseConfig = {
-  // TODO: Replace with your actual Firebase Web config
-  apiKey: "YOUR_API_KEY",
+  apiKey: "AIzaSyDJYNBZUMaq1EQuySZMsqKGLoj3-YdZ0Fs",
   authDomain: "thehammer.firebaseapp.com",
   projectId: "thehammer",
   storageBucket: "thehammer.firebasestorage.app",
-  messagingSenderId: "YOUR_SENDER_ID",
-  appId: "YOUR_APP_ID"
+  messagingSenderId: "282689937365",
+  appId: "1:282689937365:web:d87d9a37e7a5b3a28ca75c"
 };
 firebase.initializeApp(firebaseConfig);
 

@@ -34,6 +34,7 @@ app.set('trust proxy', 1);
 // ── CORS ──────────────────────────────────────────────────────────
 const EXTENSION_ID   = process.env.EXTENSION_ID || '';
 const ALLOWED_ORIGINS = [
+  'http://localhost:3000',
   ...(process.env.ADMIN_ORIGIN ? [process.env.ADMIN_ORIGIN] : []),
   ...(EXTENSION_ID ? [`chrome-extension://${EXTENSION_ID}`] : []),
 ];
