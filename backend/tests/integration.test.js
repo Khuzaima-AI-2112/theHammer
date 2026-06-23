@@ -11,17 +11,19 @@ let userId = 'test-integration-user';
 let keyId = 'test-key-id';
 
 beforeAll(async () => {
-  app = require('../src/index');
+  app = require('../src/index').app;
   db  = require('../src/lib/firestore').db;
 
   await db.collection('users').doc(adminId).set({
     email: 'admin@integration.test', displayName: 'Test Admin', role: 'admin',
+    workspaceId: 'test-workspace',
     createdAt: new Date().toISOString(), lastActiveAt: new Date().toISOString(),
     schemaVersion: 1,
   });
 
   await db.collection('users').doc(userId).set({
     email: 'user@integration.test', displayName: 'Test User', role: 'user',
+    workspaceId: 'test-workspace',
     createdAt: new Date().toISOString(), lastActiveAt: new Date().toISOString(),
     schemaVersion: 1,
   });

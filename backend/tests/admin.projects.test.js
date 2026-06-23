@@ -23,6 +23,7 @@ beforeAll(async () => {
     email:         'admin@test.com',
     displayName:   'Test Admin',
     role:          'admin',
+    workspaceId:   'test-workspace',
     createdAt:     new Date().toISOString(),
     lastActiveAt:  new Date().toISOString(),
     schemaVersion: 1,
@@ -90,6 +91,7 @@ describe('GET /admin/projects', () => {
   beforeAll(async () => {
     const ref = await db.collection('projects').add({
       name: 'GET Test Project', adminId: 'test-admin-id', memberCount: 0,
+      workspaceId: 'test-workspace',
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
       schemaVersion: 1,
     });
@@ -114,6 +116,7 @@ describe('PATCH /admin/projects/:id', () => {
   beforeEach(async () => {
     const ref = await db.collection('projects').add({
       name: 'Original Name', adminId: 'test-admin-id', memberCount: 0,
+      workspaceId: 'test-workspace',
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
       schemaVersion: 1,
     });
@@ -146,6 +149,7 @@ describe('DELETE /admin/projects/:id', () => {
   test('204 — deletes project and memberships', async () => {
     const ref = await db.collection('projects').add({
       name: 'To Delete', adminId: 'test-admin-id', memberCount: 0,
+      workspaceId: 'test-workspace',
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
       schemaVersion: 1,
     });

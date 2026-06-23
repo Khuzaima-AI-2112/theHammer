@@ -14,11 +14,12 @@ const request = require('supertest');
 let app, db;
 
 beforeAll(async () => {
-  app = require('../src/index');
+  app = require('../src/index').app;
   db  = require('../src/lib/firestore').db;
 
   await db.collection('users').doc('test-admin-id').set({
     email: 'admin@test.com', displayName: 'Test Admin', role: 'admin',
+    workspaceId: 'test-workspace',
     createdAt: new Date().toISOString(), lastActiveAt: new Date().toISOString(),
     schemaVersion: 1,
   });
@@ -73,6 +74,7 @@ describe('POST + DELETE /admin/projects/:id/members', () => {
   beforeAll(async () => {
     const ref = await db.collection('projects').add({
       name: 'Member Test Project', adminId: 'test-admin-id', memberCount: 0,
+      workspaceId: 'test-workspace',
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
       schemaVersion: 1,
     });
@@ -80,6 +82,7 @@ describe('POST + DELETE /admin/projects/:id/members', () => {
 
     await db.collection('users').doc(memberId).set({
       email: 'member@test.com', displayName: 'Test Member', role: 'user',
+      workspaceId: 'test-workspace',
       createdAt: new Date().toISOString(), lastActiveAt: new Date().toISOString(),
       schemaVersion: 1,
     });

@@ -45,28 +45,43 @@ jest.mock('@google-cloud/storage', () => {
 process.env.API_KEY    = 'test-api-key';
 process.env.GCS_BUCKET = 'fake-bucket';
 
+const { db } = require('../src/lib/firestore');
 const { app, sanitize, buildObjectPath } = require('../src/index');
 
 const VALID_BODY   = { project: 'acme', tool: 'jira', name: 'alice' };
-const VALID_HEADERS = { 'x-api-key': 'test-api-key' };
+const VALID_HEADERS = { 'x-dev-user-email': 'user@signed.test' };
+
+beforeAll(async () => {
+  await db.collection('users').doc('signed-user-id').set({
+    email: 'user@signed.test', role: 'user', workspaceId: 'test-workspace'
+  });
+  await db.collection('projects').doc('acme').set({
+    workspaceId: 'test-workspace', name: 'acme'
+  });
+});
+
+afterAll(async () => {
+  await db.collection('users').doc('signed-user-id').delete();
+  await db.collection('projects').doc('acme').delete();
+});
 
 // ─────────────────────────────────────────────────────────────────
 // Auth (task 2.7 regression)
 // ─────────────────────────────────────────────────────────────────
 describe('POST /upload-url — auth', () => {
-  test('401 when X-Api-Key header is missing', async () => {
+  test('401 when Auth header is missing', async () => {
     const res = await request(app)
       .post('/upload-url')
       .send(VALID_BODY);
     expect(res.status).toBe(401);
   });
 
-  test('401 when X-Api-Key is wrong', async () => {
+  test('401 when Auth is wrong', async () => {
     const res = await request(app)
       .post('/upload-url')
-      .set('x-api-key', 'wrong-key')
+      .set('x-dev-user-email', 'wrong-user@test.com')
       .send(VALID_BODY);
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(403); // requireAuth falls back to 403 if user not found
   });
 });
 
