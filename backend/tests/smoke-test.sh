@@ -10,8 +10,8 @@ if [ -z "$IMAGE_URL" ]; then
 fi
 
 echo "[SmokeTest] Starting container $IMAGE_URL on port 8080..."
-# Run container in background, bound to 8080
-docker run -d --name smoke-test-app -p 8080:8080 \
+# Run container in background, on the cloudbuild network so we can resolve its name
+docker run -d --name smoke-test-app --network cloudbuild \
   -e NODE_ENV=test \
   -e FIRESTORE_EMULATOR_HOST= \
   "$IMAGE_URL"
@@ -21,7 +21,7 @@ echo "[SmokeTest] Waiting for boot..."
 sleep 5
 
 echo "[SmokeTest] Hitting GET /admin/dashboard/stats with no auth..."
-HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/admin/dashboard/stats)
+HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://smoke-test-app:8080/admin/dashboard/stats)
 
 # We expect a 401 Unauthorized because we provided no IAP auth.
 # If we get a 401, the server is up and routing properly.
