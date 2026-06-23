@@ -1,55 +1,56 @@
 'use strict';
 
 const { Storage } = require('@google-cloud/storage');
-const { VertexAI } = require('@google-cloud/vertexai');
+const { GoogleGenAI } = require('@google/genai');
 const { db } = require('../lib/firestore');
 const gcs = new Storage();
 
-const location = 'us-central1';
+const PROJECT_ID = process.env.GOOGLE_CLOUD_PROJECT || 'default-project';
+const LOCATION = 'us-central1';
+
+let aiClient = null;
+function getAIClient() {
+  if (!aiClient) {
+    aiClient = new GoogleGenAI({ vertexai: { project: PROJECT_ID, location: LOCATION } });
+  }
+  return aiClient;
+}
 
 async function generateOcrReport(reportId, projectId, reportType, dateRange) {
   const reportRef = db.collection('reports').doc(reportId);
   try {
     await reportRef.update({ status: 'processing', updatedAt: new Date().toISOString() });
 
-    // Initialize Vertex AI
-    // In production, project should be the Google Cloud Project ID.
-    const googleCloudProjectId = process.env.GOOGLE_CLOUD_PROJECT || 'default-project';
-    const vertexAI = new VertexAI({ project: googleCloudProjectId, location });
+    const client = getAIClient();
     
     // We use gemini-1.5-flash for the best balance of speed, cost, and multimodal capability
-    const generativeModel = vertexAI.getGenerativeModel({
-      model: 'gemini-1.5-flash',
-      generationConfig: {
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: 'ARRAY',
-          description: 'A list of UI element state changes detected between screenshots',
-          items: {
-            type: 'OBJECT',
-            properties: {
-              elementType: {
-                type: 'STRING',
-                description: 'The type of element (checkbox, radio, textfield)'
-              },
-              label: {
-                type: 'STRING',
-                description: 'The label or text associated with the UI element'
-              },
-              oldState: {
-                type: 'STRING',
-                description: 'The state in the first screenshot (e.g., unchecked, empty)'
-              },
-              newState: {
-                type: 'STRING',
-                description: 'The state in the second screenshot (e.g., checked, "User entered text")'
-              }
-            },
-            required: ['elementType', 'label', 'oldState', 'newState']
+    // (Actual call will use client.models.generateContent)
+    const responseSchema = {
+      type: 'ARRAY',
+      description: 'A list of UI element state changes detected between screenshots',
+      items: {
+        type: 'OBJECT',
+        properties: {
+          elementType: {
+            type: 'STRING',
+            description: 'The type of element (checkbox, radio, textfield)'
+          },
+          label: {
+            type: 'STRING',
+            description: 'The label or text associated with the UI element'
+          },
+          oldState: {
+            type: 'STRING',
+            description: 'The state in the first screenshot (e.g., unchecked, empty)'
+          },
+          newState: {
+            type: 'STRING',
+            description: 'The state in the second screenshot (e.g., checked, "User entered text")'
           }
-        }
+        },
+        required: ['elementType', 'label', 'oldState', 'newState']
       }
-    });
+    };
 
     // MVP: For demonstration, we assume we fetch two generic screenshots from GCS.
     // In a full implementation, you would query Firestore for the user's recent captures in the dateRange.
