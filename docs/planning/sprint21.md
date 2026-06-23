@@ -44,6 +44,8 @@ Cloud DNS zone: thehammer.io
   A record: app.thehammer.io → LB external IP
 ```
 
+> **Note on Domain Restricted Sharing (DRS):** The Google Cloud Organization has DRS enforced by default, meaning `allUsers` cannot be bound to the Cloud Run services. They are strictly private. This perfectly aligns with this architecture, as it prevents the WAF from being bypassed. However, it requires the Load Balancer to explicitly authenticate its requests to the private Cloud Run NEGs (e.g., via IAP or Backend Service attached Service Accounts).
+
 ---
 
 ## Deliverables
@@ -268,6 +270,7 @@ gcloud compute security-policies update hammer-waf \
 | Terraform import drift | Medium | Run `terraform plan` immediately after import. Resolve all diffs before sprint close. |
 | DNS propagation > 48 h | Low | Lower NS TTL to 300 s at registrar before switching nameservers. Monitor with `dig @8.8.8.8 NS thehammer.io`. |
 | LB takes > 10 min to become active | Low | Global HTTPS LBs can take 5–10 min to propagate globally. Do not run 21.10 until `gcloud compute forwarding-rules describe hammer-https-rule` shows the LB as `ACTIVE`. |
+| Load Balancer gets 403 Forbidden from Cloud Run | High | Because the organization enforces Domain Restricted Sharing (DRS), Cloud Run services are strictly private. The Load Balancer *must* authenticate to Cloud Run, otherwise the GFE will block the request. Ensure the backend services are configured to generate Identity Tokens (or use IAP) so traffic passes the IAM check. |
 
 ---
 
