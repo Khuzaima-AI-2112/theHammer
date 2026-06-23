@@ -58,12 +58,11 @@ steps:
 
   # ── 5. Deploy backend to Cloud Run ─────────────────────────────────────────
   #
-  # --no-allow-unauthenticated: Cloud Run IAM blocks all requests that do not
-  # carry a valid Google identity token. The extension and portal authenticate
-  # via X-Api-Key (checked by requireApiKey / requireAdmin middleware), but
-  # Cloud Run itself still requires a valid invoker identity. The Cloud Build
-  # service account (thehammer-backend@) is granted roles/run.invoker so the
-  # smoke test step below can reach the service.
+  # --allow-unauthenticated: Must be enabled because the Node.js application 
+  # handles all identity verification natively via Firebase ID Tokens and 
+  # X-Api-Key headers (checked by requireAuth / requireApiKey middlewares). 
+  # If this is set to no-allow, the Google Front End (GFE) will reject 
+  # all client traffic with a 401/403.
   #
   # Sprint 9 Note on Binary Authorization (Task 9.12):
   # Binary Authorization enforcement via `--binary-authorization` has been
@@ -84,7 +83,7 @@ steps:
       - 'northamerica-northeast1'
       - '--platform'
       - 'managed'
-      - '--no-allow-unauthenticated'
+      - '--allow-unauthenticated'
       - '--min-instances'
       - '0'
       - '--max-instances'
@@ -134,7 +133,7 @@ steps:
       - 'northamerica-northeast1'
       - '--platform'
       - 'managed'
-      - '--no-allow-unauthenticated'
+      - '--allow-unauthenticated'
       - '--min-instances'
       - '0'
       - '--max-instances'
