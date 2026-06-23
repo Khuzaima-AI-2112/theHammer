@@ -388,7 +388,30 @@ Vision API / OCR (Sprint 6S) is the largest unknown cost driver. Benchmark befor
 ## `firestore.indexes.json` location
 
 `infra/firestore.indexes.json` — deployed via `firebase deploy --only firestore:indexes` in GitHub Actions.
-# Time & Activity Tracking
+
+---
+
+## 11. AI / LLM Integration
+
+**A: Centralized AI operations using the `@google/genai` SDK and Gemini 1.5 Flash.**
+
+All AI analysis (executive report generation, OCR UI diffing) is performed securely within the GCP boundary via Google GenAI. 
+
+### 11.1 SDK and Initialization
+- **SDK**: The project exclusively uses the official `@google/genai` SDK. The legacy `@google-cloud/vertexai` SDK is fully deprecated due to missing cross-platform support and binary distribution issues inside Alpine Docker containers.
+- **Lazy Initialization**: GenAI clients are never instantiated globally. They are wrapped in a singleton getter function (`getAIClient()`) that is only invoked when a background job executes. This prevents missing environment variables from crashing the server on boot (e.g., during CI/CD smoke tests).
+
+### 11.2 Model Selection
+- **gemini-1.5-flash**: Used for both narrative report generation (`reportsWorker.js`) and screenshot diffing (`ocrWorker.js`). Flash offers the best balance of multimodal processing speed and cost efficiency for non-reasoning tasks.
+
+### 11.3 Security & PII
+- No data leaves the Google Cloud perimeter.
+- All multimodal payload images are fetched from the internal `hammer-screenshots` GCS bucket via signed URL or direct byte transfer.
+- IAM controls restrict the AI worker services from reading cross-tenant data.
+
+---
+
+# 12. Time & Activity Tracking
 
 This document defines how The Hammer measures time and activity for users, how those signals roll up into reporting metrics for Analysts and Admins, and what the user is told when they start using the extension.
 
