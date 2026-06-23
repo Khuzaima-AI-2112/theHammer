@@ -271,3 +271,24 @@ Run this before starting any new sprint:
 **Root cause:** The backend implementation was updated to export `{ app }` instead of `app`, enforce Tenant Isolation by expecting a `workspaceId` on both users and projects, and enforce `requireAuth('user')` on API routes. However, the test files were not updated in lockstep: they were still expecting the old `app` export, their mock users lacked `workspaceId` fields, and they were still sending `x-api-key` instead of valid mock Dev tokens.
 **Rule going forward:**
 - When introducing global or structural changes (tenant isolation, auth strategies, module exports), do not consider the work "done" until a full repo-wide search confirms no old patterns remain, and run the *entire* test suite locally. Mock data in `beforeAll` hooks must be meticulously updated to satisfy new database constraints.
+
+### 21. `npm ci` strictly enforces OS-specific lockfiles, causing missing dependencies in Docker builds
+
+**What happened:** A Cloud Build pipeline failed during `npm test` with `Missing: @emnapi/runtime@1.11.1 from lock file`. Later, after fixing the pipeline, the smoke test container crashed on boot with HTTP `000` (Connection Refused).
+**Root cause:** The local developer machine (Windows) generated `package-lock.json` when installing `@google/genai`. This SDK has OS-specific native dependencies (like `@emnapi/runtime` for WebAssembly/C++). When the Docker build (using `node:20-alpine`) ran `npm ci`, it strictly enforced the Windows lockfile, completely skipping the download of the Alpine Linux binaries. When Node.js booted, it threw a `MODULE_NOT_FOUND` error for the missing binaries and crashed immediately.
+**Rule going forward:**
+- Use `npm install` instead of `npm ci` in cross-platform Dockerfiles (`alpine` / `debian`) if the `package-lock.json` is routinely generated on different host operating systems (like Windows). `npm install` gracefully evaluates the target OS and fetches the missing native binaries.
+
+### 22. Cloud Build Smoke Tests must output Docker Logs before cleanup
+
+**What happened:** A post-deployment smoke test hit the newly built container and instantly failed with HTTP `000` (Connection Refused). The build script simply logged `FAIL` and deleted the container.
+**Root cause:** The container was crashing on boot due to a missing native dependency (Lesson 21), but because the smoke test script ran `docker rm` immediately after curl failed, all error logs were destroyed. There was zero observability into *why* the container failed to boot.
+**Rule going forward:**
+- In any shell script that runs a temporary Docker container for testing, always add a `docker logs <container-name>` output step in the failure branch *before* stopping and removing the container.
+
+### 23. Concurrent Jest tests cause race conditions if they share Firestore document IDs
+
+**What happened:** `admin.users.test.js` unexpectedly started failing with `401 Unauthorized` on its `DELETE` request, despite identical headers working perfectly on the preceding `POST` request.
+**Root cause:** `admin.users.test.js` and `admin.projects.test.js` both hardcoded the exact same mock user (`test-admin-id` / `admin@test.com`) in their `beforeAll` hooks. Because Jest runs test files concurrently in separate processes that share the same Firestore Emulator instance, the `afterAll` hook of one test file deleted the shared admin user out from under the other test file, causing intermittent `401` errors during authentication.
+**Rule going forward:**
+- Always scope mock document IDs to the specific test file (e.g., `test-admin-id-users` and `test-admin-id-projects`). Never use generic shared IDs like `user-1` across multiple test files when running against a shared emulator database.
