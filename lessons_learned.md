@@ -311,16 +311,15 @@ Run this before starting any new sprint:
   TOKEN=$(curl -s -H "Metadata-Flavor: Google" "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity?audience=$CLOUD_RUN_URL")
   ```
 
-### 26. Deploying a Cloud Run service does not grant permission to invoke it
+### 26. Custom CI/CD Service Accounts cannot grant themselves IAM roles mid-build
 
-**What happened:** Even after configuring the smoke test to use a valid Identity Token (Lesson 25), Cloud Run rejected the request with a `401 Unauthorized` error.
-**Root cause:** When Cloud Run validates an Identity Token, it checks whether the caller's email has the `roles/run.invoker` permission on the specific service. Even though the Cloud Build Service Account is what just successfully deployed the service, its default `Cloud Run Admin` (or `Project Editor`) role does *not* implicitly grant the permission to invoke the service it just deployed.
+**What happened:** Even after configuring the smoke test to use a valid Identity Token (Lesson 25), Cloud Run rejected the request with a `401 Unauthorized` error because the deployment SA lacked `roles/run.invoker`. We attempted to fix this by adding `gcloud run services add-iam-policy-binding ... --role="roles/run.invoker"` to the build script, but it crashed with `PERMISSION_DENIED: Permission 'run.services.setIamPolicy' denied`.
+**Root cause:** When using a custom, least-privilege Service Account for CI/CD (e.g., `hammer-cicd-sa`), it has enough permission to deploy Cloud Run revisions (`roles/run.developer`), but it explicitly lacks IAM modification permissions. Therefore, the pipeline cannot dynamically grant itself the `run.invoker` role to ping the private service.
 **Rule going forward:**
-- If a CI/CD pipeline needs to run smoke tests against a private Cloud Run service it just deployed, the pipeline must explicitly grant *itself* the `run.invoker` role before making the request:
+- If a CI/CD pipeline needs to run smoke tests against private Cloud Run services, do not attempt to manipulate IAM policies inside the pipeline.
+- Instead, grant the `roles/run.invoker` role to the CI/CD Service Account permanently at the **project level**. This authorizes the pipeline to generate Identity Tokens that Cloud Run will accept for *any* service deployed in that project:
   ```bash
-  SA_EMAIL=$(gcloud config get-value account)
-  gcloud run services add-iam-policy-binding my-service \
-    --region us-central1 \
-    --member="serviceAccount:$SA_EMAIL" \
+  gcloud projects add-iam-policy-binding $PROJECT_ID \
+    --member="serviceAccount:your-cicd-sa@$PROJECT_ID.iam.gserviceaccount.com" \
     --role="roles/run.invoker"
   ```
