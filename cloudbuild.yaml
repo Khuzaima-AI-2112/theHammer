@@ -9,7 +9,7 @@ steps:
       - |
         apk add --no-cache openjdk21-jre
         npm install -g firebase-tools
-        npm ci
+        npm install
         firebase emulators:exec --only firestore --project demo-hammer 'npm test'
     env:
       - 'NODE_ENV=test'
