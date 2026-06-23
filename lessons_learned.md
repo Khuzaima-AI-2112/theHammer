@@ -235,3 +235,18 @@ Run this before starting any new sprint:
 **Rule going forward:**
 - Use Firebase Authentication for any customer-facing or B2B SaaS identity needs. It provides drop-in UI widgets, handles multi-provider sign-ins natively, and does not require touching GCP IAM or Load Balancer configurations.
 - Reserve Cloud IAP exclusively for internal administrative tools or strict enterprise intra-company access.
+
+### 16. Firebase Admin SDK Version 14 requires Node >= 22 and breaks Jest on Node 20
+
+**What happened:** A routine package update bumped `firebase-admin` to `^14.0.0` in the backend. When Cloud Build triggered its test step using the `node:20-alpine` image, it immediately crashed with a fatal Jest error: `Jest's require(ESM) requires Node v24.9+ for synchronous vm module APIs`.
+**Root cause:** `firebase-admin` v14 depends on a version of `jose` that is strictly ESM. While the application might run fine in production, Jest running on Node 20 struggles with synchronous ESM imports without experimental flags. Furthermore, the `firebase-admin@14.0.0` package officially dropped support for Node 20, requiring Node >= 22. Because our CI environments (`cloudbuild.yaml` and `Dockerfile`) were intentionally pinned to Node 20 (as documented in Lesson 8), there was a hard conflict between the updated package and the pinned runtime.
+**Rule going forward:**
+- Check runtime requirements before upgrading major versions of core libraries. If a package requires a higher Node version than what the deployment targets are pinned to, downgrade the package (e.g., to `^13.10.0`) to unblock the build unless upgrading the environment is explicitly scoped.
+- If upgrading Node across the stack is desired, it must be planned carefully by repinning all `node:*` base images across `cloudbuild.yaml` and all `Dockerfiles` concurrently to avoid environment mismatch failures.
+
+### 17. Path Sanitization must handle directory traversal sequences
+
+**What happened:** A unit test verifying that adversarial inputs (`../../etc/passwd`) are correctly sanitized failed. The `sanitize` function replaced invalid characters with underscores (`_`), but since the period (`.`) was in the allowlist for file extensions, the output was `.._.._etc_passwd`, which still contained the directory traversal sequence `..`.
+**Root cause:** Allowing periods without specifically guarding against consecutive periods (`..`) inadvertently preserves path traversal logic if those sanitized strings are later concatenated into file system or bucket paths.
+**Rule going forward:**
+- Explicitly strip or replace directory traversal sequences (`..`) in path sanitization logic before or after applying character allowlists. E.g., `.replace(/\.\./g, '_')`.

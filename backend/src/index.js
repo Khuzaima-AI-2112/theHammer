@@ -116,6 +116,7 @@ const upload = multer({
 function sanitize(value, maxLen = 64) {
   if (typeof value !== 'string') return '';
   return value
+    .replace(/\.\./g, '_')
     .replace(/[^a-zA-Z0-9_.\-]/g, '_')
     .slice(0, maxLen);
 }
