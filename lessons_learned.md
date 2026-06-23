@@ -306,9 +306,9 @@ Run this before starting any new sprint:
 **Root cause:** The Google Cloud Organization has "Domain Restricted Sharing" enforced by default, which categorically prevents any IAM bindings to `allUsers`. Consequently, new Cloud Run services default to Private, rejecting all unauthenticated requests.
 **Rule going forward:**
 - When smoke-testing Cloud Run services in a CI pipeline under DRS, you cannot rely on public access. You must pass an Identity Token in the `Authorization` header.
-- Because Cloud Build service accounts lack the `Service Account Token Creator` role required to run `gcloud auth print-identity-token`, you must fetch the token directly from the hidden Metadata Server, scoped to the exact Cloud Run audience URL:
+- To generate an Identity Token for a custom CI/CD service account, you must grant the SA the `roles/iam.serviceAccountTokenCreator` role on itself, and use `gcloud` to explicitly impersonate it (see Lesson 27):
   ```bash
-  TOKEN=$(curl -s -H "Metadata-Flavor: Google" "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity?audience=$CLOUD_RUN_URL")
+  TOKEN=$(gcloud auth print-identity-token --impersonate-service-account="$SA_EMAIL" --audiences="$CLOUD_RUN_URL" --include-email)
   ```
 
 ### 26. Custom CI/CD Service Accounts cannot grant themselves IAM roles mid-build
@@ -322,4 +322,17 @@ Run this before starting any new sprint:
   gcloud projects add-iam-policy-binding $PROJECT_ID \
     --member="serviceAccount:your-cicd-sa@$PROJECT_ID.iam.gserviceaccount.com" \
     --role="roles/run.invoker"
+  ```
+
+### 27. The Cloud Build Metadata Server ignores custom CI/CD service accounts
+
+**What happened:** Even after granting `roles/run.invoker` to the custom CI/CD service account (Lesson 26), smoke tests were still failing with `401 Unauthorized` when generating Identity Tokens using `curl` against the metadata server.
+**Root cause:** Cloud Build containers run on worker VMs. When you use `curl` against the VM's metadata server (`http://metadata.google.internal/...`), it ignores the custom identity configured in `gcloud` inside the container. Instead, it generates the Identity Token for the underlying VM's *default* Cloud Build service account. Since `run.invoker` was granted to the custom CI/CD SA and *not* the VM's default SA, Cloud Run rejected the token.
+**Rule going forward:**
+- **Never** use `curl` against the metadata server to generate identity tokens in a CI/CD pipeline if you are using a custom service account.
+- Instead, grant the custom service account the `roles/iam.serviceAccountTokenCreator` role globally, and explicitly command `gcloud` to impersonate it:
+  ```bash
+  TOKEN=$(gcloud auth print-identity-token \
+    --impersonate-service-account="$SA_EMAIL" \
+    --audiences="$URL" --include-email)
   ```
