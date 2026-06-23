@@ -65,17 +65,10 @@ FFmpeg renders are discrete, bounded tasks — not long-running servers. Cloud R
 ### 2.1 Load Balancing
 
 **Q: CLB or direct Cloud Run URLs?**
-**A: Global HTTPS Load Balancer with Serverless NEGs.**
-
-```
-LB Frontend: HTTPS :443 → URL Map
-  /api/*      → Backend: hammer-api             (Serverless NEG, us-central1)
-  /export/*   → Backend: hammer-export-trigger  (Serverless NEG, us-central1)
-  /*          → Backend: hammer-portal          (Serverless NEG, us-central1)
-```
+**A: Currently using direct Cloud Run `*.run.app` URLs.** The Global HTTPS Load Balancer with Serverless NEGs rollout has been delayed to a future sprint.
 
 **Q: Cloud Armor?**
-**A: Yes — basic policy on Day 1.** Rules: `sqli-stable`, `xss-stable`, rate limit 100 req/min/IP. Cost: $5/month.
+**A: Delayed.** Will be implemented when the Global HTTPS LB is provisioned.
 
 ---
 
@@ -374,13 +367,13 @@ Two GCP projects: `hammer-dev` and `hammer-prod`. Terraform workspaces per envir
 | Firestore (reads/writes at scale) | $2–5 |
 | GCS storage (3 GB/month screenshots) | $0.06 |
 | GCS egress (signed URL reads) | $1–3 |
-| HTTPS LB + Cloud Armor | $20 |
+| HTTPS LB + Cloud Armor | $0 (Delayed) |
 | Cloud DNS | $1 |
 | Secret Manager API calls | $0.03 |
 | Cloud Logging (< 50 GB free) | $0 |
-| **Total** | **~$30–45/month** |
+| **Total** | **~$8–24/month** |
 
-Vision API / OCR (Sprint 6S) is the largest unknown cost driver. Benchmark before Sprint 6S ships. Set a GCP Billing budget alert at 3× the monthly estimate with auto-notify at 80% and 100%.
+AI costs (`gemini-1.5-flash`) are negligible compared to traditional Vision APIs (fractions of a cent per report). Set a GCP Billing budget alert at 3× the monthly estimate with auto-notify at 80% and 100%.
 
 
 ---
