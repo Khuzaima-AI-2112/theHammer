@@ -1,29 +1,16 @@
 steps:
-  # ── 1. Start Firestore emulator ────────────────────────────────────────────
-  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
-    id: 'start-firestore-emulator'
-    entrypoint: bash
-    args:
-      - '-c'
-      - |
-        apt-get install -y default-jre-headless --quiet
-        npm install -g firebase-tools --quiet
-        firebase emulators:start --only firestore --project demo-hammer &
-        echo "Waiting for Firestore emulator..."
-        sleep 10
-        echo "Emulator ready."
-    env:
-      - 'FIRESTORE_EMULATOR_HOST=127.0.0.1:8080'
-
-  # ── 2. Run backend tests ────────────────────────────────────────────────────
+  # ── 1. Run backend tests with Firestore emulator ────────────────────────────
   - name: 'node:20-alpine'
     id: 'test'
-    waitFor: ['start-firestore-emulator']
     dir: 'backend'
     entrypoint: sh
     args:
       - '-c'
-      - 'npm ci && npm test'
+      - |
+        apk add --no-cache openjdk17-jre
+        npm install -g firebase-tools
+        npm ci
+        firebase emulators:exec --only firestore --project demo-hammer 'npm test'
     env:
       - 'NODE_ENV=test'
       - 'FIRESTORE_EMULATOR_HOST=127.0.0.1:8080'
