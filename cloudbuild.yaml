@@ -145,6 +145,8 @@ steps:
       - |
         set -euo pipefail
 
+        SA_EMAIL=$$(gcloud config get-value account)
+
         BACKEND_URL=$$(gcloud run services describe thehammer-backend \
           --region northamerica-northeast1 --format 'value(status.url)')
 
@@ -152,13 +154,13 @@ steps:
           --region northamerica-northeast1 --format 'value(status.url)')
 
         echo "── backend: $$BACKEND_URL"
-        TOKEN_BACKEND=$$(curl -s -H "Metadata-Flavor: Google" "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity?audience=$$BACKEND_URL")
+        TOKEN_BACKEND=$$(gcloud auth print-identity-token --impersonate-service-account="$$SA_EMAIL" --audiences="$$BACKEND_URL" --include-email)
         STATUS=$$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $$TOKEN_BACKEND" "$$BACKEND_URL/health")
         echo "   /health → $$STATUS"
         [ "$$STATUS" = "200" ] || { echo "FAIL: backend /health returned $$STATUS"; exit 1; }
 
         echo "── portal: $$PORTAL_URL"
-        TOKEN_PORTAL=$$(curl -s -H "Metadata-Flavor: Google" "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity?audience=$$PORTAL_URL")
+        TOKEN_PORTAL=$$(gcloud auth print-identity-token --impersonate-service-account="$$SA_EMAIL" --audiences="$$PORTAL_URL" --include-email)
         STATUS=$$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $$TOKEN_PORTAL" "$$PORTAL_URL/health")
         echo "   /health → $$STATUS"
         [ "$$STATUS" = "200" ] || { echo "FAIL: portal /health returned $$STATUS"; exit 1; }
