@@ -310,3 +310,17 @@ Run this before starting any new sprint:
   ```bash
   TOKEN=$(curl -s -H "Metadata-Flavor: Google" "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity?audience=$CLOUD_RUN_URL")
   ```
+
+### 26. Deploying a Cloud Run service does not grant permission to invoke it
+
+**What happened:** Even after configuring the smoke test to use a valid Identity Token (Lesson 25), Cloud Run rejected the request with a `401 Unauthorized` error.
+**Root cause:** When Cloud Run validates an Identity Token, it checks whether the caller's email has the `roles/run.invoker` permission on the specific service. Even though the Cloud Build Service Account is what just successfully deployed the service, its default `Cloud Run Admin` (or `Project Editor`) role does *not* implicitly grant the permission to invoke the service it just deployed.
+**Rule going forward:**
+- If a CI/CD pipeline needs to run smoke tests against a private Cloud Run service it just deployed, the pipeline must explicitly grant *itself* the `run.invoker` role before making the request:
+  ```bash
+  SA_EMAIL=$(gcloud config get-value account)
+  gcloud run services add-iam-policy-binding my-service \
+    --region us-central1 \
+    --member="serviceAccount:$SA_EMAIL" \
+    --role="roles/run.invoker"
+  ```
