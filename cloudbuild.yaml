@@ -145,22 +145,6 @@ steps:
       - |
         set -euo pipefail
 
-        # Grant the Cloud Build service account permission to invoke the private services
-        SA_EMAIL=$$(gcloud config get-value account)
-        echo "Authorizing $$SA_EMAIL to invoke Cloud Run..."
-        
-        gcloud run services add-iam-policy-binding thehammer-portal \
-          --region northamerica-northeast1 \
-          --member="serviceAccount:$$SA_EMAIL" \
-          --role="roles/run.invoker" \
-          --quiet || echo "Warning: Could not bind portal IAM"
-
-        gcloud run services add-iam-policy-binding thehammer-backend \
-          --region northamerica-northeast1 \
-          --member="serviceAccount:$$SA_EMAIL" \
-          --role="roles/run.invoker" \
-          --quiet || echo "Warning: Could not bind backend IAM"
-
         BACKEND_URL=$$(gcloud run services describe thehammer-backend \
           --region northamerica-northeast1 --format 'value(status.url)')
 
