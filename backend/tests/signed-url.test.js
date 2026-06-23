@@ -81,7 +81,7 @@ describe('POST /upload-url — auth', () => {
       .post('/upload-url')
       .set('x-dev-user-email', 'wrong-user@test.com')
       .send(VALID_BODY);
-    expect(res.status).toBe(403); // requireAuth falls back to 403 if user not found
+    expect(res.status).toBe(401); // requireAuth falls back to 401 if user not found
   });
 });
 

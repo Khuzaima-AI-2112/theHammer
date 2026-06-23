@@ -1,14 +1,19 @@
 'use strict';
 
 const { Storage } = require('@google-cloud/storage');
-const { VertexAI } = require('@google-cloud/vertexai');
+const { GoogleGenAI } = require('@google/genai');
 const { db } = require('../lib/firestore');
 const gcs = new Storage();
 
 // Initialize Vertex with Cloud project and location
 const PROJECT_ID = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT || 'thehammer';
 const LOCATION = 'northamerica-northeast1'; // or us-central1
-const vertex_ai = new VertexAI({ project: PROJECT_ID, location: LOCATION });
+let aiClient = null;
+
+function getAIClient() {
+  if (!aiClient) aiClient = new GoogleGenAI({ vertexai: { project: PROJECT_ID, location: LOCATION } });
+  return aiClient;
+}
 
 // This is a simplified MVP worker logic for generating standard reports
 async function generateStandardReport(reportId, projectId, reportType, dateRange) {
@@ -38,23 +43,21 @@ async function generateStandardReport(reportId, projectId, reportType, dateRange
 
     // Call Vertex AI LLM Router to generate narrative summary based on metrics
     try {
-      const generativeModel = vertex_ai.preview.getGenerativeModel({
+      const prompt = `You are an executive assistant. Generate a short narrative summary (max 3 sentences) for a report of type ${reportType}. 
+      The metrics are: ${JSON.stringify(resultData.metrics)}`;
+
+      const client = getAIClient();
+      const resp = await client.models.generateContent({
         model: modelId,
-        generationConfig: {
+        contents: prompt,
+        config: {
           maxOutputTokens: 2048,
           temperature: 0.2,
           topP: 0.8,
         },
       });
-
-      const prompt = `You are an executive assistant. Generate a short narrative summary (max 3 sentences) for a report of type ${reportType}. 
-      The metrics are: ${JSON.stringify(resultData.metrics)}`;
-
-      const resp = await generativeModel.generateContent({
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      });
       
-      const summaryText = resp.response.candidates[0].content.parts[0].text;
+      const summaryText = resp.text;
       resultData.summary = summaryText;
     } catch (llmError) {
       console.error(`[Reports Worker] LLM Error for ${reportId} using ${modelId}:`, llmError);
