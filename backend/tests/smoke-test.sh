@@ -28,14 +28,19 @@ HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/admin
 # If we get a 5xx or 000 (conn refused), the server failed to boot.
 echo "[SmokeTest] Received HTTP $HTTP_STATUS"
 
-# Cleanup
-docker stop smoke-test-app
-docker rm smoke-test-app
-
 if [ "$HTTP_STATUS" = "401" ]; then
   echo "[SmokeTest] PASS - Expected 401 Unauthorized."
+  # Cleanup
+  docker stop smoke-test-app > /dev/null 2>&1
+  docker rm smoke-test-app > /dev/null 2>&1
   exit 0
 else
   echo "[SmokeTest] FAIL - Expected 401, got $HTTP_STATUS"
+  echo "--- DOCKER LOGS ---"
+  docker logs smoke-test-app
+  echo "-------------------"
+  # Cleanup
+  docker stop smoke-test-app > /dev/null 2>&1
+  docker rm smoke-test-app > /dev/null 2>&1
   exit 1
 fi
