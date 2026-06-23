@@ -17,8 +17,8 @@ beforeAll(async () => {
   app = require('../src/index').app;
   db  = require('../src/lib/firestore').db;
 
-  await db.collection('users').doc('test-admin-id').set({
-    email: 'admin@test.com', displayName: 'Test Admin', role: 'admin',
+  await db.collection('users').doc('test-admin-id-users').set({
+    email: 'admin-users@test.com', displayName: 'Test Admin', role: 'admin',
     workspaceId: 'test-workspace',
     createdAt: new Date().toISOString(), lastActiveAt: new Date().toISOString(),
     schemaVersion: 1,
@@ -26,10 +26,10 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await db.collection('users').doc('test-admin-id').delete();
+  await db.collection('users').doc('test-admin-id-users').delete();
 });
 
-const H = { 'x-dev-user-email': 'admin@test.com', 'content-type': 'application/json' };
+const H = { 'x-dev-user-email': 'admin-users@test.com', 'content-type': 'application/json' };
 
 describe('POST /admin/users', () => {
   afterEach(async () => {
@@ -73,7 +73,7 @@ describe('POST + DELETE /admin/projects/:id/members', () => {
 
   beforeAll(async () => {
     const ref = await db.collection('projects').add({
-      name: 'Member Test Project', adminId: 'test-admin-id', memberCount: 0,
+      name: 'Member Test Project', adminId: 'test-admin-id-users', memberCount: 0,
       workspaceId: 'test-workspace',
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
       schemaVersion: 1,

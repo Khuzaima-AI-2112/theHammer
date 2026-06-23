@@ -19,8 +19,8 @@ beforeAll(async () => {
   app = require('../src/index').app;
   db  = require('../src/lib/firestore').db;
 
-  await db.collection('users').doc('test-admin-id').set({
-    email:         'admin@test.com',
+  await db.collection('users').doc('test-admin-id-projects').set({
+    email:         'admin-projects@test.com',
     displayName:   'Test Admin',
     role:          'admin',
     workspaceId:   'test-workspace',
@@ -31,11 +31,11 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await db.collection('users').doc('test-admin-id').delete().catch(() => {});
+  await db.collection('users').doc('test-admin-id-projects').delete().catch(() => {});
 });
 
 const H = {
-  'x-dev-user-email': 'admin@test.com',
+  'x-dev-user-email': 'admin-projects@test.com',
   'content-type':     'application/json',
 };
 
@@ -58,7 +58,7 @@ describe('POST /admin/projects', () => {
     expect(res.status).toBe(201);
     expect(res.body).toMatchObject({
       name:          'Test Project Alpha',
-      adminId:       'test-admin-id',
+      adminId:       'test-admin-id-projects',
       memberCount:   0,
       schemaVersion: 1,
     });
@@ -90,7 +90,7 @@ describe('GET /admin/projects', () => {
 
   beforeAll(async () => {
     const ref = await db.collection('projects').add({
-      name: 'GET Test Project', adminId: 'test-admin-id', memberCount: 0,
+      name: 'GET Test Project', adminId: 'test-admin-id-projects', memberCount: 0,
       workspaceId: 'test-workspace',
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
       schemaVersion: 1,
@@ -115,7 +115,7 @@ describe('PATCH /admin/projects/:id', () => {
 
   beforeEach(async () => {
     const ref = await db.collection('projects').add({
-      name: 'Original Name', adminId: 'test-admin-id', memberCount: 0,
+      name: 'Original Name', adminId: 'test-admin-id-projects', memberCount: 0,
       workspaceId: 'test-workspace',
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
       schemaVersion: 1,
@@ -148,7 +148,7 @@ describe('PATCH /admin/projects/:id', () => {
 describe('DELETE /admin/projects/:id', () => {
   test('204 — deletes project and memberships', async () => {
     const ref = await db.collection('projects').add({
-      name: 'To Delete', adminId: 'test-admin-id', memberCount: 0,
+      name: 'To Delete', adminId: 'test-admin-id-projects', memberCount: 0,
       workspaceId: 'test-workspace',
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
       schemaVersion: 1,
