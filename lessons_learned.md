@@ -394,3 +394,24 @@ Run this before starting any new sprint:
     // reject
   }
   ```
+
+---
+
+### 33. Plaintext Console Logs Are Invisible to Cloud Logging Alerts
+
+**What happened:** We used standard `console.log` and `console.error` everywhere in the Node.js backend. In GCP Cloud Logging, these showed up as generic text logs, making it impossible to set up log-based metrics or alerts based on `severity` (e.g. triggering an alert for `ERROR` but ignoring `INFO`).
+**Root cause:** Node's default console functions output strings to stdout/stderr. Cloud Logging expects structured JSON payloads to correctly map fields like `severity`, `jsonPayload.message`, and timestamps.
+**Rule going forward:**
+- Never use raw `console.log()` in the backend.
+- Always use a structured JSON logger (e.g., `logger.info()`, `logger.error()`) that writes stringified JSON objects to stdout/stderr so the Google Cloud Logging agent can automatically parse and index them.
+
+---
+
+### 34. Chrome Extensions Cannot Use External Font CDNs
+
+**What happened:** The Chrome Extension popup loaded the Inter font from `https://fonts.googleapis.com`. This violates strict Content Security Policies (CSP) often required for extensions, and it leaks the user's IP and timing data to Google every time they open the popup.
+**Root cause:** Copy-pasting standard web development practices (using CDNs) into a Chrome Extension environment.
+**Rule going forward:**
+- Extensions must be fully self-contained.
+- Download all required web fonts (`.woff2`) and store them in the extension's local `fonts/` directory.
+- Reference them via standard `@font-face` blocks pointing to local relative paths.
