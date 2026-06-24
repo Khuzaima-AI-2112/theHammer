@@ -82,41 +82,42 @@
     #settings-toggle:hover { text-decoration: underline; }
     #status { margin-top: 10px; font-size: 12px; color: #555; min-height: 16px; text-align: center; }
 
-    /* ── Not-configured banner (5.15) ── */
-    #no-key-banner {
-      display: none; margin-top: 10px; padding: 8px 10px;
-      background: #fff8e1; border: 1px solid #ffe082; border-radius: 6px;
-      font-size: 11px; color: #6d4c00; line-height: 1.4;
-    }
-    #no-key-banner button {
-      flex: none; display: inline; padding: 0; background: none; border: none;
-      color: #01696f; font-weight: 700; font-size: 11px; cursor: pointer; text-decoration: underline;
-    }
+    /* ── Logged out state (Welcome) ── */
+    #welcome-screen { display: none; text-align: center; padding: 20px 10px; }
+    #welcome-screen h2 { font-size: 16px; margin-bottom: 8px; color: #01696f; }
+    #welcome-screen p { font-size: 13px; color: #555; margin-bottom: 20px; line-height: 1.4; }
+    #welcome-signin-btn { width: 100%; background: #01696f; color: #fff; padding: 10px 0; font-size: 14px; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; transition: background 140ms ease; }
+    #welcome-signin-btn:hover { background: #0c4e54; }
 
-    /* ── Settings panel (5.15) ── */
+    /* ── Settings panel (Overlay Modal) ── */
     #settings-panel {
-      display: none; margin-top: 12px; padding: 10px;
-      background: #fff; border: 1px solid #ddd; border-radius: 8px;
+      display: none; position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(247, 246, 242, 0.96); padding: 20px; z-index: 100;
+      backdrop-filter: blur(2px); overflow-y: auto; border: none; border-radius: 0; margin-top: 0;
     }
     #settings-panel.open { display: block; }
     #settings-panel h2 {
-      font-size: 12px; font-weight: 700; text-transform: uppercase;
-      letter-spacing: 0.05em; color: #555; margin-bottom: 8px;
+      font-size: 14px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.05em; color: #01696f; margin-bottom: 12px; border-bottom: 1px solid #ccc; padding-bottom: 6px;
     }
-    #settings-panel .field { margin-bottom: 8px; }
+    #settings-panel .field { margin-bottom: 12px; }
     #settings-panel label { font-size: 11px; }
     #settings-panel input[type="text"],
     #settings-panel input[type="url"],
     #settings-panel input[type="password"],
     #settings-panel input[type="number"] { font-size: 13px; }
-    #cloud-run-url[readonly] { background: #f3f3f3; color: #888; cursor: not-allowed; }
-    #url-error { display: none; font-size: 11px; color: #c0392b; margin-top: 3px; }
     #settings-save-btn {
-      width: 100%; padding: 7px 0; background: #01696f; color: #fff;
+      width: 100%; padding: 8px 0; background: #01696f; color: #fff;
       border: none; border-radius: 6px; font-size: 13px; font-weight: 600;
-      cursor: pointer; margin-top: 4px;
+      cursor: pointer; margin-top: 8px;
     }
     #settings-save-btn:hover { background: #0c4e54; }
+    #open-admin-btn {
+      width: 100%; padding: 8px 0; background: #e6e4df; color: #1a1a1a;
+      border: none; border-radius: 6px; font-size: 13px; font-weight: 600;
+      cursor: pointer; margin-top: 4px; margin-bottom: 12px;
+    }
+    #open-admin-btn:hover { background: #d4d1ca; }
 
     /* ── 4.5 History panel ── */
     #history-panel { display: none; margin-top: 4px; }
@@ -170,68 +171,62 @@
   <!-- Capture panel -->
   <div id="capture-panel">
 
-    <!--
-      5.16: Project field.
-      #project-dropdown — shown when >1 project (user must choose).
-      #project-single   — shown when exactly 1 project (read-only label, dropdown hidden).
-      Both controlled by populateProjectSelect() in popup.js.
-    -->
-    <div class="field" id="project-field">
-      <label for="project-select">Project</label>
-      <div id="project-dropdown">
-        <select id="project-select"><option value="">— loading… —</option></select>
+    <!-- Logged out state -->
+    <div id="welcome-screen">
+      <h2>Welcome to The Hammer</h2>
+      <p>Please sign in to start capturing evidence for your projects.</p>
+      <button id="welcome-signin-btn">Sign In</button>
+    </div>
+
+    <!-- Logged in controls -->
+    <div id="capture-controls">
+      <!-- 5.16: Project field -->
+      <div class="field" id="project-field">
+        <label for="project-select">Project</label>
+        <div id="project-dropdown">
+          <select id="project-select"><option value="">— loading… —</option></select>
+        </div>
+        <div id="project-single" aria-live="polite"></div>
       </div>
-      <!-- 5.16: auto-selected single project label -->
-      <div id="project-single" aria-live="polite"></div>
+
+      <!-- Stage dropdown -->
+      <div class="field">
+        <label for="stage-select">Stage</label>
+        <select id="stage-select">
+          <option value="">— select stage —</option>
+          <option value="beginning">Beginning</option>
+          <option value="during">During</option>
+          <option value="after">After</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label for="tool-input">Tool / Context <span style="font-weight:400;text-transform:none">(optional)</span></label>
+        <input id="tool-input" type="text" placeholder="e.g. Figma, Jira, Notion" maxlength="64" />
+      </div>
+
+      <div class="row">
+        <button id="save-btn">Save</button>
+        <button id="capture-btn">Capture Now</button>
+      </div>
+
+      <!-- progress bar -->
+      <div id="progress-wrap" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+        <div id="progress-bar"></div>
+      </div>
     </div>
 
-    <!-- 5.16: Stage dropdown (Beginning / During / After) -->
-    <div class="field">
-      <label for="stage-select">Stage</label>
-      <select id="stage-select">
-        <option value="">— select stage —</option>
-        <option value="beginning">Beginning</option>
-        <option value="during">During</option>
-        <option value="after">After</option>
-      </select>
-    </div>
-
-    <div class="field">
-      <label for="tool-input">Tool / Context <span style="font-weight:400;text-transform:none">(optional)</span></label>
-      <input id="tool-input" type="text" placeholder="e.g. Figma, Jira, Notion" maxlength="64" />
-    </div>
-
-    <!-- 5.15: shown when User has not signed in -->
-    <div id="no-key-banner">
-      Sign in to The Hammer to start capturing.
-      <button id="open-settings-banner">Sign In</button>
-    </div>
-
-    <div class="row">
-      <button id="save-btn">Save</button>
-      <button id="capture-btn">Capture Now</button>
-    </div>
-
-    <!-- 4.3: progress bar -->
-    <div id="progress-wrap" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
-      <div id="progress-bar"></div>
-    </div>
-
-    <!-- Settings panel (5.15) -->
+    <!-- Settings panel -->
     <div id="settings-panel">
       <h2>Settings</h2>
-      <div class="field">
-        <label for="cloud-run-url">Backend URL</label>
-        <input id="cloud-run-url" type="url"
-               value="https://thehammer-backend-282689937365.northamerica-northeast1.run.app/api"
-               title="Paste your custom backend URL here" />
-        <p id="url-error">URL must start with http</p>
-      </div>
+      
       <div class="field">
         <label>Account</label>
         <div id="auth-status-text" style="font-size: 12px; margin-bottom: 8px;">Not signed in</div>
         <button id="auth-login-btn" style="width:100%; padding: 6px 0; background: #e6e4df; border:none; border-radius:4px; cursor:pointer;">Sign In</button>
       </div>
+      <button id="open-admin-btn">Open Admin Portal</button>
+
       <div class="field">
         <label for="retention-input">Retention (days) <span style="font-weight:400;text-transform:none;font-size:10px">admin-managed</span></label>
         <input id="retention-input" type="number" placeholder="—" min="1" max="3650" readonly />

@@ -34,7 +34,7 @@ const ICON_DATA_URI =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ' +
   'AAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
 
-const FALLBACK_API_BASE = 'https://app.thehammer.io/api';
+const FALLBACK_API_BASE = 'https://thehammer-backend-282689937365.northamerica-northeast1.run.app/api';
 
 // ─────────────────────────────────────────────────────────────────
 // 6.1 / 6.2 / 6.3 — Session state helpers

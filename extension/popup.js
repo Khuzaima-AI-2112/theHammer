@@ -36,15 +36,16 @@ const captureBtn         = document.getElementById('capture-btn');
 const statusEl           = document.getElementById('status');
 const progressBar        = document.getElementById('progress-bar');
 const progressWrap       = document.getElementById('progress-wrap');
-const noKeyBanner        = document.getElementById('no-key-banner');
-const openSettingsBanner = document.getElementById('open-settings-banner');
+const welcomeScreen      = document.getElementById('welcome-screen');
+const welcomeSigninBtn   = document.getElementById('welcome-signin-btn');
+const captureControls    = document.getElementById('capture-controls');
 
 // Settings panel
 const settingsToggle   = document.getElementById('settings-toggle');
 const settingsPanel    = document.getElementById('settings-panel');
-const cloudRunUrlInput = document.getElementById('cloud-run-url');  // read-only
 const authStatusText   = document.getElementById('auth-status-text');
 const authLoginBtn     = document.getElementById('auth-login-btn');
+const openAdminBtn     = document.getElementById('open-admin-btn');
 const retentionInput   = document.getElementById('retention-input'); // read-only (admin-managed)
 const maxSizeInput     = document.getElementById('max-size-input');  // read-only (admin-managed)
 const notifyInput      = document.getElementById('notify-input');
@@ -65,14 +66,16 @@ const btnCaptureNow   = document.getElementById('btn-capture-now');
 document.addEventListener('DOMContentLoaded', async () => {
   const { session, settings } = await chrome.storage.local.get(['session', 'settings']);
 
-  // ── 5.15 / 5.18: Show no-key-banner if Firebase token absent ──
+  // ── 5.15 / 5.18: Show welcome screen if Firebase token absent ──
   const token = settings?.firebaseToken?.trim() || '';
   if (!token) {
-    noKeyBanner.style.display = 'block';
-    captureBtn.disabled = true;
+    welcomeScreen.style.display = 'block';
+    captureControls.style.display = 'none';
     authStatusText.textContent = 'Not signed in';
     authLoginBtn.textContent = 'Sign In';
   } else {
+    welcomeScreen.style.display = 'none';
+    captureControls.style.display = 'block';
     authStatusText.textContent = 'Signed in with Firebase';
     authLoginBtn.textContent = 'Sign Out';
   }
@@ -81,7 +84,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   // cloudRunUrl, retention, maxSize are authoritative from GET /config (5.17);
   // we show cached values here while the async fetch runs.
   if (settings?.notify != null) notifyInput.checked    = settings.notify;
-  if (settings?.cloudRunUrl)    cloudRunUrlInput.value = settings.cloudRunUrl;
   if (settings?.retention)      retentionInput.value   = settings.retention;
   if (settings?.maxSize)        maxSizeInput.value     = settings.maxSize;
 
@@ -136,7 +138,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         setStatus('Blocked — set Project & save first.');
       } else if (response?.reason === 'no_api_key' || response?.reason === 'unauthorized') {
         setStatus('Sign in to your account.');
-        noKeyBanner.style.display = 'block';
+        welcomeScreen.style.display = 'block';
+        captureControls.style.display = 'none';
       } else {
         setStatus('Failed: ' + (response?.error ?? 'unknown'));
       }
@@ -187,14 +190,12 @@ document.addEventListener('DOMContentLoaded', async () => {
       : '⚙ Settings';
   });
 
-  openSettingsBanner.addEventListener('click', () => {
-    settingsPanel.classList.add('open');
-    settingsToggle.textContent = '✕ Settings';
-  });
-
   // ── 5.18: OAuth Login Flow ──
-  authLoginBtn.addEventListener('click', async () => {
+  const PORTAL_URL = 'https://thehammer-portal-282689937365.northamerica-northeast1.run.app';
+
+  async function triggerSignIn() {
     authLoginBtn.disabled = true;
+    welcomeSigninBtn.disabled = true;
     try {
       const existing = (await chrome.storage.local.get('settings')).settings || {};
       
@@ -203,15 +204,15 @@ document.addEventListener('DOMContentLoaded', async () => {
         await chrome.storage.local.set({ settings: { ...existing, firebaseToken: '', firebaseRefreshToken: '' } });
         authStatusText.textContent = 'Not signed in';
         authLoginBtn.textContent = 'Sign In';
-        noKeyBanner.style.display = 'block';
-        captureBtn.disabled = true;
+        welcomeScreen.style.display = 'block';
+        captureControls.style.display = 'none';
         setProjectSelectPlaceholder('Sign in to view projects');
         setStatus('Signed out.');
         return;
       }
       
       setStatus('Authenticating...');
-      const authUrl = 'http://localhost:3000/auth-ext.html';
+      const authUrl = `${PORTAL_URL}/auth-ext.html`;
       const redirectUrl = chrome.identity.getRedirectURL();
 
       const responseUrl = await chrome.identity.launchWebAuthFlow({
@@ -228,8 +229,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         const allSettings = { ...existing, firebaseToken: token, firebaseRefreshToken: refreshToken, firebaseApiKey: fbApiKey };
         await chrome.storage.local.set({ settings: allSettings });
         setStatus('Signed in ✓');
-        noKeyBanner.style.display = 'none';
-        captureBtn.disabled = false;
+        welcomeScreen.style.display = 'none';
+        captureControls.style.display = 'block';
         authStatusText.textContent = 'Signed in with Firebase';
         authLoginBtn.textContent = 'Sign Out';
         
@@ -244,30 +245,31 @@ document.addEventListener('DOMContentLoaded', async () => {
       setStatus('Sign-in failed.');
     } finally {
       authLoginBtn.disabled = false;
+      welcomeSigninBtn.disabled = false;
     }
+  }
+
+  authLoginBtn.addEventListener('click', triggerSignIn);
+  welcomeSigninBtn.addEventListener('click', triggerSignIn);
+
+  openAdminBtn.addEventListener('click', () => {
+    window.open(PORTAL_URL, '_blank');
   });
 
   // ── 5.15 / 5.17: Settings save ──
   settingsSaveBtn.addEventListener('click', async () => {
-    const urlVal = cloudRunUrlInput.value.trim();
-    if (urlVal && !urlVal.startsWith('http')) {
-      document.getElementById('url-error').style.display = 'block';
-      return;
-    } else {
-      document.getElementById('url-error').style.display = 'none';
-    }
-
     settingsSaveBtn.disabled = true;
     const existing = (await chrome.storage.local.get('settings')).settings || {};
     const allSettings = {
       ...existing,        // preserve tokens, etc.
-      cloudRunUrl: urlVal || existing.cloudRunUrl,
       notify: notifyInput.checked
     };
 
     try {
       await chrome.storage.local.set({ settings: allSettings });
       setStatus('Settings saved ✓');
+      settingsPanel.classList.remove('open');
+      settingsToggle.textContent = '⚙ Settings';
     } catch (err) {
       console.error('[Hammer popup] settings save error:', err);
       setStatus('Save failed: ' + err.message);
