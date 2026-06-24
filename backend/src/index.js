@@ -34,7 +34,7 @@ app.set('trust proxy', 1);
 // ── CORS ──────────────────────────────────────────────────────────
 const EXTENSION_ID   = process.env.EXTENSION_ID || '';
 const ALLOWED_ORIGINS = [
-  'http://localhost:3000',
+  ...(process.env.NODE_ENV !== 'production' ? ['http://localhost:3000'] : []),
   ...(process.env.ADMIN_ORIGIN ? [process.env.ADMIN_ORIGIN] : []),
   ...(EXTENSION_ID ? [`chrome-extension://${EXTENSION_ID}`] : []),
 ];
@@ -143,7 +143,7 @@ function keysEqual(provided, expected) {
 // Auth middleware
 // ─────────────────────────────────────────────────────────────────
 
-const { requireAuth } = require('./middleware/requireAuth');
+const { requireAuth, requireAdmin } = require('./middleware/requireAuth');
 
 function requireMultipart(req, res, next) {
   const ct = req.headers['content-type'] || '';
@@ -510,13 +510,13 @@ const workerLimiter = rateLimit({
 const { generateStandardReport } = require('./worker/reportsWorker');
 const { generateOcrReport } = require('./worker/ocrWorker');
 
-app.post('/worker/reports', express.json(), workerLimiter, (req, res) => {
+app.post('/worker/reports', express.json(), workerLimiter, requireAdmin, (req, res) => {
   const { reportId, projectId, reportType, dateRange } = req.body;
   generateStandardReport(reportId, projectId, reportType, dateRange);
   res.status(202).send();
 });
 
-app.post('/worker/ocr', express.json(), workerLimiter, (req, res) => {
+app.post('/worker/ocr', express.json(), workerLimiter, requireAdmin, (req, res) => {
   const { reportId, projectId, reportType, dateRange } = req.body;
   generateOcrReport(reportId, projectId, reportType, dateRange);
   res.status(202).send();

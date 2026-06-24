@@ -81,8 +81,6 @@ steps:
       - '30s'
       - '--service-account'
       - 'thehammer-backend@$PROJECT_ID.iam.gserviceaccount.com'
-      - '--set-secrets'
-      - 'API_KEY=thehammer-api-key:latest'
       - '--set-env-vars'
       - 'NODE_ENV=production,GCS_BUCKET=thehammer-storage-2026'
 
