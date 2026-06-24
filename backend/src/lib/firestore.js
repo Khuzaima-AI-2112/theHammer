@@ -11,6 +11,9 @@
 
 'use strict';
 
+const logger = require('./logger');
+
+
 const { initializeApp, getApps } = require('firebase-admin/app');
 const { getFirestore }           = require('firebase-admin/firestore');
 
@@ -22,7 +25,7 @@ const db = getFirestore(process.env.DATABASE_ID ?? '(default)');
 
 // Firestore emulator support for local dev / CI
 if (process.env.FIRESTORE_EMULATOR_HOST) {
-  console.info(`[firestore] using emulator at ${process.env.FIRESTORE_EMULATOR_HOST}`);
+  logger.info(`[firestore] using emulator at ${process.env.FIRESTORE_EMULATOR_HOST}`);
 }
 
 module.exports = { db };

@@ -15,6 +15,9 @@
 
 'use strict';
 
+const logger = require('../lib/logger');
+
+
 const { getAuth } = require('firebase-admin/auth');
 const { db } = require('../lib/firestore');
 
@@ -93,7 +96,7 @@ function requireAuth(minRole) {
 
       next();
     } catch (err) {
-      console.error('[Auth] Token verification failed:', err.message);
+      logger.error('[Auth] Token verification failed:', err.message);
       return res.status(401).json({ error: 'unauthenticated: invalid token' });
     }
   };

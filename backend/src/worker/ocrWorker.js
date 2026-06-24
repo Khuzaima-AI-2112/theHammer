@@ -1,5 +1,8 @@
 'use strict';
 
+const logger = require('../lib/logger');
+
+
 const { Storage } = require('@google-cloud/storage');
 const { GoogleGenAI } = require('@google/genai');
 const { db } = require('../lib/firestore');
@@ -119,9 +122,9 @@ async function generateOcrReport(reportId, projectId, reportType, dateRange) {
       updatedAt: new Date().toISOString()
     });
     
-    console.log(`[OCR Worker] Successfully generated ${reportId}`);
+    logger.info(`[OCR Worker] Successfully generated ${reportId}`);
   } catch (err) {
-    console.error(`[OCR Worker] Error generating ${reportId}:`, err);
+    logger.error(`[OCR Worker] Error generating ${reportId}:`, err);
     await reportRef.update({ status: 'error', updatedAt: new Date().toISOString() });
   }
 }

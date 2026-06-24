@@ -1,5 +1,8 @@
 'use strict';
 
+const logger = require('../lib/logger');
+
+
 const crypto = require('crypto');
 const { db } = require('../../lib/firestore');
 
@@ -19,12 +22,12 @@ function generateApiKey() {
  * - Sets a 7-day grace period before old keys expire.
  */
 async function rotateApiKeys() {
-  console.log('[KeyRotation] Starting API Key rotation process');
+  logger.info('[KeyRotation] Starting API Key rotation process');
   const now = new Date();
   const gracePeriodEnd = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString();
   
   const usersSnap = await db.collection('users').where('isActive', '==', true).get();
-  console.log(`[KeyRotation] Found ${usersSnap.size} active users for rotation.`);
+  logger.info(`[KeyRotation] Found ${usersSnap.size} active users for rotation.`);
 
   for (const doc of usersSnap.docs) {
     const user = doc.data();
@@ -63,7 +66,7 @@ async function rotateApiKeys() {
         status: 'pending'
       });
     });
-    console.log(`[KeyRotation] Rotated key for user ${userId}`);
+    logger.info(`[KeyRotation] Rotated key for user ${userId}`);
   }
 }
 
@@ -71,7 +74,7 @@ async function rotateApiKeys() {
  * Daily cleanup job to deactivate keys that have passed their grace period.
  */
 async function cleanupExpiredKeys() {
-  console.log('[KeyRotation] Starting expired keys cleanup');
+  logger.info('[KeyRotation] Starting expired keys cleanup');
   const now = new Date().toISOString();
   
   const expiredSnap = await db.collection('api_keys')
@@ -84,7 +87,7 @@ async function cleanupExpiredKeys() {
     await doc.ref.update({ isActive: false });
     count++;
   }
-  console.log(`[KeyRotation] Deactivated ${count} expired keys.`);
+  logger.info(`[KeyRotation] Deactivated ${count} expired keys.`);
 }
 
 module.exports = { rotateApiKeys, cleanupExpiredKeys };

@@ -19,6 +19,9 @@
 // ─────────────────────────────────────────────────────────────────
 'use strict';
 
+const logger = require('./lib/logger');
+
+
 const express    = require('express');
 const multer     = require('multer');
 const crypto     = require('crypto');
@@ -182,10 +185,10 @@ async function firestoreWrite(objectPath, fields) {
       },
       { merge: false }
     );
-    console.log('[hammer-api] Firestore write ✓ | doc:', docId);
+    logger.info('[hammer-api] Firestore write ✓ | doc:', docId);
     return null;
   } catch (err) {
-    console.error('[hammer-api] Firestore write error:', err.message);
+    logger.error('[hammer-api] Firestore write error:', err.message);
     return err.message;
   }
 }
@@ -211,18 +214,18 @@ async function dispatchWebhook(projectId, payload) {
       if (p.webhookUrl) {
         const ssrfErr = validateWebhookUrl(p.webhookUrl);
         if (ssrfErr) {
-          console.error('[hammer-api] Webhook blocked (SSRF):', ssrfErr, '| url:', p.webhookUrl);
+          logger.error('[hammer-api] Webhook blocked (SSRF):', ssrfErr, '| url:', p.webhookUrl);
           return;
         }
         fetch(p.webhookUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
-        }).catch(err => console.error('[hammer-api] Webhook dispatch error:', err.message));
+        }).catch(err => logger.error('[hammer-api] Webhook dispatch error:', err.message));
       }
     }
   } catch(err) {
-    console.error('[hammer-api] Webhook fetch project error:', err.message);
+    logger.error('[hammer-api] Webhook fetch project error:', err.message);
   }
 }
 
@@ -231,7 +234,16 @@ async function dispatchWebhook(projectId, payload) {
 // ─────────────────────────────────────────────────────────────────
 
 // ─ Health ─────────────────────────────────────────────────────────
-app.get('/health', (_req, res) => res.json({ status: 'ok' }));
+app.get('/health', async (_req, res) => {
+  try {
+    if (!db) throw new Error('Firestore db object missing');
+    await db.collection('projects').limit(1).get();
+    res.json({ status: 'ok', firestore: 'connected' });
+  } catch (err) {
+    logger.error('[hammer-api] Health check failed:', err.message);
+    res.status(503).json({ status: 'error', reason: 'Firestore disconnected' });
+  }
+});
 
 // ─ POST /upload-url ───────────────────────────────────────────────
 app.post('/upload-url', requireAuth('user'), async (req, res, next) => {
@@ -257,7 +269,7 @@ app.post('/upload-url', requireAuth('user'), async (req, res, next) => {
       const jsonFile = gcs.bucket(BUCKET_NAME).file(jsonPath);
       jsonFile.save(JSON.stringify(req.body.semanticData), {
         contentType: 'application/json'
-      }).catch(err => console.error('[hammer-api] Semantic data write error:', err.message));
+      }).catch(err => logger.error('[hammer-api] Semantic data write error:', err.message));
     }
 
     const file = gcs.bucket(BUCKET_NAME).file(objectPath);
@@ -343,9 +355,9 @@ app.post('/capture', requireAuth('user'), requireMultipart, (req, res, next) => 
         const jsonFile = gcs.bucket(BUCKET_NAME).file(jsonPath);
         jsonFile.save(JSON.stringify(parsed), {
           contentType: 'application/json'
-        }).catch(err => console.error('[hammer-api] Semantic data write error:', err.message));
+        }).catch(err => logger.error('[hammer-api] Semantic data write error:', err.message));
       } catch (e) {
-        console.error('[hammer-api] Could not parse semanticData');
+        logger.error('[hammer-api] Could not parse semanticData');
       }
     }
 
@@ -544,9 +556,9 @@ app.use(errorHandler);
 // ─ Start ──────────────────────────────────────────────────────────
 if (require.main === module) {
   app.listen(PORT, () => {
-    console.log(`[hammer-api] listening on :${PORT}`);
-    console.log(`[hammer-api] GCS_BUCKET=${BUCKET_NAME || '(not set)'}`);
-    console.log(`[hammer-api] EXTENSION_ID=${EXTENSION_ID || '(not set — CORS for extension disabled)'}`);
+    logger.info(`[hammer-api] listening on :${PORT}`);
+    logger.info(`[hammer-api] GCS_BUCKET=${BUCKET_NAME || '(not set)'}`);
+    logger.info(`[hammer-api] EXTENSION_ID=${EXTENSION_ID || '(not set — CORS for extension disabled)'}`);
   });
 }
 

@@ -1,5 +1,8 @@
 'use strict';
 
+const logger = require('../../lib/logger');
+
+
 const express = require('express');
 const { db } = require('../../lib/firestore');
 const { requireAnalyst } = require('../../middleware/requireAuth');
@@ -56,7 +59,7 @@ router.post('/reports/generate', requireAnalyst, analystReportLimiter, async (re
         'X-Internal-Secret': process.env.INTERNAL_SECRET || 'dev-secret'
       },
       body: JSON.stringify({ reportId, projectId, reportType, dateRange })
-    }).catch(err => console.error('[Reports] Failed to trigger worker:', err));
+    }).catch(err => logger.error('[Reports] Failed to trigger worker:', err));
 
     return res.status(202).json({ reportId, status: 'queued' });
   } catch (err) {

@@ -1,5 +1,8 @@
 'use strict';
 
+const logger = require('../../lib/logger');
+
+
 const express = require('express');
 const crypto = require('crypto');
 const { db } = require('../../lib/firestore');
@@ -91,7 +94,7 @@ router.post('/workspaces/invites', requireAdmin, async (req, res, next) => {
     });
 
     // TODO: Actually dispatch an email using SendGrid / Postmark here
-    console.log(`[Invites] Created invite for ${email} to workspace ${workspaceId}. Token: ${token}`);
+    logger.info(`[Invites] Created invite for ${email} to workspace ${workspaceId}. Token: ${token}`);
 
     return res.status(201).json({ id: inviteRef.id, email, role, message: 'Invitation created' });
   } catch (err) {

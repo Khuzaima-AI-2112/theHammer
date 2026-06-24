@@ -1,5 +1,8 @@
 'use strict';
 
+const logger = require('../lib/logger');
+
+
 const { Storage } = require('@google-cloud/storage');
 const { GoogleGenAI } = require('@google/genai');
 const { db } = require('../lib/firestore');
@@ -60,7 +63,7 @@ async function generateStandardReport(reportId, projectId, reportType, dateRange
       const summaryText = resp.text;
       resultData.summary = summaryText;
     } catch (llmError) {
-      console.error(`[Reports Worker] LLM Error for ${reportId} using ${modelId}:`, llmError);
+      logger.error(`[Reports Worker] LLM Error for ${reportId} using ${modelId}:`, llmError);
       resultData.summary = "LLM generation failed. Showing raw metrics only.";
       resultData.llmError = llmError.message;
     }
@@ -82,9 +85,9 @@ async function generateStandardReport(reportId, projectId, reportType, dateRange
       updatedAt: new Date().toISOString()
     });
     
-    console.log(`[Reports Worker] Successfully generated ${reportId}`);
+    logger.info(`[Reports Worker] Successfully generated ${reportId}`);
   } catch (err) {
-    console.error(`[Reports Worker] Error generating ${reportId}:`, err);
+    logger.error(`[Reports Worker] Error generating ${reportId}:`, err);
     await reportRef.update({ status: 'error', updatedAt: new Date().toISOString() });
   }
 }
