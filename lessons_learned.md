@@ -331,8 +331,14 @@ Run this before starting any new sprint:
 **Rule going forward:**
 - **Never** use `curl` against the metadata server to generate identity tokens in a CI/CD pipeline if you are using a custom service account.
 - Instead, grant the custom service account the `roles/iam.serviceAccountTokenCreator` role globally, and explicitly command `gcloud` to impersonate it:
-  ```bash
   TOKEN=$(gcloud auth print-identity-token \
     --impersonate-service-account="$SA_EMAIL" \
     --audiences="$URL" --include-email)
-  ```
+
+### 28. Frontend Authentication Pages Cannot Reside on the Backend API URL
+
+**What happened:** When building the Chrome extension's OAuth login flow, the sign-in URL was derived by simply appending `/auth-ext.html` to the `cloudRunUrl` setting (which points to the backend API, `https://thehammer-backend-.../api`). Users who clicked "Sign In" were met with a silent failure and an invisible 404 error because the backend does not serve frontend HTML pages.
+**Root cause:** The extension conflated the *Backend API URL* (where it sends data) with the *Portal URL* (where the frontend authentication UI is hosted). The `auth-ext.html` file lives in the Portal, not the Backend.
+**Rule going forward:**
+- Explicitly separate `BACKEND_API_URL` and `PORTAL_URL` constants in any architecture where the frontend and backend are deployed as distinct services. 
+- Never attempt to derive an HTML auth flow URL from a REST API URL.
