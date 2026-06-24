@@ -357,3 +357,40 @@ Run this before starting any new sprint:
     -webkit-backdrop-filter: blur(16px);
   }
   ```
+
+### 30. Internal Worker Endpoints Must Be Authenticated
+
+**What happened:** During the SRE audit, `/worker/reports` and `/worker/ocr` (which trigger Vertex AI inference) were found to have zero authentication — only a rate limiter. Any caller who knew the Cloud Run URL could trigger unbounded AI spend.
+**Root cause:** Worker endpoints were added quickly as internal fire-and-forget triggers. The assumption was "nobody knows the URL," which is security by obscurity, not a real control.
+**Rule going forward:**
+- All internal trigger endpoints must use `requireAdmin` middleware, even if they are intended to be called only by other internal services.
+- For service-to-service calls (e.g., a Cloud Task calling the worker), use a shared internal secret header verified against Secret Manager, or use Google-signed OIDC tokens.
+
+---
+
+### 31. Never Include `localhost` Unconditionally in a Production CORS Allowlist
+
+**What happened:** `http://localhost:3000` was hardcoded in the `ALLOWED_ORIGINS` array in `backend/src/index.js` without any environment gate. In production, this would allow any attacker running a local dev server to issue credentialed cross-origin requests to the live API.
+**Root cause:** The origin was added during initial local development and never guarded before going to production.
+**Rule going forward:**
+- Always gate local dev origins behind `process.env.NODE_ENV !== 'production'`:
+  ```javascript
+  ...(process.env.NODE_ENV !== 'production' ? ['http://localhost:3000'] : []),
+  ```
+- Treat the CORS allowlist as a security boundary, not a convenience list.
+
+---
+
+### 32. SSRF Risk in Server-Side Webhook Dispatch
+
+**What happened:** The `dispatchWebhook()` function read a `webhookUrl` from a Firestore project document and passed it directly to `fetch()`. An admin could set this to `http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token` to steal the service account's access token via SSRF.
+**Root cause:** Admin-controlled string input was used directly as a network target without validation.
+**Rule going forward:**
+- Any URL used in a server-side `fetch()` that originates from user/admin input must be validated before use.
+- Block private IP ranges (RFC 1918), loopback, link-local, and named metadata endpoints:
+  ```javascript
+  const PRIVATE_IP_RE = /^(10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.|192\.168\.|127\.|169\.254\.|::1$|fc00:|fd)/;
+  if (parsed.protocol !== 'https:' || PRIVATE_IP_RE.test(parsed.hostname)) {
+    // reject
+  }
+  ```
