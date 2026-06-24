@@ -378,18 +378,8 @@ app.post('/session-events', requireAuth('user'), async (req, res, next) => {
       return res.status(403).json({ error: 'Forbidden: Project not found or belongs to another workspace' });
     }
     
-    // Resolve user from X-Api-Key if possible
-    let resolvedUserId = null;
-    try {
-      const rawKey = req.headers['x-api-key'];
-      if (rawKey) {
-        const keyHash = sha256(rawKey);
-        const keySnap = await db.collection('api_keys').where('keyHash', '==', keyHash).where('isActive', '==', true).limit(1).get();
-        if (!keySnap.empty) {
-          resolvedUserId = keySnap.docs[0].data().userId;
-        }
-      }
-    } catch(err) {}
+    // Identity is guaranteed by requireAuth middleware
+    const resolvedUserId = req.hammerUser.uid;
 
     // Calculate trueActiveMs (Duration - any inactivity). We will do simple sessionLength for now,
     // and if we fetch inactivity_events for this session, subtract it.
@@ -484,7 +474,6 @@ app.post('/inactivity-events', requireAuth('user'), async (req, res, next) => {
 // Admin routers (Sprint 5)
 // All route-level auth is handled inside each router via requireRole().
 // ─────────────────────────────────────────────────────────────────
-module.exports = { app, sanitize, buildObjectPath, sha256, analystReportLimiter, videoExportLimiter };
 
 app.use('/',       require('./routes/admin/me'));
 app.use('/admin',  require('./routes/admin/projects'));
@@ -537,3 +526,5 @@ if (require.main === module) {
     console.log(`[hammer-api] EXTENSION_ID=${EXTENSION_ID || '(not set — CORS for extension disabled)'}`);
   });
 }
+
+module.exports = { app, sanitize, buildObjectPath, sha256, analystReportLimiter, videoExportLimiter };
