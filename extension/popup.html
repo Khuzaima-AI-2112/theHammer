@@ -1,186 +1,236 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>The Hammer</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
+    :root {
+      --color-bg: #0f0f0f;
+      --color-surface: rgba(22, 22, 22, 0.7);
+      --color-surface-solid: #161616;
+      --color-surface-offset: rgba(255, 255, 255, 0.05);
+      --color-border: rgba(255, 255, 255, 0.08);
+      --color-border-glow: rgba(249, 115, 22, 0.3);
+      --color-text: #e8e8e8;
+      --color-text-muted: #888888;
+      --color-primary: #f97316;
+      --color-primary-hover: #ea6c0a;
+      --color-primary-bg: rgba(249, 115, 22, 0.15);
+      --shadow-glow: 0 0 12px rgba(249, 115, 22, 0.2);
+    }
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      width: 320px;
+      width: 340px;
       padding: 16px;
-      font-family: system-ui, sans-serif;
+      font-family: 'Inter', system-ui, sans-serif;
       font-size: 14px;
-      color: #1a1a1a;
-      background: #f7f6f2;
+      color: var(--color-text);
+      background: radial-gradient(circle at 50% 0%, #1e1510 0%, var(--color-bg) 60%);
+      min-height: 400px;
+      overflow-x: hidden;
     }
-    h1 { font-size: 16px; font-weight: 700; margin-bottom: 10px; letter-spacing: -0.01em; }
+    
+    header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+    header img {
+      width: 24px;
+      height: 24px;
+      object-fit: contain;
+    }
+    header h1 {
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      background: linear-gradient(90deg, #fff, #bbb);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
 
-    /* ── Tabs (4.5) ── */
-    .tabs { display: flex; gap: 4px; margin-bottom: 12px; }
+    /* ── Tabs ── */
+    .tabs { display: flex; gap: 6px; margin-bottom: 16px; position: relative; }
     .tab-btn {
-      flex: 1; padding: 6px 0; border: 1px solid #ccc; border-radius: 6px;
-      background: #eee; font-size: 12px; font-weight: 600; cursor: pointer;
-      color: #555; transition: background 140ms;
+      flex: 1; padding: 8px 0; border: 1px solid var(--color-border); border-radius: 8px;
+      background: var(--color-surface); font-size: 12px; font-weight: 600; cursor: pointer;
+      color: var(--color-text-muted); transition: all 200ms ease;
+      backdrop-filter: blur(8px);
     }
-    .tab-btn.active { background: #01696f; color: #fff; border-color: #01696f; }
+    .tab-btn:hover { background: var(--color-surface-offset); color: var(--color-text); }
+    .tab-btn.active { 
+      background: var(--color-primary-bg); 
+      color: var(--color-primary); 
+      border-color: var(--color-border-glow);
+      box-shadow: var(--shadow-glow);
+    }
 
     /* ── Capture panel ── */
-    .field { margin-bottom: 10px; }
-    label { display: block; font-size: 12px; font-weight: 600; color: #555;
-            margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.04em; }
+    #capture-panel, #history-panel {
+      animation: fadeIn 300ms ease forwards;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .field { margin-bottom: 14px; }
+    label { 
+      display: block; font-size: 11px; font-weight: 600; color: var(--color-text-muted);
+      margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.05em; 
+    }
     select, input[type="text"], input[type="url"], input[type="password"], input[type="number"] {
-      width: 100%; padding: 6px 8px; border: 1px solid #ccc;
-      border-radius: 6px; font-size: 14px; background: #fff;
+      width: 100%; padding: 8px 10px; border: 1px solid var(--color-border);
+      border-radius: 8px; font-size: 13px; background: rgba(0,0,0,0.3); color: var(--color-text);
+      transition: all 200ms ease;
     }
-    select:focus, input:focus { outline: 2px solid #01696f; outline-offset: 1px; }
-    .row { display: flex; gap: 8px; margin-top: 14px; }
-    button {
-      flex: 1; padding: 8px 0; border: none; border-radius: 6px;
+    select:focus, input:focus { 
+      outline: none; border-color: var(--color-primary); box-shadow: var(--shadow-glow); background: #000;
+    }
+    
+    .row { display: flex; gap: 10px; margin-top: 20px; }
+    button.action-btn {
+      flex: 1; padding: 10px 0; border: 1px solid transparent; border-radius: 8px;
       font-size: 13px; font-weight: 600; cursor: pointer;
-      transition: background 140ms ease;
+      transition: all 200ms ease;
     }
-    #save-btn         { background: #e6e4df; color: #1a1a1a; }
-    #save-btn:hover   { background: #d4d1ca; }
-    #capture-btn      { background: #01696f; color: #fff; }
-    #capture-btn:hover { background: #0c4e54; }
+    #save-btn { 
+      background: var(--color-surface); color: var(--color-text); border-color: var(--color-border); 
+    }
+    #save-btn:hover { background: var(--color-surface-offset); }
+    
+    #capture-btn { 
+      background: linear-gradient(135deg, var(--color-primary), #d45f00); 
+      color: #fff; border: none; box-shadow: 0 4px 12px rgba(249,115,22,0.3);
+    }
+    #capture-btn:hover { 
+      transform: translateY(-1px); box-shadow: 0 6px 16px rgba(249,115,22,0.4);
+    }
+    #capture-btn:active { transform: translateY(1px); }
 
-    /* ── 5.16: Single-project label (shown instead of dropdown) ── */
     #project-single {
-      display: none; /* shown by JS when exactly 1 project */
-      padding: 6px 8px;
-      background: #e8f5f5;
-      border: 1px solid #b2d8d8;
-      border-radius: 6px;
-      font-size: 13px;
-      font-weight: 600;
-      color: #01696f;
+      display: none; padding: 8px 10px; background: var(--color-primary-bg);
+      border: 1px solid var(--color-border-glow); border-radius: 8px;
+      font-size: 13px; font-weight: 600; color: var(--color-primary);
     }
 
-    /* ── 4.3 Progress bar ── */
     #progress-wrap {
-      display: none;
-      margin-top: 8px;
-      height: 6px;
-      background: #ddd;
-      border-radius: 3px;
-      overflow: hidden;
+      display: none; margin-top: 12px; height: 4px; background: rgba(255,255,255,0.1);
+      border-radius: 2px; overflow: hidden;
     }
     #progress-bar {
-      height: 100%;
-      width: 0%;
-      background: #01696f;
-      border-radius: 3px;
-      transition: width 100ms linear;
+      height: 100%; width: 0%; background: var(--color-primary); border-radius: 2px;
+      transition: width 100ms linear; box-shadow: 0 0 8px var(--color-primary);
     }
 
-    .footer { margin-top: 12px; display: flex; justify-content: space-between; align-items: center; }
+    .footer { margin-top: 16px; display: flex; justify-content: space-between; align-items: center; border-top: 1px solid var(--color-border); padding-top: 12px; }
     #settings-toggle {
-      font-size: 11px; color: #01696f; text-decoration: none;
-      background: none; border: none; cursor: pointer; padding: 0;
+      font-size: 12px; color: var(--color-text-muted); text-decoration: none;
+      background: none; border: none; cursor: pointer; padding: 4px 8px; border-radius: 4px; transition: all 150ms;
     }
-    #settings-toggle:hover { text-decoration: underline; }
-    #status { margin-top: 10px; font-size: 12px; color: #555; min-height: 16px; text-align: center; }
+    #settings-toggle:hover { color: var(--color-text); background: var(--color-surface-offset); }
+    #status { margin-top: 12px; font-size: 12px; color: var(--color-text-muted); min-height: 16px; text-align: center; }
 
-    /* ── Logged out state (Welcome) ── */
-    #welcome-screen { display: none; text-align: center; padding: 20px 10px; }
-    #welcome-screen h2 { font-size: 16px; margin-bottom: 8px; color: #01696f; }
-    #welcome-screen p { font-size: 13px; color: #555; margin-bottom: 20px; line-height: 1.4; }
-    #welcome-signin-btn { width: 100%; background: #01696f; color: #fff; padding: 10px 0; font-size: 14px; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; transition: background 140ms ease; }
-    #welcome-signin-btn:hover { background: #0c4e54; }
+    /* ── Logged out state ── */
+    #welcome-screen { display: none; text-align: center; padding: 30px 10px; }
+    #welcome-screen h2 { font-size: 16px; margin-bottom: 12px; color: var(--color-primary); }
+    #welcome-screen p { font-size: 13px; color: var(--color-text-muted); margin-bottom: 24px; line-height: 1.5; }
+    #welcome-signin-btn { 
+      width: 100%; background: linear-gradient(135deg, var(--color-primary), #d45f00);
+      color: #fff; padding: 10px 0; font-size: 14px; border: none; border-radius: 8px; 
+      cursor: pointer; font-weight: 600; transition: all 200ms ease; box-shadow: 0 4px 12px rgba(249,115,22,0.3);
+    }
+    #welcome-signin-btn:hover { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(249,115,22,0.4); }
 
-    /* ── Settings panel (Overlay Modal) ── */
+    /* ── Settings panel (Glassmorphism Overlay Modal) ── */
     #settings-panel {
       display: none; position: absolute; top: 0; left: 0; right: 0; bottom: 0;
-      background: rgba(247, 246, 242, 0.96); padding: 20px; z-index: 100;
-      backdrop-filter: blur(2px); overflow-y: auto; border: none; border-radius: 0; margin-top: 0;
+      background: rgba(15, 15, 15, 0.75); padding: 20px; z-index: 100;
+      backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(255,255,255,0.05); overflow-y: auto;
+      animation: scaleIn 250ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    }
+    @keyframes scaleIn {
+      from { opacity: 0; transform: scale(0.98); }
+      to { opacity: 1; transform: scale(1); }
     }
     #settings-panel.open { display: block; }
     #settings-panel h2 {
       font-size: 14px; font-weight: 700; text-transform: uppercase;
-      letter-spacing: 0.05em; color: #01696f; margin-bottom: 12px; border-bottom: 1px solid #ccc; padding-bottom: 6px;
+      letter-spacing: 0.05em; color: var(--color-primary); margin-bottom: 16px; 
+      border-bottom: 1px solid var(--color-border); padding-bottom: 8px;
     }
-    #settings-panel .field { margin-bottom: 12px; }
-    #settings-panel label { font-size: 11px; }
-    #settings-panel input[type="text"],
-    #settings-panel input[type="url"],
-    #settings-panel input[type="password"],
-    #settings-panel input[type="number"] { font-size: 13px; }
-    #settings-save-btn {
-      width: 100%; padding: 8px 0; background: #01696f; color: #fff;
-      border: none; border-radius: 6px; font-size: 13px; font-weight: 600;
-      cursor: pointer; margin-top: 8px;
+    #settings-save-btn, #open-admin-btn, #auth-login-btn {
+      width: 100%; padding: 10px 0; border: 1px solid transparent; border-radius: 8px;
+      font-size: 13px; font-weight: 600; cursor: pointer; transition: all 200ms ease;
     }
-    #settings-save-btn:hover { background: #0c4e54; }
-    #open-admin-btn {
-      width: 100%; padding: 8px 0; background: #e6e4df; color: #1a1a1a;
-      border: none; border-radius: 6px; font-size: 13px; font-weight: 600;
-      cursor: pointer; margin-top: 4px; margin-bottom: 12px;
-    }
-    #open-admin-btn:hover { background: #d4d1ca; }
+    #auth-login-btn { background: var(--color-surface); color: var(--color-text); border-color: var(--color-border); }
+    #auth-login-btn:hover { background: var(--color-surface-offset); }
+    #settings-save-btn { background: var(--color-primary); color: #fff; margin-top: 12px; }
+    #settings-save-btn:hover { background: var(--color-primary-hover); }
+    #open-admin-btn { background: var(--color-surface); color: var(--color-text); border-color: var(--color-border); margin-bottom: 16px; }
+    #open-admin-btn:hover { background: var(--color-surface-offset); }
 
-    /* ── 4.5 History panel ── */
-    #history-panel { display: none; margin-top: 4px; }
-    .history-empty { font-size: 12px; color: #999; text-align: center; padding: 20px 0; }
+    /* ── History panel ── */
+    #history-panel { display: none; margin-top: 8px; }
+    .history-empty { font-size: 13px; color: var(--color-text-muted); text-align: center; padding: 30px 0; }
     .history-row {
-      padding: 6px 0;
-      border-bottom: 1px solid #eee;
-      display: flex; flex-direction: column; gap: 2px;
+      padding: 10px 12px; margin-bottom: 8px; background: var(--color-surface);
+      border: 1px solid var(--color-border); border-radius: 8px;
+      display: flex; flex-direction: column; gap: 4px;
+      transition: all 150ms ease; cursor: pointer;
     }
-    .history-row:last-child { border-bottom: none; }
+    .history-row:hover { background: var(--color-surface-offset); border-color: rgba(255,255,255,0.15); transform: translateY(-1px); }
     .history-path {
-      font-size: 11px; color: #1a1a1a;
-      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-      max-width: 288px;
+      font-size: 12px; color: var(--color-text); font-family: monospace;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 288px;
     }
-    .history-meta { font-size: 10px; color: #999; }
+    .history-meta { font-size: 11px; color: var(--color-text-muted); }
 
-    /* ── Inactivity Modal (6.5) ── */
+    /* ── Inactivity Modal ── */
     #inactivity-modal {
-      display: none;
-      position: absolute; top: 0; left: 0; right: 0; bottom: 0;
-      background: rgba(0, 0, 0, 0.5);
-      z-index: 1000;
-      justify-content: center; align-items: center;
-      padding: 16px;
+      display: none; position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0, 0, 0, 0.7); backdrop-filter: blur(4px); z-index: 1000;
+      justify-content: center; align-items: center; padding: 20px;
     }
-    #inactivity-modal.open { display: flex; }
+    #inactivity-modal.open { display: flex; animation: fadeIn 200ms; }
     .modal-content {
-      background: #fff; border-radius: 8px; padding: 16px;
-      text-align: center; width: 100%;
+      background: var(--color-surface-solid); border: 1px solid var(--color-border);
+      border-radius: 12px; padding: 20px; text-align: center; width: 100%; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
     }
-    .modal-content h3 { font-size: 14px; font-weight: 700; color: #01696f; margin-bottom: 8px; }
-    .modal-content p { font-size: 12px; color: #555; margin-bottom: 16px; line-height: 1.4; }
-    .modal-actions { display: flex; gap: 8px; }
-    .modal-actions button { flex: 1; padding: 8px 0; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; transition: background 140ms ease; }
-    #btn-snooze { background: #e6e4df; color: #1a1a1a; }
-    #btn-snooze:hover { background: #d4d1ca; }
-    #btn-capture-now { background: #01696f; color: #fff; }
-    #btn-capture-now:hover { background: #0c4e54; }
+    .modal-content h3 { font-size: 16px; font-weight: 700; color: var(--color-primary); margin-bottom: 10px; }
+    .modal-content p { font-size: 13px; color: var(--color-text); margin-bottom: 20px; line-height: 1.5; }
+    .modal-actions { display: flex; gap: 10px; }
+    #btn-snooze { background: transparent; color: var(--color-text); border: 1px solid var(--color-border); flex: 1; padding: 10px; border-radius: 8px; font-weight:600; cursor:pointer; }
+    #btn-snooze:hover { background: var(--color-surface-offset); }
+    #btn-capture-now { background: var(--color-primary); color: #fff; border: none; flex: 1; padding: 10px; border-radius: 8px; font-weight:600; cursor:pointer; }
+    #btn-capture-now:hover { background: var(--color-primary-hover); }
   </style>
 </head>
 <body>
-  <h1>🔨 The Hammer</h1>
+  <header>
+    <img src="icons/hammer-logo.png" alt="The Hammer Logo" />
+    <h1>The Hammer</h1>
+  </header>
 
-  <!-- 4.5: tabs -->
   <div class="tabs">
     <button class="tab-btn active" id="tab-capture">Capture</button>
     <button class="tab-btn" id="tab-history">History</button>
   </div>
 
-  <!-- Capture panel -->
   <div id="capture-panel">
-
-    <!-- Logged out state -->
     <div id="welcome-screen">
       <h2>Welcome to The Hammer</h2>
       <p>Please sign in to start capturing evidence for your projects.</p>
       <button id="welcome-signin-btn">Sign In</button>
     </div>
 
-    <!-- Logged in controls -->
     <div id="capture-controls">
-      <!-- 5.16: Project field -->
       <div class="field" id="project-field">
         <label for="project-select">Project</label>
         <div id="project-dropdown">
@@ -189,7 +239,6 @@
         <div id="project-single" aria-live="polite"></div>
       </div>
 
-      <!-- Stage dropdown -->
       <div class="field">
         <label for="stage-select">Stage</label>
         <select id="stage-select">
@@ -206,24 +255,22 @@
       </div>
 
       <div class="row">
-        <button id="save-btn">Save</button>
-        <button id="capture-btn">Capture Now</button>
+        <button id="save-btn" class="action-btn">Save</button>
+        <button id="capture-btn" class="action-btn">Capture Now</button>
       </div>
 
-      <!-- progress bar -->
       <div id="progress-wrap" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
         <div id="progress-bar"></div>
       </div>
     </div>
 
-    <!-- Settings panel -->
     <div id="settings-panel">
       <h2>Settings</h2>
       
       <div class="field">
         <label>Account</label>
-        <div id="auth-status-text" style="font-size: 12px; margin-bottom: 8px;">Not signed in</div>
-        <button id="auth-login-btn" style="width:100%; padding: 6px 0; background: #e6e4df; border:none; border-radius:4px; cursor:pointer;">Sign In</button>
+        <div id="auth-status-text" style="font-size: 13px; margin-bottom: 10px; color: var(--color-text);">Not signed in</div>
+        <button id="auth-login-btn">Sign In</button>
       </div>
       <button id="open-admin-btn">Open Admin Portal</button>
 
@@ -236,8 +283,8 @@
         <input id="max-size-input" type="number" placeholder="—" min="1" max="50" readonly />
       </div>
       <div class="field" style="display:flex;align-items:center;gap:8px;">
-        <input id="notify-input" type="checkbox" style="width:auto" />
-        <label for="notify-input" style="text-transform:none;font-size:12px;margin-bottom:0">Show upload notifications</label>
+        <input id="notify-input" type="checkbox" style="width:16px; height:16px;" />
+        <label for="notify-input" style="text-transform:none;font-size:13px;margin-bottom:0">Show upload notifications</label>
       </div>
       <button id="settings-save-btn">Close Settings</button>
     </div>
@@ -249,12 +296,10 @@
     </div>
   </div>
 
-  <!-- 4.5: history panel -->
   <div id="history-panel">
     <div id="history-list"></div>
   </div>
 
-  <!-- Inactivity Modal (6.5) -->
   <div id="inactivity-modal">
     <div class="modal-content">
       <h3>Are you still there?</h3>
@@ -266,7 +311,6 @@
     </div>
   </div>
 
-  <!-- MV3: no inline scripts -->
   <script src="popup.js"></script>
 </body>
 </html>
