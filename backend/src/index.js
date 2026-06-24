@@ -162,8 +162,9 @@ function requireMultipart(req, res, next) {
 
 const { db } = require('./lib/firestore');
 
+// Returns null on success, error message string on failure
 async function firestoreWrite(objectPath, fields) {
-  if (!db) return;
+  if (!db) return 'Firestore not initialized';
   try {
     const docId = encodeURIComponent(objectPath);
     await db.collection('uploads').doc(docId).set(
@@ -182,9 +183,24 @@ async function firestoreWrite(objectPath, fields) {
       { merge: false }
     );
     console.log('[hammer-api] Firestore write ✓ | doc:', docId);
+    return null;
   } catch (err) {
-    console.error('[hammer-api] Firestore write error (non-fatal):', err.message);
+    console.error('[hammer-api] Firestore write error:', err.message);
+    return err.message;
   }
+}
+
+// ── SSRF guard: only allow https:// to non-private addresses ──────
+const PRIVATE_IP_RE = /^(10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.|192\.168\.|127\.|169\.254\.|::1$|fc00:|fd)/;
+
+function validateWebhookUrl(raw) {
+  let parsed;
+  try { parsed = new URL(raw); } catch (_) { return 'Invalid URL'; }
+  if (parsed.protocol !== 'https:') return 'Webhook URL must use https://';
+  const host = parsed.hostname;
+  if (PRIVATE_IP_RE.test(host)) return 'Webhook URL resolves to a private/reserved address';
+  if (host === 'metadata.google.internal') return 'Webhook URL targets GCP metadata server';
+  return null; // valid
 }
 
 async function dispatchWebhook(projectId, payload) {
@@ -193,6 +209,11 @@ async function dispatchWebhook(projectId, payload) {
     if (snap.exists) {
       const p = snap.data();
       if (p.webhookUrl) {
+        const ssrfErr = validateWebhookUrl(p.webhookUrl);
+        if (ssrfErr) {
+          console.error('[hammer-api] Webhook blocked (SSRF):', ssrfErr, '| url:', p.webhookUrl);
+          return;
+        }
         fetch(p.webhookUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -328,7 +349,7 @@ app.post('/capture', requireAuth('user'), requireMultipart, (req, res, next) => 
       }
     }
 
-    await firestoreWrite(objectPath, {
+    const firestoreErr = await firestoreWrite(objectPath, {
       path: objectPath, bucket: BUCKET_NAME, size: req.file.size,
       projectId: safeProject, userId: safeUser, tool: safeTool,
       tabUrl: safeTabUrl, uploadedAt, hasSemanticData
@@ -352,7 +373,9 @@ app.post('/capture', requireAuth('user'), requireMultipart, (req, res, next) => 
       }]
     });
 
-    return res.json({ success: true, path: objectPath, size: req.file.size, readUrl });
+    const resp = { success: true, path: objectPath, size: req.file.size, readUrl };
+    if (firestoreErr) resp.warning = `Metadata write failed: ${firestoreErr}`;
+    return res.json(resp);
   } catch (err) {
     return next(err);
   }

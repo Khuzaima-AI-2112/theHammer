@@ -2,7 +2,7 @@
  * Sprint 5.2–5.5  —  /admin/projects  CRUD
  *
  * POST   /admin/projects              → 5.2 create project
- * GET    /admin/projects              → 5.3 list projects
+ * GET    /admin/projects              → 5.3 list projects (paginated, 100/page)
  * GET    /admin/projects/:id          → 5.4 get single project
  * PATCH  /admin/projects/:id          → 5.4 rename project
  * DELETE /admin/projects/:id          → 5.5 delete project + memberships (chunked batch)
@@ -15,6 +15,9 @@
  * The field is kept consistent transactionally by tasks 5.6 and 5.7 (POST/DELETE
  * /members). This is architecturally superior to a per-project count() RPC on
  * every list call (avoids N extra reads). Recorded per Guardrail 6 / Lesson 7.
+ *
+ * SRE Audit (2026-06-23): Added cursor-based pagination (limit 100) to GET
+ * /admin/projects to prevent OOM on large workspaces.
  */
 
 'use strict';
@@ -69,12 +72,24 @@ router.post('/projects', requireAdmin, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// 5.3  GET /admin/projects
+// 5.3  GET /admin/projects — paginated (max 100 per page)
+// Supports ?cursor= for next-page token (pass the last project ID).
 router.get('/projects', requireAdmin, async (req, res, next) => {
   try {
-    const snap = await db.collection('projects').where('workspaceId', '==', req.hammerUser.workspaceId).orderBy('createdAt', 'desc').get();
-    const projects = snap.docs.map(serializeDoc);
-    return res.json({ projects, total: projects.length });
+    const PAGE_SIZE = 100;
+    let query = db.collection('projects')
+      .where('workspaceId', '==', req.hammerUser.workspaceId)
+      .orderBy('createdAt', 'desc');
+    if (req.query.cursor) {
+      const cursorSnap = await db.collection('projects').doc(req.query.cursor).get();
+      if (cursorSnap.exists) query = query.startAfter(cursorSnap);
+    }
+    const snap = await query.limit(PAGE_SIZE + 1).get();
+    const hasMore = snap.docs.length > PAGE_SIZE;
+    const docs = hasMore ? snap.docs.slice(0, PAGE_SIZE) : snap.docs;
+    const projects = docs.map(serializeDoc);
+    const nextCursor = hasMore ? docs[docs.length - 1].id : null;
+    return res.json({ projects, total: projects.length, nextCursor });
   } catch (err) { next(err); }
 });
 

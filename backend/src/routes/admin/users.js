@@ -56,19 +56,27 @@ function serializeMembership(snap) {
 function nowISO() { return new Date().toISOString(); }
 
 // ─── GET /admin/users ──────────────────────────────────────────────────────
-// Returns all users ordered by email asc.
-// Optional ?role= filter — uses Firestore query (composite index on role+email).
+// Returns up to 100 users per page, ordered by email asc.
+// Supports ?role= filter and ?cursor= for next-page token.
 router.get('/users', requireAdmin, async (req, res, next) => {
   try {
+    const PAGE_SIZE = 100;
     let query = db.collection('users').orderBy('email', 'asc');
     if (req.query.role && VALID_ROLES.includes(req.query.role)) {
       query = db.collection('users')
         .where('role', '==', req.query.role)
         .orderBy('email', 'asc');
     }
-    const snap  = await query.get();
-    const users = snap.docs.map(serializeUser);
-    return res.json({ users, total: users.length });
+    if (req.query.cursor) {
+      const cursorSnap = await db.collection('users').doc(req.query.cursor).get();
+      if (cursorSnap.exists) query = query.startAfter(cursorSnap);
+    }
+    const snap  = await query.limit(PAGE_SIZE + 1).get();
+    const hasMore = snap.docs.length > PAGE_SIZE;
+    const docs  = hasMore ? snap.docs.slice(0, PAGE_SIZE) : snap.docs;
+    const users = docs.map(serializeUser);
+    const nextCursor = hasMore ? docs[docs.length - 1].id : null;
+    return res.json({ users, total: users.length, nextCursor });
   } catch (err) { next(err); }
 });
 
