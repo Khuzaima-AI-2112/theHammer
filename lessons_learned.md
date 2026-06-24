@@ -342,3 +342,18 @@ Run this before starting any new sprint:
 **Rule going forward:**
 - Explicitly separate `BACKEND_API_URL` and `PORTAL_URL` constants in any architecture where the frontend and backend are deployed as distinct services. 
 - Never attempt to derive an HTML auth flow URL from a REST API URL.
+
+### 29. Dynamic Glassmorphism and CSS Custom Properties
+
+**What happened:** When upgrading the Admin Portal to a premium glassmorphism aesthetic, we initially attempted to use `rgba(22, 22, 22, 0.7)` for the `.topbar` and `.sidebar` backgrounds. However, this hardcoded RGBA value broke the UI when switching between Light and Dark themes, as it forced a dark, semi-transparent background on a light surface.
+**Root cause:** Hardcoded transparency values do not respect dynamic theme tokens (CSS Custom Properties like `--color-surface`). Attempting to manually declare `rgba` variants for every theme token causes CSS bloat and maintenance overhead.
+**Rule going forward:**
+- Use the modern `color-mix()` CSS function to derive translucent variations directly from existing CSS variables.
+- Example for applying glassmorphism that automatically adapts to both Light and Dark themes:
+  ```css
+  .glass-panel {
+    background: color-mix(in srgb, var(--color-surface) 80%, transparent);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+  }
+  ```
