@@ -27,6 +27,7 @@ const multer     = require('multer');
 const crypto     = require('crypto');
 const rateLimit  = require('express-rate-limit');
 const { Storage } = require('@google-cloud/storage');
+const collections = require('./lib/collections');
 
 const app  = express();
 const PORT = process.env.PORT || 8080;
@@ -73,33 +74,7 @@ app.use((req, res, next) => {
 });
 
 // ── Per-Role Rate Limiters ─────────────────────────────────────────
-const analystReportLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000, // 1 hour
-  max: 10, // 10 requests per hour
-  standardHeaders: true,
-  legacyHeaders: false,
-  keyGenerator: (req) => req.hammerUser?.id || req.ip,
-  handler: (_req, res, _next, options) => {
-    res.status(options.statusCode).json({
-      error: 'Analyst report rate limit exceeded (10/hr)',
-      retryAfter: Math.ceil(options.windowMs / 1000)
-    });
-  }
-});
-
-const videoExportLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000, // 1 hour
-  max: 5, // 5 requests per hour
-  standardHeaders: true,
-  legacyHeaders: false,
-  keyGenerator: (req) => req.hammerUser?.id || req.ip,
-  handler: (_req, res, _next, options) => {
-    res.status(options.statusCode).json({
-      error: 'Video export rate limit exceeded (5/hr)',
-      retryAfter: Math.ceil(options.windowMs / 1000)
-    });
-  }
-});
+const { analystReportLimiter, videoExportLimiter } = require('./middleware/rateLimiters');
 
 app.use(express.json());
 
@@ -170,7 +145,7 @@ async function firestoreWrite(objectPath, fields) {
   if (!db) return 'Firestore not initialized';
   try {
     const docId = encodeURIComponent(objectPath);
-    await db.collection('uploads').doc(docId).set(
+    await db.collection(collections.UPLOADS).doc(docId).set(
       {
         path:       fields.path,
         bucket:     fields.bucket,
@@ -208,7 +183,7 @@ function validateWebhookUrl(raw) {
 
 async function dispatchWebhook(projectId, payload) {
   try {
-    const snap = await db.collection('projects').doc(projectId).get();
+    const snap = await db.collection(collections.PROJECTS).doc(projectId).get();
     if (snap.exists) {
       const p = snap.data();
       if (p.webhookUrl) {
@@ -237,7 +212,7 @@ async function dispatchWebhook(projectId, payload) {
 app.get('/health', async (_req, res) => {
   try {
     if (!db) throw new Error('Firestore db object missing');
-    await db.collection('projects').limit(1).get();
+    await db.collection(collections.PROJECTS).limit(1).get();
     res.json({ status: 'ok', firestore: 'connected' });
   } catch (err) {
     logger.error('[hammer-api] Health check failed:', err.message);
@@ -248,21 +223,20 @@ app.get('/health', async (_req, res) => {
 // ─ POST /upload-url ───────────────────────────────────────────────
 app.post('/upload-url', requireAuth('user'), async (req, res, next) => {
   try {
-    const { project, tool, name } = req.body || {};
+    const { project, tool } = req.body || {};
     const missing = [];
     if (!project) missing.push('project');
     if (!tool)    missing.push('tool');
-    if (!name)    missing.push('name');
     if (missing.length > 0) return res.status(400).json({ error: 'Missing required fields', missing });
     if (!BUCKET_NAME) return res.status(500).json({ error: 'Server misconfiguration: GCS_BUCKET not set' });
 
     // Enforce Tenant Isolation
-    const projSnap = await db.collection('projects').doc(project).get();
+    const projSnap = await db.collection(collections.PROJECTS).doc(project).get();
     if (!projSnap.exists || projSnap.data().workspaceId !== req.hammerUser.workspaceId) {
       return res.status(403).json({ error: 'Forbidden: Project not found or belongs to another workspace' });
     }
 
-    const objectPath = buildObjectPath(sanitize(project), sanitize(name), sanitize(tool, 32));
+    const objectPath = buildObjectPath(sanitize(project), req.hammerUser.id, sanitize(tool, 32));
     
     if (req.body.semanticData) {
       const jsonPath = objectPath.replace(/\.png$/, '.json');
@@ -289,7 +263,7 @@ app.post('/upload-url', requireAuth('user'), async (req, res, next) => {
         title: 'Capture Details',
         fields: [
           { title: 'Tool', value: tool || 'Unknown', short: true },
-          { title: 'Name', value: name || 'Unknown', short: true },
+          { title: 'User', value: req.hammerUser.displayName || req.hammerUser.email || req.hammerUser.id, short: true },
           { title: 'Link', value: readUrl, short: false }
         ]
       }]
@@ -316,23 +290,22 @@ app.post('/capture', requireAuth('user'), requireMultipart, (req, res, next) => 
   });
 }, async (req, res, next) => {
   try {
-    const { projectId, userId, tool, tabUrl } = req.body || {};
+    const { projectId, tool, tabUrl } = req.body || {};
     const missing = [];
     if (!projectId) missing.push('projectId');
-    if (!userId)    missing.push('userId');
     if (missing.length > 0) return res.status(400).json({ error: 'Missing required fields', missing });
     if (!req.file)             return res.status(400).json({ error: 'Missing required field: file' });
     if (req.file.size === 0)   return res.status(400).json({ error: 'file must not be empty (0 bytes)' });
     if (!BUCKET_NAME) return res.status(500).json({ error: 'Server misconfiguration: GCS_BUCKET not set' });
 
     // Enforce Tenant Isolation
-    const projSnap = await db.collection('projects').doc(projectId).get();
+    const projSnap = await db.collection(collections.PROJECTS).doc(projectId).get();
     if (!projSnap.exists || projSnap.data().workspaceId !== req.hammerUser.workspaceId) {
       return res.status(403).json({ error: 'Forbidden: Project not found or belongs to another workspace' });
     }
 
     const safeProject  = sanitize(projectId);
-    const safeUser     = sanitize(userId);
+    const safeUser     = req.hammerUser.id;
     const safeTool     = tool   ? sanitize(tool, 32)    : '';
     const safeTabUrl   = tabUrl ? tabUrl.slice(0, 500)  : '';
     const objectPath   = buildObjectPath(safeProject, safeUser, safeTool);
@@ -426,7 +399,7 @@ app.post('/session-events', requireAuth('user'), async (req, res, next) => {
       
       // Fetch inactivity for this session to subtract
       try {
-        const inactSnap = await db.collection('inactivity_events')
+        const inactSnap = await db.collection(collections.INACTIVITY_EVENTS)
           .where('sessionId', '==', body.sessionId)
           .get();
         
@@ -445,7 +418,7 @@ app.post('/session-events', requireAuth('user'), async (req, res, next) => {
     }
 
     const docId = sanitize(body.sessionId, 64);
-    await db.collection('session_events').doc(docId).set({
+    await db.collection(collections.SESSION_EVENTS).doc(docId).set({
       sessionId: body.sessionId,
       projectId: safeProject,
       userId: resolvedUserId || null,
@@ -480,7 +453,7 @@ app.post('/inactivity-events', requireAuth('user'), async (req, res, next) => {
     if (missing.length > 0) return res.status(400).json({ error: 'Missing required fields', missing });
 
     // Enforce Tenant Isolation
-    const projSnap = await db.collection('projects').doc(sanitize(body.projectId)).get();
+    const projSnap = await db.collection(collections.PROJECTS).doc(sanitize(body.projectId)).get();
     if (!projSnap.exists || projSnap.data().workspaceId !== req.hammerUser.workspaceId) {
       return res.status(403).json({ error: 'Forbidden: Project not found or belongs to another workspace' });
     }
@@ -488,7 +461,7 @@ app.post('/inactivity-events', requireAuth('user'), async (req, res, next) => {
     const resolvedUserId = req.hammerUser.uid;
 
     const docId = sanitize(body.eventId, 64);
-    await db.collection('inactivity_events').doc(docId).set({
+    await db.collection(collections.INACTIVITY_EVENTS).doc(docId).set({
       eventId: body.eventId,
       sessionId: body.sessionId,
       projectId: sanitize(body.projectId),
@@ -534,13 +507,21 @@ const workerLimiter = rateLimit({
 const { generateStandardReport } = require('./worker/reportsWorker');
 const { generateOcrReport } = require('./worker/ocrWorker');
 
-app.post('/worker/reports', express.json(), workerLimiter, requireAdmin, (req, res) => {
+const requireWorkerAuth = (req, res, next) => {
+  const secret = req.headers['x-internal-secret'];
+  if (secret && secret === (process.env.INTERNAL_SECRET || 'dev-secret')) {
+    return next();
+  }
+  return requireAdmin(req, res, next);
+};
+
+app.post('/worker/reports', express.json(), workerLimiter, requireWorkerAuth, (req, res) => {
   const { reportId, projectId, reportType, dateRange } = req.body;
   generateStandardReport(reportId, projectId, reportType, dateRange);
   res.status(202).send();
 });
 
-app.post('/worker/ocr', express.json(), workerLimiter, requireAdmin, (req, res) => {
+app.post('/worker/ocr', express.json(), workerLimiter, requireWorkerAuth, (req, res) => {
   const { reportId, projectId, reportType, dateRange } = req.body;
   generateOcrReport(reportId, projectId, reportType, dateRange);
   res.status(202).send();

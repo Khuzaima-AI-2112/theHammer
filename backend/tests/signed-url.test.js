@@ -47,22 +47,24 @@ process.env.GCS_BUCKET = 'fake-bucket';
 
 const { db } = require('../src/lib/firestore');
 const { app, sanitize, buildObjectPath } = require('../src/index');
+const { clearDatabase, seedUser, seedProject } = require('./helpers/fixtures');
 
-const VALID_BODY   = { project: 'acme', tool: 'jira', name: 'alice' };
+const VALID_BODY   = { project: 'acme', tool: 'jira' };
 const VALID_HEADERS = { 'x-dev-user-email': 'user@signed.test' };
 
 beforeAll(async () => {
-  await db.collection('users').doc('signed-user-id').set({
-    email: 'user@signed.test', role: 'user', workspaceId: 'test-workspace'
+  await clearDatabase();
+  await seedUser('signed-user-id', {
+    email: 'user@signed.test',
+    role: 'user'
   });
-  await db.collection('projects').doc('acme').set({
-    workspaceId: 'test-workspace', name: 'acme'
+  await seedProject('acme', {
+    name: 'acme'
   });
 });
 
 afterAll(async () => {
-  await db.collection('users').doc('signed-user-id').delete();
-  await db.collection('projects').doc('acme').delete();
+  await clearDatabase();
 });
 
 // ─────────────────────────────────────────────────────────────────
@@ -93,7 +95,6 @@ describe('POST /upload-url — field validation (task 3.1)', () => {
   const cases = [
     { omit: 'project', label: 'missing project' },
     { omit: 'tool',    label: 'missing tool' },
-    { omit: 'name',    label: 'missing name' },
   ];
 
   cases.forEach(({ omit, label }) => {
@@ -111,14 +112,14 @@ describe('POST /upload-url — field validation (task 3.1)', () => {
     });
   });
 
-  test('400 lists all missing fields when all three are absent', async () => {
+  test('400 lists all missing fields when both are absent', async () => {
     const res = await request(app)
       .post('/upload-url')
       .set(VALID_HEADERS)
       .send({});
 
     expect(res.status).toBe(400);
-    expect(res.body.missing).toEqual(expect.arrayContaining(['project', 'tool', 'name']));
+    expect(res.body.missing).toEqual(expect.arrayContaining(['project', 'tool']));
   });
 });
 

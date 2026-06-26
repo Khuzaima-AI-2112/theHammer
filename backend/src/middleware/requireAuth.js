@@ -20,8 +20,9 @@ const logger = require('../lib/logger');
 
 const { getAuth } = require('firebase-admin/auth');
 const { db } = require('../lib/firestore');
-
-const ROLE_HIERARCHY = { admin: 4, analyst: 3, instructional_designer: 2, user: 1 };
+const { ROLE_HIERARCHY } = require('../lib/roles');
+const { USER_PREFERENCES } = require('../lib/defaults');
+const collections = require('../lib/collections');
 
 function requireAuth(minRole) {
   return async (req, res, next) => {
@@ -30,7 +31,7 @@ function requireAuth(minRole) {
       // Local dev fallback
       if (process.env.NODE_ENV !== 'production' && req.headers['x-dev-user-email']) {
         try {
-          const snap = await db.collection('users')
+          const snap = await db.collection(collections.USERS)
             .where('email', '==', req.headers['x-dev-user-email'].toLowerCase())
             .limit(1).get();
           if (!snap.empty) {
@@ -41,7 +42,18 @@ function requireAuth(minRole) {
             if (userLevel < minLevel) {
               return res.status(403).json({ error: 'forbidden: insufficient role', required: minRole, actual: d.role });
             }
-            req.hammerUser = { id: doc.id, uid: doc.id, email: d.email, role: d.role, workspaceId: d.workspaceId, displayName: d.displayName };
+            req.hammerUser = {
+              id: doc.id,
+              uid: doc.id,
+              email: d.email,
+              role: d.role,
+              workspaceId: d.workspaceId,
+              displayName: d.displayName,
+              inactivityPromptEnabled: d.inactivityPromptEnabled ?? USER_PREFERENCES.inactivityPromptEnabled,
+              inactivityTimerSeconds: d.inactivityTimerSeconds ?? USER_PREFERENCES.inactivityTimerSeconds,
+              allowPreUploadBlur: d.allowPreUploadBlur ?? USER_PREFERENCES.allowPreUploadBlur,
+              instantClipboardLinks: d.instantClipboardLinks ?? USER_PREFERENCES.instantClipboardLinks,
+            };
             return next();
           }
         } catch (e) {
@@ -58,11 +70,11 @@ function requireAuth(minRole) {
 
       // Look up user by UID (assumes doc ID is UID, or query by uid field)
       // Since new signups will use UID as the document ID:
-      let userDoc = await db.collection('users').doc(uid).get();
+      let userDoc = await db.collection(collections.USERS).doc(uid).get();
       
       // Fallback: check by email if the document isn't keyed by UID yet
       if (!userDoc.exists && email) {
-        const snap = await db.collection('users').where('email', '==', email.toLowerCase()).limit(1).get();
+        const snap = await db.collection(collections.USERS).where('email', '==', email.toLowerCase()).limit(1).get();
         if (!snap.empty) {
           userDoc = snap.docs[0];
           // Optionally migrate the doc to UID or store UID here, but for now just use it.
@@ -92,6 +104,10 @@ function requireAuth(minRole) {
         role: d.role,
         workspaceId: d.workspaceId,
         displayName: d.displayName ?? null,
+        inactivityPromptEnabled: d.inactivityPromptEnabled ?? USER_PREFERENCES.inactivityPromptEnabled,
+        inactivityTimerSeconds: d.inactivityTimerSeconds ?? USER_PREFERENCES.inactivityTimerSeconds,
+        allowPreUploadBlur: d.allowPreUploadBlur ?? USER_PREFERENCES.allowPreUploadBlur,
+        instantClipboardLinks: d.instantClipboardLinks ?? USER_PREFERENCES.instantClipboardLinks,
       };
 
       next();

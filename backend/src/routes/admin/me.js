@@ -39,6 +39,8 @@ const express  = require('express');
 const { Timestamp } = require('firebase-admin/firestore');
 const { db }   = require('../../lib/firestore');
 const { requireAuth, requireAdmin } = require('../../middleware/requireAuth');
+const { CONFIG_DEFAULTS } = require('../../lib/defaults');
+const collections = require('../../lib/collections');
 
 const router = express.Router();
 
@@ -82,7 +84,7 @@ router.get('/me/projects', requireAuth('user'), async (req, res, next) => {
     const userId = req.hammerUser.id;
 
     // Fetch all memberships for this user
-    const membSnap = await db.collection('project_memberships')
+    const membSnap = await db.collection(collections.MEMBERSHIPS)
       .where('userId', '==', userId)
       .get();
 
@@ -93,7 +95,7 @@ router.get('/me/projects', requireAuth('user'), async (req, res, next) => {
     // Batch-fetch all project docs in a single getAll RPC
     const projectIds = membSnap.docs.map(d => d.data().projectId);
     const projectRefs = [...new Set(projectIds)].map(id =>
-      db.collection('projects').doc(id)
+      db.collection(collections.PROJECTS).doc(id)
     );
     const projectSnaps = await db.getAll(...projectRefs);
 
@@ -143,14 +145,6 @@ router.get('/me/projects', requireAuth('user'), async (req, res, next) => {
 //   schemaVersion        number
 // ─────────────────────────────────────────────────────────────────
 
-const CONFIG_DEFAULTS = {
-  retentionDays:         365,
-  maxFileSizeBytes:      10 * 1024 * 1024, // 10 MB
-  defaultCaptureQuality: 'png',
-  backendUrl:            'https://app.thehammer.io/api',
-  schemaVersion:         1,
-};
-
 const VALID_CAPTURE_QUALITY = ['png', 'webp'];
 
 function readConfig(d) {
@@ -168,7 +162,7 @@ function readConfig(d) {
 
 router.get('/config', requireAuth('user'), async (req, res, next) => {
   try {
-    const snap = await db.collection('config').doc('global').get();
+    const snap = await db.collection(collections.CONFIG).doc('global').get();
 
     let configData = { ...CONFIG_DEFAULTS, inactivityPromptEnabled: false, allowPreUploadBlur: false, instantClipboardLinks: false };
     if (snap.exists) {
@@ -259,7 +253,7 @@ router.patch('/config', requireAdmin, async (req, res, next) => {
     update.updatedAt     = new Date().toISOString();
     update.updatedBy     = req.hammerUser?.id ?? null;
 
-    const ref = db.collection('config').doc('global');
+    const ref = db.collection(collections.CONFIG).doc('global');
     await ref.set(update, { merge: true });
 
     const saved = await ref.get();

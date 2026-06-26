@@ -1,6 +1,6 @@
 steps:
   # ── 1. Run backend tests with Firestore emulator ────────────────────────────
-  - name: 'node:20-alpine'
+  - name: 'node:22-alpine'
     id: 'test'
     dir: 'backend'
     entrypoint: sh
@@ -84,11 +84,24 @@ steps:
       - '--set-env-vars'
       - 'NODE_ENV=production,GCS_BUCKET=thehammer-storage-2026,EXTENSION_ID=ndmbjlbmcdlmijglkfcelbiejmghiikm,ADMIN_ORIGIN=https://thehammer-portal-282689937365.northamerica-northeast1.run.app'
 
+  # ── 5a. Inject backend URL into Portal ──────────────────────────────────────
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'inject-backend-url'
+    waitFor: ['deploy-backend']
+    entrypoint: bash
+    args:
+      - '-c'
+      - |
+        set -euo pipefail
+        BACKEND_URL=$(gcloud run services describe thehammer-backend \
+          --region northamerica-northeast1 --format 'value(status.url)')
+        echo "Injecting backend URL: $$BACKEND_URL"
+        sed -i "s|__BACKEND_API_URL__|$$BACKEND_URL/api|g" portal/app.js
+
   # ── 6. Build portal image ───────────────────────────────────────────────────
-  # Runs in parallel with the backend build — only needs tests to pass.
   - name: 'gcr.io/cloud-builders/docker'
     id: 'build-portal'
-    waitFor: ['test']
+    waitFor: ['inject-backend-url']
     args:
       - 'build'
       - '-t'

@@ -3,6 +3,7 @@
 const express = require('express');
 const { db } = require('../../lib/firestore');
 const { requireAdmin } = require('../../middleware/requireAuth');
+const collections = require('../../lib/collections');
 
 const router = express.Router();
 
@@ -15,25 +16,25 @@ router.get('/dashboard/stats', requireAdmin, async (req, res, next) => {
     // For this implementation, we will use basic queries where possible, and aggregates for larger collections.
     
     // Active Projects (memberCount > 0)
-    const activeProjectsSnap = await db.collection('projects').where('memberCount', '>', 0).count().get();
+    const activeProjectsSnap = await db.collection(collections.PROJECTS).where('memberCount', '>', 0).count().get();
     
     // Pending Reports (status == 'queued' or 'processing')
-    const pendingReportsSnap = await db.collection('reports').where('status', 'in', ['queued', 'processing']).count().get();
+    const pendingReportsSnap = await db.collection(collections.REPORTS).where('status', 'in', ['queued', 'processing']).count().get();
     
     // Captures Today
-    const capturesTodaySnap = await db.collection('uploads').where('uploadedAt', '>=', startOfDay).count().get();
+    const capturesTodaySnap = await db.collection(collections.UPLOADS).where('uploadedAt', '>=', startOfDay).count().get();
 
     // Pending Exports (assuming we'll use an exports collection later, for now hardcode to 0 as it's Sprint 22 or we don't have it yet)
     let pendingExportsCount = 0;
     try {
-      const exportsSnap = await db.collection('exports').where('status', 'in', ['queued', 'processing']).count().get();
+      const exportsSnap = await db.collection(collections.EXPORTS).where('status', 'in', ['queued', 'processing']).count().get();
       pendingExportsCount = exportsSnap.data().count;
     } catch(err) {
       // Collection might not exist or be used yet
     }
 
     // Active Users Today
-    const activeUsersTodaySnap = await db.collection('users').where('lastActiveAt', '>=', startOfDay).count().get();
+    const activeUsersTodaySnap = await db.collection(collections.USERS).where('lastActiveAt', '>=', startOfDay).count().get();
 
     return res.json({
       activeProjects: activeProjectsSnap.data().count,

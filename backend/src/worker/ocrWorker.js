@@ -6,21 +6,12 @@ const logger = require('../lib/logger');
 const { Storage } = require('@google-cloud/storage');
 const { GoogleGenAI } = require('@google/genai');
 const { db } = require('../lib/firestore');
+const { getAIClient } = require('../lib/vertex');
+const collections = require('../lib/collections');
 const gcs = new Storage();
 
-const PROJECT_ID = process.env.GOOGLE_CLOUD_PROJECT || 'default-project';
-const LOCATION = 'us-central1';
-
-let aiClient = null;
-function getAIClient() {
-  if (!aiClient) {
-    aiClient = new GoogleGenAI({ vertexai: { project: PROJECT_ID, location: LOCATION } });
-  }
-  return aiClient;
-}
-
 async function generateOcrReport(reportId, projectId, reportType, dateRange) {
-  const reportRef = db.collection('reports').doc(reportId);
+  const reportRef = db.collection(collections.REPORTS).doc(reportId);
   try {
     await reportRef.update({ status: 'processing', updatedAt: new Date().toISOString() });
 

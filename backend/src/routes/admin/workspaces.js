@@ -7,6 +7,8 @@ const express = require('express');
 const crypto = require('crypto');
 const { db } = require('../../lib/firestore');
 const { requireAuth, requireAdmin } = require('../../middleware/requireAuth');
+const { VALID_ROLES } = require('../../lib/roles');
+const collections = require('../../lib/collections');
 
 const router = express.Router();
 
@@ -27,12 +29,12 @@ router.post('/workspaces', requireAuth('user'), async (req, res, next) => {
     const now = nowISO();
 
     // Prevent creating multiple workspaces for the same owner right now
-    const existingSnap = await db.collection('workspaces').where('ownerId', '==', userId).limit(1).get();
+    const existingSnap = await db.collection(collections.WORKSPACES).where('ownerId', '==', userId).limit(1).get();
     if (!existingSnap.empty) {
       return res.status(400).json({ error: 'User already owns a workspace' });
     }
 
-    const workspaceRef = await db.collection('workspaces').add({
+    const workspaceRef = await db.collection(collections.WORKSPACES).add({
       name,
       ownerId: userId,
       billingStatus: 'trial', // or 'active' depending on billing setup
@@ -41,7 +43,7 @@ router.post('/workspaces', requireAuth('user'), async (req, res, next) => {
     });
 
     // Update the user document to associate with this workspace and set them as admin
-    await db.collection('users').doc(userId).set({
+    await db.collection(collections.USERS).doc(userId).set({
       email: req.hammerUser.email,
       workspaceId: workspaceRef.id,
       role: 'admin',
@@ -65,8 +67,7 @@ router.post('/workspaces/invites', requireAdmin, async (req, res, next) => {
       return res.status(400).json({ error: 'Missing email or role' });
     }
 
-    const validRoles = ['admin', 'analyst', 'instructional_designer', 'user'];
-    if (!validRoles.includes(role)) {
+    if (!VALID_ROLES.includes(role)) {
       return res.status(400).json({ error: 'Invalid role' });
     }
 
@@ -82,7 +83,7 @@ router.post('/workspaces/invites', requireAdmin, async (req, res, next) => {
     // Expires in 7 days
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
 
-    const inviteRef = await db.collection('invitations').add({
+    const inviteRef = await db.collection(collections.INVITATIONS).add({
       workspaceId,
       email: email.toLowerCase(),
       role,
@@ -114,7 +115,7 @@ router.post('/workspaces/join', requireAuth('user'), async (req, res, next) => {
     const userId = req.hammerUser.uid;
     const userEmail = req.hammerUser.email;
 
-    const snap = await db.collection('invitations')
+    const snap = await db.collection(collections.INVITATIONS)
       .where('token', '==', token)
       .where('status', '==', 'pending')
       .limit(1)
@@ -145,7 +146,7 @@ router.post('/workspaces/join', requireAuth('user'), async (req, res, next) => {
     });
 
     // 2. Add user to workspace with specified role
-    await db.collection('users').doc(userId).set({
+    await db.collection(collections.USERS).doc(userId).set({
       email: userEmail,
       workspaceId: invite.workspaceId,
       role: invite.role,
@@ -165,7 +166,7 @@ router.post('/workspaces/join', requireAuth('user'), async (req, res, next) => {
 router.get('/workspaces/invites', requireAdmin, async (req, res, next) => {
   try {
     const workspaceId = req.hammerUser.workspaceId;
-    const snap = await db.collection('invitations')
+    const snap = await db.collection(collections.INVITATIONS)
       .where('workspaceId', '==', workspaceId)
       .where('status', '==', 'pending')
       .orderBy('createdAt', 'desc')

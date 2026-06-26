@@ -6,26 +6,19 @@ const logger = require('../lib/logger');
 const { Storage } = require('@google-cloud/storage');
 const { GoogleGenAI } = require('@google/genai');
 const { db } = require('../lib/firestore');
+const { getAIClient } = require('../lib/vertex');
+const collections = require('../lib/collections');
+const { CONFIG_DEFAULTS } = require('../lib/defaults');
 const gcs = new Storage();
-
-// Initialize Vertex with Cloud project and location
-const PROJECT_ID = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT || 'thehammer';
-const LOCATION = 'northamerica-northeast1'; // or us-central1
-let aiClient = null;
-
-function getAIClient() {
-  if (!aiClient) aiClient = new GoogleGenAI({ vertexai: { project: PROJECT_ID, location: LOCATION } });
-  return aiClient;
-}
 
 // This is a simplified MVP worker logic for generating standard reports
 async function generateStandardReport(reportId, projectId, reportType, dateRange) {
-  const reportRef = db.collection('reports').doc(reportId);
+  const reportRef = db.collection(collections.REPORTS).doc(reportId);
   try {
     await reportRef.update({ status: 'processing', updatedAt: new Date().toISOString() });
 
     // Fetch the project configuration to get the llmModel
-    const projectSnap = await db.collection('projects').doc(projectId).get();
+    const projectSnap = await db.collection(collections.PROJECTS).doc(projectId).get();
     const projectData = projectSnap.data() || {};
     const modelId = projectData.llmModel || 'gemini-1.5-flash';
 

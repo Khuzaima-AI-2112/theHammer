@@ -9,8 +9,7 @@
 //   5.17 — Admin-managed fields (cloudRunUrl, retention, maxSize) in the
 //          Settings panel are now always sourced from /config; they are never
 //          editable by the user (already read-only in HTML).
-//   5.17 — cloudRunUrlInput display value updated from storage after loadConfig
-//          resolves so the popup shows the authoritative URL.
+//   5.17 — Removed cloudRunUrlInput reference (admin-managed URL display removed from popup UI)
 //   5.17 — Fallback: if GET /config fails, cached values in storage are
 //          preserved and capture is not blocked (offline-safe).
 // Retained from Sprint 5.16:
@@ -343,7 +342,6 @@ async function loadConfig(apiKey) {
     await chrome.storage.local.set({ settings: updated });
 
     // Reflect in read-only display fields
-    if (updated.cloudRunUrl) cloudRunUrlInput.value = updated.cloudRunUrl;
     if (updated.retention)   retentionInput.value   = updated.retention;
     if (updated.maxSize)     maxSizeInput.value     = updated.maxSize;
 

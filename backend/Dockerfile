@@ -7,7 +7,7 @@
 #
 # Note: source is plain JS in src/ (no TypeScript build step).
 # dist/ deviation documented in lessons_learned.md item 6.
-FROM node:22-alpine
+FROM node:22-alpine@sha256:4d64b49e6c891c8fc821007cb1cdc6c0db7773110ac2c34bf2e6960adef62ed3
 WORKDIR /app
 COPY package*.json ./
 RUN npm install --omit=dev

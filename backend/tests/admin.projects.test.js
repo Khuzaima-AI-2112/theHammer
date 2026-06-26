@@ -12,6 +12,7 @@ process.env.NODE_ENV                = 'test';
 process.env.FIRESTORE_EMULATOR_HOST = process.env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8080';
 
 const request = require('supertest');
+const { clearDatabase, seedUser, seedProject } = require('./helpers/fixtures');
 
 let app, db;
 
@@ -19,19 +20,15 @@ beforeAll(async () => {
   app = require('../src/index').app;
   db  = require('../src/lib/firestore').db;
 
-  await db.collection('users').doc('test-admin-id-projects').set({
-    email:         'admin-projects@test.com',
-    displayName:   'Test Admin',
-    role:          'admin',
-    workspaceId:   'test-workspace',
-    createdAt:     new Date().toISOString(),
-    lastActiveAt:  new Date().toISOString(),
-    schemaVersion: 1,
+  await clearDatabase();
+  await seedUser('test-admin-id-projects', {
+    email: 'admin-projects@test.com',
+    role: 'admin'
   });
 });
 
 afterAll(async () => {
-  await db.collection('users').doc('test-admin-id-projects').delete().catch(() => {});
+  await clearDatabase();
 });
 
 const H = {
@@ -86,16 +83,13 @@ describe('POST /admin/projects', () => {
 });
 
 describe('GET /admin/projects', () => {
-  let pid;
+  let pid = 'get-test-project';
 
   beforeAll(async () => {
-    const ref = await db.collection('projects').add({
-      name: 'GET Test Project', adminId: 'test-admin-id-projects', memberCount: 0,
-      workspaceId: 'test-workspace',
-      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
-      schemaVersion: 1,
+    await seedProject(pid, {
+      name: 'GET Test Project',
+      adminId: 'test-admin-id-projects'
     });
-    pid = ref.id;
   });
 
   afterAll(async () => {
@@ -111,16 +105,13 @@ describe('GET /admin/projects', () => {
 });
 
 describe('PATCH /admin/projects/:id', () => {
-  let pid;
+  let pid = 'patch-test-project';
 
   beforeEach(async () => {
-    const ref = await db.collection('projects').add({
-      name: 'Original Name', adminId: 'test-admin-id-projects', memberCount: 0,
-      workspaceId: 'test-workspace',
-      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
-      schemaVersion: 1,
+    await seedProject(pid, {
+      name: 'Original Name',
+      adminId: 'test-admin-id-projects'
     });
-    pid = ref.id;
   });
 
   afterEach(async () => {
@@ -147,15 +138,14 @@ describe('PATCH /admin/projects/:id', () => {
 
 describe('DELETE /admin/projects/:id', () => {
   test('204 — deletes project and memberships', async () => {
-    const ref = await db.collection('projects').add({
-      name: 'To Delete', adminId: 'test-admin-id-projects', memberCount: 0,
-      workspaceId: 'test-workspace',
-      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
-      schemaVersion: 1,
+    const pid = 'delete-test-project';
+    await seedProject(pid, {
+      name: 'To Delete',
+      adminId: 'test-admin-id-projects'
     });
-    const res = await request(app).delete(`/admin/projects/${ref.id}`).set(H);
+    const res = await request(app).delete(`/admin/projects/${pid}`).set(H);
     expect(res.status).toBe(204);
-    const check = await db.collection('projects').doc(ref.id).get();
+    const check = await db.collection('projects').doc(pid).get();
     expect(check.exists).toBe(false);
   });
 

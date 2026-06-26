@@ -20,6 +20,7 @@ const { Timestamp } = require('firebase-admin/firestore');
 const { Storage } = require('@google-cloud/storage');
 const { db } = require('../../lib/firestore');
 const { requireAdmin } = require('../../middleware/requireAuth');
+const collections = require('../../lib/collections');
 
 const router    = express.Router({ mergeParams: true });
 const MAX_LIMIT = 500;
@@ -76,16 +77,16 @@ router.get('/projects/:id/activity', requireAdmin, async (req, res, next) => {
       MAX_LIMIT
     );
 
-    const projSnap = await db.collection('projects').doc(projectId).get();
+    const projSnap = await db.collection(collections.PROJECTS).doc(projectId).get();
     if (!projSnap.exists) return res.status(404).json({ error: 'project not found' });
 
-    let query = db.collection('uploads')
+    let query = db.collection(collections.UPLOADS)
       .where('projectId', '==', projectId)
       .orderBy('uploadedAt', 'desc')
       .limit(limit + 1);  // fetch one extra to determine hasMore
 
     if (tool) {
-      query = db.collection('uploads')
+      query = db.collection(collections.UPLOADS)
         .where('projectId', '==', projectId)
         .where('tool', '==', tool)
         .orderBy('uploadedAt', 'desc')
@@ -106,7 +107,7 @@ router.get('/projects/:id/activity', requireAdmin, async (req, res, next) => {
     const userIds  = [...new Set(uploads.map(u => u.userId).filter(Boolean))];
     const userMap  = {};
     if (userIds.length > 0) {
-      const userRefs  = userIds.map(id => db.collection('users').doc(id));
+      const userRefs  = userIds.map(id => db.collection(collections.USERS).doc(id));
       const userSnaps = await db.getAll(...userRefs);
       userSnaps.forEach((s) => {
         if (s.exists) {

@@ -442,13 +442,14 @@ The system combines several low‑level signals:
 3. **Inactivity events (extension → `/inactivity-events`)**
    - Emitted when the inactivity timer fires while the user has the feature enabled.
    - Fields:
-     - `triggeredAt` — ISO timestamp when the prompt was raised.
-     - `userId` — resolved server‑side from API key.
-     - `projectId`
-     - `acknowledged` — `true` if the user clicked **Capture Now** or **Snooze**.
-     - `inactiveDurationMs` (optional) — duration of that idle stretch, if available.
+     - `eventId` — UUID per event.
+     - `sessionId` — UUID of the active session.
+     - `projectId` — current project ID.
+     - `userId` — resolved server‑side from authentication token.
+     - `inactiveStart` — ISO timestamp when inactivity started (timer triggered).
+     - `inactiveEnd` — ISO timestamp when the inactivity ended (user clicked Snooze/Capture).
+     - `durationMs` — duration of inactivity in milliseconds.
      - `schemaVersion` — currently `1`.
-     - `deleteAfter` — `triggeredAt + 365 days` (Firestore TTL).
 
 4. **Idle / focus signals (optional enhancements)**
    - **Chrome Idle API** (`chrome.idle`) — reports `active` vs `idle` vs `locked` for the device.

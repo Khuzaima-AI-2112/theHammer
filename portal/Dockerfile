@@ -4,7 +4,7 @@
 #
 # Re-pin the digest periodically:
 # docker pull nginx:1.27-alpine && docker inspect --format='{{index .RepoDigests 0}}' nginx:1.27-alpine
-FROM nginx:1.27-alpine
+FROM nginx:1.27-alpine@sha256:2f2a1065645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10
 
 # Replace default nginx config to listen on 8080
 COPY nginx.conf /etc/nginx/conf.d/default.conf

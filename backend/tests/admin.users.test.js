@@ -10,6 +10,7 @@ process.env.NODE_ENV                = 'test';
 process.env.FIRESTORE_EMULATOR_HOST = process.env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8080';
 
 const request = require('supertest');
+const { clearDatabase, seedUser, seedProject, seedMembership } = require('./helpers/fixtures');
 
 let app, db;
 
@@ -17,16 +18,15 @@ beforeAll(async () => {
   app = require('../src/index').app;
   db  = require('../src/lib/firestore').db;
 
-  await db.collection('users').doc('test-admin-id-users').set({
-    email: 'admin-users@test.com', displayName: 'Test Admin', role: 'admin',
-    workspaceId: 'test-workspace',
-    createdAt: new Date().toISOString(), lastActiveAt: new Date().toISOString(),
-    schemaVersion: 1,
+  await clearDatabase();
+  await seedUser('test-admin-id-users', {
+    email: 'admin-users@test.com',
+    role: 'admin'
   });
 });
 
 afterAll(async () => {
-  await db.collection('users').doc('test-admin-id-users').delete();
+  await clearDatabase();
 });
 
 const H = { 'x-dev-user-email': 'admin-users@test.com', 'content-type': 'application/json' };
@@ -68,23 +68,19 @@ describe('POST /admin/users', () => {
 });
 
 describe('POST + DELETE /admin/projects/:id/members', () => {
-  let projectId;
+  let projectId = 'member-test-project';
   let memberId = 'member-user-id';
 
   beforeAll(async () => {
-    const ref = await db.collection('projects').add({
-      name: 'Member Test Project', adminId: 'test-admin-id-users', memberCount: 0,
-      workspaceId: 'test-workspace',
-      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
-      schemaVersion: 1,
+    await seedProject(projectId, {
+      name: 'Member Test Project',
+      adminId: 'test-admin-id-users'
     });
-    projectId = ref.id;
 
-    await db.collection('users').doc(memberId).set({
-      email: 'member@test.com', displayName: 'Test Member', role: 'user',
-      workspaceId: 'test-workspace',
-      createdAt: new Date().toISOString(), lastActiveAt: new Date().toISOString(),
-      schemaVersion: 1,
+    await seedUser(memberId, {
+      email: 'member@test.com',
+      displayName: 'Test Member',
+      role: 'user'
     });
   });
 

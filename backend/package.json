@@ -6,8 +6,8 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
-    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
-    "test:integration": "node --experimental-vm-modules node_modules/jest/bin/jest.js tests/integration.test.js"
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js --runInBand",
+    "test:integration": "node --experimental-vm-modules node_modules/jest/bin/jest.js tests/integration.test.js --runInBand"
   },
   "dependencies": {
     "@google-cloud/firestore": "^7.9.0",

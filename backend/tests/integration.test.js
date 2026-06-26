@@ -4,6 +4,7 @@ process.env.NODE_ENV                = 'test';
 process.env.FIRESTORE_EMULATOR_HOST = process.env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8080';
 
 const request = require('supertest');
+const { clearDatabase, seedUser, seedApiKey } = require('./helpers/fixtures');
 
 let app, db;
 let adminId = 'test-integration-admin';
@@ -14,31 +15,26 @@ beforeAll(async () => {
   app = require('../src/index').app;
   db  = require('../src/lib/firestore').db;
 
-  await db.collection('users').doc(adminId).set({
-    email: 'admin@integration.test', displayName: 'Test Admin', role: 'admin',
-    workspaceId: 'test-workspace',
-    createdAt: new Date().toISOString(), lastActiveAt: new Date().toISOString(),
-    schemaVersion: 1,
+  await clearDatabase();
+  await seedUser(adminId, {
+    email: 'admin@integration.test',
+    displayName: 'Test Admin',
+    role: 'admin'
   });
 
-  await db.collection('users').doc(userId).set({
-    email: 'user@integration.test', displayName: 'Test User', role: 'user',
-    workspaceId: 'test-workspace',
-    createdAt: new Date().toISOString(), lastActiveAt: new Date().toISOString(),
-    schemaVersion: 1,
+  await seedUser(userId, {
+    email: 'user@integration.test',
+    displayName: 'Test User',
+    role: 'user'
   });
 
-  await db.collection('api_keys').doc(keyId).set({
-    userId,
-    role: 'user',
-    isActive: true,
+  await seedApiKey(keyId, userId, {
+    role: 'user'
   });
 });
 
 afterAll(async () => {
-  await db.collection('users').doc(adminId).delete();
-  await db.collection('users').doc(userId).delete();
-  await db.collection('api_keys').doc(keyId).delete();
+  await clearDatabase();
 });
 
 const H_ADMIN = { 'x-dev-user-email': 'admin@integration.test', 'content-type': 'application/json' };

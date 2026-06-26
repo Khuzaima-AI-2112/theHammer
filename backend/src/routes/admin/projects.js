@@ -26,6 +26,7 @@ const express  = require('express');
 const { FieldValue, Timestamp } = require('firebase-admin/firestore');
 const { db }   = require('../../lib/firestore');
 const { requireAdmin } = require('../../middleware/requireAuth');
+const collections = require('../../lib/collections');
 
 const router = express.Router();
 
@@ -56,7 +57,7 @@ router.post('/projects', requireAdmin, async (req, res, next) => {
       return res.status(400).json({ error: 'name must be 1–128 characters' });
     }
     const now = nowISO();
-    const ref = await db.collection('projects').add({
+    const ref = await db.collection(collections.PROJECTS).add({
       workspaceId: req.hammerUser.workspaceId,
       name,
       webhookUrl,
@@ -77,11 +78,11 @@ router.post('/projects', requireAdmin, async (req, res, next) => {
 router.get('/projects', requireAdmin, async (req, res, next) => {
   try {
     const PAGE_SIZE = 100;
-    let query = db.collection('projects')
+    let query = db.collection(collections.PROJECTS)
       .where('workspaceId', '==', req.hammerUser.workspaceId)
       .orderBy('createdAt', 'desc');
     if (req.query.cursor) {
-      const cursorSnap = await db.collection('projects').doc(req.query.cursor).get();
+      const cursorSnap = await db.collection(collections.PROJECTS).doc(req.query.cursor).get();
       if (cursorSnap.exists) query = query.startAfter(cursorSnap);
     }
     const snap = await query.limit(PAGE_SIZE + 1).get();
@@ -96,7 +97,7 @@ router.get('/projects', requireAdmin, async (req, res, next) => {
 // 5.4  GET /admin/projects/:id
 router.get('/projects/:id', requireAdmin, async (req, res, next) => {
   try {
-    const snap = await db.collection('projects').doc(req.params.id).get();
+    const snap = await db.collection(collections.PROJECTS).doc(req.params.id).get();
     if (!snap.exists) return res.status(404).json({ error: 'project not found' });
     if (snap.data().workspaceId !== req.hammerUser.workspaceId) {
       return res.status(403).json({ error: 'forbidden: project belongs to another workspace' });
@@ -114,7 +115,7 @@ router.patch('/projects/:id', requireAdmin, async (req, res, next) => {
     if (!name || name.length > 128) {
       return res.status(400).json({ error: 'name must be 1–128 characters' });
     }
-    const ref  = db.collection('projects').doc(req.params.id);
+    const ref  = db.collection(collections.PROJECTS).doc(req.params.id);
     const snap = await ref.get();
     if (!snap.exists) return res.status(404).json({ error: 'project not found' });
     if (snap.data().workspaceId !== req.hammerUser.workspaceId) {
@@ -131,14 +132,14 @@ router.patch('/projects/:id', requireAdmin, async (req, res, next) => {
 router.delete('/projects/:id', requireAdmin, async (req, res, next) => {
   try {
     const { id } = req.params;
-    const projectRef = db.collection('projects').doc(id);
+    const projectRef = db.collection(collections.PROJECTS).doc(id);
     const snap       = await projectRef.get();
     if (!snap.exists) return res.status(404).json({ error: 'project not found' });
     if (snap.data().workspaceId !== req.hammerUser.workspaceId) {
       return res.status(403).json({ error: 'forbidden: project belongs to another workspace' });
     }
 
-    const membersSnap = await db.collection('project_memberships')
+    const membersSnap = await db.collection(collections.MEMBERSHIPS)
       .where('projectId', '==', id)
       .get();
 

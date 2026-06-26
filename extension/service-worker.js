@@ -324,6 +324,12 @@ chrome.runtime.onInstalled.addListener(async () => {
   console.log('[Hammer SW] installed; injected content.js into', tabs.length, 'tabs');
 });
 
+// ── Startup: Clear stale sessions on browser startup ──
+chrome.runtime.onStartup.addListener(async () => {
+  console.log('[Hammer SW] Browser started. Clearing any stale session memory.');
+  await sessionClear();
+});
+
 chrome.contextMenus.onClicked.addListener((info, tab) => {
   if (info.menuItemId === 'capture-element') {
     chrome.tabs.sendMessage(tab.id, { type: 'CAPTURE_ELEMENT' }, async (res) => {
@@ -865,17 +871,20 @@ async function logInactivityEvent() {
 
   const { settings } = await chrome.storage.local.get('settings');
   const cloudRunUrl = settings?.cloudRunUrl?.trim() || FALLBACK_API_BASE;
-  const apiKey      = settings?.apiKey?.trim() || '';
+  const token       = settings?.firebaseToken?.trim() || '';
   const timerSeconds = settings?.inactivityTimerSeconds || 45;
 
-  if (apiKey && cloudRunUrl) {
+  if (token && cloudRunUrl) {
     const inactiveEnd = new Date().toISOString();
     // The start of inactivity was timerSeconds ago
     const inactiveStart = new Date(Date.now() - (timerSeconds * 1000)).toISOString();
 
     fetch(`${cloudRunUrl}/inactivity-events`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Api-Key': apiKey },
+      headers: { 
+        'Content-Type': 'application/json', 
+        'Authorization': `Bearer ${token}` 
+      },
       body: JSON.stringify({
         eventId: crypto.randomUUID(),
         sessionId: s.sessionId,

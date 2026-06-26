@@ -415,3 +415,42 @@ Run this before starting any new sprint:
 - Extensions must be fully self-contained.
 - Download all required web fonts (`.woff2`) and store them in the extension's local `fonts/` directory.
 - Reference them via standard `@font-face` blocks pointing to local relative paths.
+
+---
+
+### 35. Circular Imports in Express Route Configurations
+
+**What happened:** In the main API server entrypoint `index.js`, we defined and exported `analystReportLimiter`. However, we imported `backend/src/routes/admin/reports.js` before exporting this limiter. Because `reports.js` required `index.js` to access `analystReportLimiter`, Node.js's circular dependency mechanism resolved the required object as empty `{}`, leading to a runtime crash when the route tried to reference the limiter.
+**Root cause:** Requiring modules that import properties from the requiring file before those properties are defined and exported.
+**Rule going forward:**
+- Reusable middleware (including authentication, validation, and rate limiters) must be declared in separate, dedicated files inside a `middleware/` folder rather than exported from the main entrypoint file.
+- Keep the entrypoint (`index.js`) exclusively as a bootstrap/wire-up layer.
+
+---
+
+### 36. Webhook and Log Payload references must be updated in tandem with Request Schema changes
+
+**What happened:** We refactored `POST /upload-url` to remove the client-provided `name` body property (resolving user identity server-side using the Firebase token as `req.hammerUser.id`). However, the Slack webhook integration block later in the same route handler still referenced the deleted `name` variable, throwing a `ReferenceError` that crashed the upload pipeline at runtime.
+**Root cause:** Modifying request input structures without auditing all references to those variables later in the execution flow (e.g. notifications, logging, webhook builders).
+**Rule going forward:**
+- When deprecating, renaming, or removing body properties, perform a full file-level (or repository-level) search for the deleted parameter variables.
+- Update downstream dependencies (such as logs, Slack webhooks, database objects) to use server-resolved fallback values (e.g., `req.hammerUser.displayName || req.hammerUser.email || req.hammerUser.id`).
+
+---
+
+### 37. PowerShell curl alias maps to Invoke-WebRequest and hangs non-interactive background tasks
+
+**What happened:** When verifying the API server's health status via a background `run_command` task in PowerShell, the command `curl http://127.0.0.1:8081/health` hung indefinitely, failing to return output until the task was manually terminated.
+**Root cause:** In Windows PowerShell, `curl` is a default alias for the `Invoke-WebRequest` cmdlet rather than the native system `curl.exe`. `Invoke-WebRequest` attempts to establish progress streams and wraps response text in rich HTML/JSON objects, which can block or hang execution when run inside non-interactive background shells expecting raw text.
+**Rule going forward:**
+- Always call `curl.exe` explicitly rather than `curl` when running network tests or checks in PowerShell scripts or background commands on Windows, ensuring the native utility is executed and raw text is returned.
+
+---
+
+### 38. Git hooks on Windows run in Git Bash and require explicit path/shell configurations for PowerShell execution
+
+**What happened:** When setting up the local pre-commit hook using `scripts/install-git-hook.ps1`, the hook script written to `.git/hooks/pre-commit` failed to invoke the powershell scripts correctly because Windows Git executes hooks inside a Git Bash/MinGW environment.
+**Root cause:** Git on Windows automatically uses a bash shell environment to interpret hook scripts. Calling powershell command lines from a bash script requires invoking `powershell.exe` explicitly, bypassing execution policies (`-ExecutionPolicy Bypass`), and handling path translations correctly between Unix/Windows styles.
+**Rule going forward:**
+- When scripting hooks that call PowerShell from Git Bash on Windows, format the call explicitly: `powershell.exe -NoProfile -ExecutionPolicy Bypass -File "scripts/verify-gcp-env.ps1"`.
+- Use relative paths from the repository root when running files from git hooks, as Git runs hooks from the workspace root.

@@ -4,7 +4,7 @@
 // HAMMER_API_BASE: set by Cloud Run env injection or leave '' for same-origin.
 // Dev: window.HAMMER_API_BASE = 'https://hammer-api-xxxx-uc.a.run.app'
 const API_BASE = window.HAMMER_API_BASE
-  || 'https://thehammer-backend-282689937365.northamerica-northeast1.run.app/api';
+  || '__BACKEND_API_URL__';
 
 // ── Theme Toggle ───────────────────────────────────────────────
 (function() {

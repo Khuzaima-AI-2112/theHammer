@@ -6,6 +6,7 @@ const logger = require('../../lib/logger');
 const express = require('express');
 const { db } = require('../../lib/firestore');
 const { requireAnalyst } = require('../../middleware/requireAuth');
+const collections = require('../../lib/collections');
 // Use the Cloud Tasks library if configured, else invoke worker directly (MVP)
 // const { CloudTasksClient } = require('@google-cloud/tasks');
 
@@ -13,7 +14,7 @@ const router = express.Router();
 
 function nowISO() { return new Date().toISOString(); }
 
-const { analystReportLimiter } = require('../../index');
+const { analystReportLimiter } = require('../../middleware/rateLimiters');
 
 // POST /reports/generate
 router.post('/reports/generate', requireAnalyst, analystReportLimiter, async (req, res, next) => {
@@ -24,7 +25,7 @@ router.post('/reports/generate', requireAnalyst, analystReportLimiter, async (re
     }
 
     const now = nowISO();
-    const reportRef = await db.collection('reports').add({
+    const reportRef = await db.collection(collections.REPORTS).add({
       projectId,
       reportType,
       dateRange: dateRange || null,
@@ -70,7 +71,7 @@ router.post('/reports/generate', requireAnalyst, analystReportLimiter, async (re
 // GET /reports/:id/status
 router.get('/reports/:id/status', requireAnalyst, async (req, res, next) => {
   try {
-    const snap = await db.collection('reports').doc(req.params.id).get();
+    const snap = await db.collection(collections.REPORTS).doc(req.params.id).get();
     if (!snap.exists) return res.status(404).json({ error: 'report not found' });
     
     const data = snap.data();
@@ -92,7 +93,7 @@ router.get('/reports', requireAnalyst, async (req, res, next) => {
       return res.status(400).json({ error: 'Missing projectId query param' });
     }
 
-    const snap = await db.collection('reports')
+    const snap = await db.collection(collections.REPORTS)
       .where('projectId', '==', projectId)
       .orderBy('createdAt', 'desc')
       .get();

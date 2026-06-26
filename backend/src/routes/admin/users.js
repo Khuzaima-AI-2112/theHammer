@@ -18,10 +18,11 @@ const express  = require('express');
 const { FieldValue, Timestamp } = require('firebase-admin/firestore');
 const { db }   = require('../../lib/firestore');
 const { requireAdmin } = require('../../middleware/requireAuth');
+const { VALID_ROLES } = require('../../lib/roles');
+const { USER_PREFERENCES } = require('../../lib/defaults');
+const collections = require('../../lib/collections');
 
 const router = express.Router({ mergeParams: true });
-
-const VALID_ROLES = ['admin', 'analyst', 'instructional_designer', 'user'];
 
 function serializeUser(snap) {
   const d = snap.data();
@@ -33,9 +34,9 @@ function serializeUser(snap) {
     createdAt:    d.createdAt instanceof Timestamp ? d.createdAt.toDate().toISOString() : d.createdAt,
     lastActiveAt: d.lastActiveAt instanceof Timestamp ? d.lastActiveAt.toDate().toISOString() : d.lastActiveAt,
     inactivityPromptEnabled: d.inactivityPromptEnabled,
-    inactivityTimerSeconds: d.inactivityTimerSeconds ?? 45,
-    allowPreUploadBlur: d.allowPreUploadBlur ?? false,
-    instantClipboardLinks: d.instantClipboardLinks ?? false,
+    inactivityTimerSeconds: d.inactivityTimerSeconds ?? USER_PREFERENCES.inactivityTimerSeconds,
+    allowPreUploadBlur: d.allowPreUploadBlur ?? USER_PREFERENCES.allowPreUploadBlur,
+    instantClipboardLinks: d.instantClipboardLinks ?? USER_PREFERENCES.instantClipboardLinks,
     schemaVersion: d.schemaVersion,
   };
 }
@@ -61,14 +62,14 @@ function nowISO() { return new Date().toISOString(); }
 router.get('/users', requireAdmin, async (req, res, next) => {
   try {
     const PAGE_SIZE = 100;
-    let query = db.collection('users').orderBy('email', 'asc');
+    let query = db.collection(collections.USERS).orderBy('email', 'asc');
     if (req.query.role && VALID_ROLES.includes(req.query.role)) {
-      query = db.collection('users')
+      query = db.collection(collections.USERS)
         .where('role', '==', req.query.role)
         .orderBy('email', 'asc');
     }
     if (req.query.cursor) {
-      const cursorSnap = await db.collection('users').doc(req.query.cursor).get();
+      const cursorSnap = await db.collection(collections.USERS).doc(req.query.cursor).get();
       if (cursorSnap.exists) query = query.startAfter(cursorSnap);
     }
     const snap  = await query.limit(PAGE_SIZE + 1).get();
@@ -83,7 +84,7 @@ router.get('/users', requireAdmin, async (req, res, next) => {
 // ─── GET /admin/users/:id ──────────────────────────────────────────────────
 router.get('/users/:id', requireAdmin, async (req, res, next) => {
   try {
-    const snap = await db.collection('users').doc(req.params.id).get();
+    const snap = await db.collection(collections.USERS).doc(req.params.id).get();
     if (!snap.exists) return res.status(404).json({ error: 'user not found' });
     return res.json(serializeUser(snap));
   } catch (err) { next(err); }
@@ -104,21 +105,21 @@ router.post('/users', requireAdmin, async (req, res, next) => {
       return res.status(400).json({ error: `role must be one of: ${VALID_ROLES.join(', ')}` });
     }
 
-    const existing = await db.collection('users').where('email', '==', email).limit(1).get();
+    const existing = await db.collection(collections.USERS).where('email', '==', email).limit(1).get();
     if (!existing.empty) {
       return res.status(200).json(serializeUser(existing.docs[0]));
     }
 
     const now = nowISO();
-    const ref = await db.collection('users').add({
+    const ref = await db.collection(collections.USERS).add({
       email,
       displayName: displayName || null,
       role,
       createdAt:     now,
       lastActiveAt:  now,
-      inactivityTimerSeconds: 45,
-      allowPreUploadBlur: false,
-      instantClipboardLinks: false,
+      inactivityTimerSeconds: USER_PREFERENCES.inactivityTimerSeconds,
+      allowPreUploadBlur: USER_PREFERENCES.allowPreUploadBlur,
+      instantClipboardLinks: USER_PREFERENCES.instantClipboardLinks,
       schemaVersion: 1,
     });
     const snap = await ref.get();
@@ -130,20 +131,20 @@ router.post('/users', requireAdmin, async (req, res, next) => {
 router.get('/projects/:id/members', requireAdmin, async (req, res, next) => {
   try {
     const projectId = req.params.id;
-    const projSnap  = await db.collection('projects').doc(projectId).get();
+    const projSnap  = await db.collection(collections.PROJECTS).doc(projectId).get();
     if (!projSnap.exists) return res.status(404).json({ error: 'project not found' });
     if (projSnap.data().workspaceId !== req.hammerUser.workspaceId) {
       return res.status(403).json({ error: 'forbidden: project belongs to another workspace' });
     }
 
-    const membSnap = await db.collection('project_memberships')
+    const membSnap = await db.collection(collections.MEMBERSHIPS)
       .where('projectId', '==', projectId)
       .orderBy('admittedAt', 'asc')
       .get();
 
     const members = await Promise.all(membSnap.docs.map(async (mSnap) => {
       const m        = serializeMembership(mSnap);
-      const userSnap = await db.collection('users').doc(m.userId).get();
+      const userSnap = await db.collection(collections.USERS).doc(m.userId).get();
       m.user = userSnap.exists ? serializeUser(userSnap) : null;
       return m;
     }));
@@ -165,9 +166,9 @@ router.post('/projects/:id/members', requireAdmin, async (req, res, next) => {
       return res.status(400).json({ error: `role must be one of: ${VALID_ROLES.join(', ')}` });
     }
 
-    const projectRef    = db.collection('projects').doc(projectId);
-    const userRef       = db.collection('users').doc(userId);
-    const membershipRef = db.collection('project_memberships').doc(`${projectId}_${userId}`);
+    const projectRef    = db.collection(collections.PROJECTS).doc(projectId);
+    const userRef       = db.collection(collections.USERS).doc(userId);
+    const membershipRef = db.collection(collections.MEMBERSHIPS).doc(`${projectId}_${userId}`);
 
     const result = await db.runTransaction(async (tx) => {
       const [projSnap, userSnap, membSnap] = await Promise.all([
@@ -206,8 +207,8 @@ router.post('/projects/:id/members', requireAdmin, async (req, res, next) => {
 router.delete('/projects/:id/members/:userId', requireAdmin, async (req, res, next) => {
   try {
     const { id: projectId, userId } = req.params;
-    const projectRef    = db.collection('projects').doc(projectId);
-    const membershipRef = db.collection('project_memberships').doc(`${projectId}_${userId}`);
+    const projectRef    = db.collection(collections.PROJECTS).doc(projectId);
+    const membershipRef = db.collection(collections.MEMBERSHIPS).doc(`${projectId}_${userId}`);
 
     await db.runTransaction(async (tx) => {
       const [projSnap, membSnap] = await Promise.all([
@@ -261,7 +262,7 @@ router.patch('/users/:id', requireAdmin, async (req, res, next) => {
       return res.status(400).json({ error: 'no valid fields to update' });
     }
 
-    const userRef = db.collection('users').doc(userId);
+    const userRef = db.collection(collections.USERS).doc(userId);
     updates.updatedAt = nowISO();
 
     await db.runTransaction(async (tx) => {
@@ -270,7 +271,7 @@ router.patch('/users/:id', requireAdmin, async (req, res, next) => {
 
       let keysToUpdate = [];
       if (updates.role) {
-        const keysQuery = db.collection('api_keys').where('userId', '==', userId);
+        const keysQuery = db.collection(collections.API_KEYS).where('userId', '==', userId);
         const keysSnap = await tx.get(keysQuery);
         keysSnap.forEach(k => keysToUpdate.push(k.ref));
       }
