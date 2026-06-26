@@ -26,7 +26,7 @@ We have completed the implementation and verification tasks according to the app
 - **Test Image Alignment (`cloudbuild.yaml`):** Updated the test stage environment to `node:22-alpine` to align with the production Node.js 22 runtime.
 - **Secure Image Pinning (`backend/Dockerfile` and `portal/Dockerfile`):**
   - Pinned `node:22-alpine` to `sha256:4d64b49e6c891c8fc821007cb1cdc6c0db7773110ac2c34bf2e6960adef62ed3`.
-  - Pinned `nginx:1.27-alpine` to `sha256:2f2a1065645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10`.
+  - Pinned `nginx:1.27-alpine` to `sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10`.
 
 ### 4. Documentation
 - **Architecture Reference (`docs/architecture.md`):** Updated Section 12 to match the actual inactivity event schema fields: `eventId`, `sessionId`, `projectId`, `userId`, `inactiveStart`, `inactiveEnd`, `durationMs`, and `schemaVersion`.

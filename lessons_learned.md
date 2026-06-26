@@ -454,3 +454,15 @@ Run this before starting any new sprint:
 **Rule going forward:**
 - When scripting hooks that call PowerShell from Git Bash on Windows, format the call explicitly: `powershell.exe -NoProfile -ExecutionPolicy Bypass -File "scripts/verify-gcp-env.ps1"`.
 - Use relative paths from the repository root when running files from git hooks, as Git runs hooks from the workspace root.
+
+---
+
+### 39. Validate OCI base image digests are exactly 64 hexadecimal characters long
+
+**What happened:** A Cloud Build deployment failed on the portal build step due to an `invalid checksum digest length` error. The Dockerfile contained a 70-character hash (`2f2a1065645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10`).
+
+**Root cause:** During copy-paste or a merge conflict resolution, a local 6-character short image ID prefix (`2f2a10`) was accidentally prepended to the actual 64-character SHA-256 hash (`65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10`). Because it visually looked like a long hash, it was committed without verifying its character length.
+
+**Rule going forward:**
+- Always verify that any SHA-256 base image digest in a Dockerfile is exactly 64 characters long (excluding the `sha256:` prefix).
+- Test build images locally (e.g. run `docker build`) or dry-run pull the exact pinned tag+digest reference before pushing changes to the remote branch to catch checksum errors early.
