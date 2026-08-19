@@ -1,0 +1,8 @@
+.gcloudignore
+.git
+.gitignore
+node_modules/
+backend/node_modules/
+portal/node_modules/
+firestore-debug.log
+backend/firestore-debug.log
