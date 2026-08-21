@@ -34,7 +34,7 @@ cd ..
 
 ## 2. Authentication & GCP Project Setup
 
-Your Google account (`ua7968863@gmail.com`) has been granted **Editor** permissions on the GCP project `thehammer`.
+Your Google account (`usmanali07137@gmail.com`) has been granted **Editor** permissions on the GCP project `thehammer`.
 
 1. **Authenticate gcloud CLI**:
    ```bash
