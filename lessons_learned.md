@@ -492,3 +492,28 @@ Run this before starting any new sprint:
 - When `--detectOpenHandles` reports nothing but Jest still will not exit, use `process.getActiveResourcesInfo()` in an `afterAll` instead, and bisect by running each suite alone.
 - Set `METADATA_SERVER_DETECTION=none` for any offline suite so the credential probe never starts.
 - Be aware this is a workaround for an import-time side effect: a module-scope client construction runs on every `require` of the app, including in tests that never touch it. Prefer lazy construction for clients that need credentials.
+
+---
+
+### 42. Replying early to a large upload resets the socket, and the client never sees the status
+
+**What happened:** A new pre-multer guard on `POST /capture` correctly refused a 12MB upload with 413, and the test failed with `read ECONNRESET`. The server was right and the client still could not read the answer.
+
+**Root cause:** Answering while the client is still uploading ends the response before the request body has been consumed. Node then tears down the socket, so the client sees a connection reset rather than the 413. For theHammer this is worse than a cosmetic problem: `AGENTS.md` Rule 4 makes a lost Capture non-negotiable, and the extension's retry logic would re-send an oversized Capture three times, never learning why it failed.
+
+**Rule going forward:**
+- When rejecting a request before its body is read, drain the remainder and answer on `end`. Draining discards bytes as they arrive; it does not buffer them, so the memory protection is unchanged.
+- Cap the drain. `Content-Length` is attacker-controlled, so draining without a ceiling lets one request cost the server an arbitrary amount of reading. Past the budget, destroy the request and accept that the client loses its answer.
+- Treat `ECONNRESET` in a test that asserts an error status as evidence about *when* the server replied, not as flakiness.
+
+---
+
+### 43. `Content-Length` measures the multipart envelope, not the file
+
+**What happened:** A pre-multer size guard compared `Content-Length` against the 10MB file ceiling. A legitimate Capture at the ceiling was refused, because the request carries more than the file.
+
+**Root cause:** `Content-Length` covers the whole multipart body: every part header, every boundary, and the other form fields, as well as the file. Comparing it against a per-file limit therefore refuses valid files near that limit.
+
+**Rule going forward:**
+- Give a header-based size guard an explicit envelope allowance above the per-file limit, and leave the parser's own per-file limit as the exact check.
+- Accept what this leaves open, and write it down: a body between the file limit and the limit plus the allowance, and a chunked request carrying no `Content-Length` at all, both reach the parser. Neither can grow memory past the per-file limit, which is what the guard exists to protect.

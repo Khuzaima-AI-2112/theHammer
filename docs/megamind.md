@@ -15,7 +15,7 @@ This document provides a single-entry index of critical architectural topics and
 | **Database Instance Singleton** | Bootstrapping point of Firebase Admin Firestore singleton shared across all routes. | [`backend/src/lib/firestore.js`](../backend/src/lib/firestore.js) |
 | **Structured Logging** | Central JSON logger library formatting messages for automated GCP Cloud Logging ingestion. | [`backend/src/lib/logger.js`](../backend/src/lib/logger.js) |
 | **Test Fixtures & Seeding** | Core helpers for database cleaning and user/project seeding across all unit and integration tests. | [`backend/tests/helpers/fixtures.js`](../backend/tests/helpers/fixtures.js) |
-| **SSRF Webhook Validation** | Security check constants and protocols restricting outbound dispatch calls from hitting local or metadata IP scopes. | [`backend/src/index.js`](../backend/src/index.js#L170-L181) |
+| **SSRF Webhook Validation** | Security check constants and protocols restricting outbound dispatch calls from hitting local or metadata IP scopes. | [`backend/src/index.js`](../backend/src/index.js#L260-L270) |
 | **CORS Allowed Origins** | Domain whitelist restricting and authorizing secure API requests from Extension and Admin Portal. | [`backend/src/index.js`](../backend/src/index.js#L38-L43) |
 | **Build & Deploy Pipeline** | Configuration for container builds, Jest emulator tasks, and multi-service Cloud Run deployment setups. | [`cloudbuild.yaml`](../cloudbuild.yaml) |
 | **Local Dev context checking** | Deployment target context checks preventing cross-project deployments and validating credentials. | [`verify-gcp-env.ps1`](../verify-gcp-env.ps1) |
@@ -48,7 +48,7 @@ This document provides a single-entry index of critical architectural topics and
 *   **Usage:** Shared by reports and OCR background workers for vertex inference operations.
 
 ### SSRF Webhook Validation
-*   **Module:** [`backend/src/index.js`](../backend/src/index.js#L170-L181)
+*   **Module:** [`backend/src/index.js`](../backend/src/index.js#L260-L270)
 *   **Exports:** Internal checks (`validateWebhookUrl`, `PRIVATE_IP_RE`).
 *   **Usage:** Evaluated prior to server-side webhook dispatch requests to prevent computational metadata server attacks or local traversal breaches.
 

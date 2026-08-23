@@ -17,29 +17,9 @@ const request = require('supertest');
 // assert the path in the URL matches the path field in the response (task 3.3).
 const FAKE_SIGNED_URL_PREFIX = 'https://storage.googleapis.com/fake-bucket/';
 
-jest.mock('@google-cloud/storage', () => {
-  const mockGetSignedUrl = jest.fn().mockImplementation(function () {
-    // `this` is the File instance; grab the name from it
-    const objectPath = this.name;
-    return Promise.resolve([`${FAKE_SIGNED_URL_PREFIX}${objectPath}?X-Goog-Signature=abc`]);
-  });
-
-  const mockFile = jest.fn().mockImplementation(function (name) {
-    this.name = name;
-    this.getSignedUrl = mockGetSignedUrl.bind(this);
-    this.save = jest.fn().mockResolvedValue();
-  });
-
-  const mockBucket = jest.fn().mockImplementation(() => ({
-    file: (name) => new mockFile(name),
-  }));
-
-  return {
-    Storage: jest.fn().mockImplementation(() => ({
-      bucket: () => new mockBucket(),
-    })),
-  };
-});
+jest.mock('@google-cloud/storage', () => require('./helpers/gcsMock').createStorageMock({
+  signedUrlPrefix: 'https://storage.googleapis.com/fake-bucket/'
+}));
 
 // Set required env vars before the app module loads
 process.env.API_KEY    = 'test-api-key';
