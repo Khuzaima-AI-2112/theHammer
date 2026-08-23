@@ -19,6 +19,7 @@ This document provides a single-entry index of critical architectural topics and
 | **CORS Allowed Origins** | Domain whitelist restricting and authorizing secure API requests from Extension and Admin Portal. | [`backend/src/index.js`](../backend/src/index.js#L38-L43) |
 | **Build & Deploy Pipeline** | Configuration for container builds, Jest emulator tasks, and multi-service Cloud Run deployment setups. | [`cloudbuild.yaml`](../cloudbuild.yaml) |
 | **Local Dev context checking** | Deployment target context checks preventing cross-project deployments and validating credentials. | [`verify-gcp-env.ps1`](../verify-gcp-env.ps1) |
+| **Test Environment & Timeouts** | Jest configuration for the backend suite: the hook timeout budget and the offline environment applied before any test module loads. | [`backend/jest.config.js`](../backend/jest.config.js) |
 | **Extension Messaging Contracts** | Data structure schemas and actions used for content-script, popup, and service-worker messaging. | Comment blocks at the top of [`extension/service-worker.js`](../extension/service-worker.js) |
 | **Developer Rules & History** | Directives, guardrails, and lessons learned from past sprint bugs and deployment hiccups. | [`lessons_learned.md`](../lessons_learned.md) |
 

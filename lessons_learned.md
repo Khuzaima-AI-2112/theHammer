@@ -466,3 +466,29 @@ Run this before starting any new sprint:
 **Rule going forward:**
 - Always verify that any SHA-256 base image digest in a Dockerfile is exactly 64 characters long (excluding the `sha256:` prefix).
 - Test build images locally (e.g. run `docker build`) or dry-run pull the exact pinned tag+digest reference before pushing changes to the remote branch to catch checksum errors early.
+
+---
+
+### 40. Jest's default 5s hook budget is too tight for emulator-backed setup
+
+**What happened:** On a clean machine `npm test` reported 38 of 45 tests passing. All seven failures were in `admin.users.test.js`, every one of them `Exceeded timeout of 5000 ms for a hook`. The suite looked like it had seven product defects. It had none — the same suite passed 7/7 in isolation once the timeout was raised.
+
+**Root cause:** The suite had no Jest config file at all, so Jest's 5s default applied. `beforeAll` in the emulator-backed suites clears the whole emulator database over HTTP and then seeds fixtures, which comfortably exceeds 5s against a cold emulator. A warm emulator finishes inside 5s, so the failure only appears on the first run after a machine starts — which is exactly when a new developer meets it.
+
+**Rule going forward:**
+- Any suite whose hooks do network or emulator work needs an explicit `testTimeout`; do not rely on the Jest default.
+- Treat a whole-suite failure that is entirely `Exceeded timeout ... for a hook` as a harness problem until proven otherwise, not as a product defect.
+- Reproduce timing failures on a cold emulator. A green run proves nothing if a previous run left the emulator warm.
+
+---
+
+### 41. The Cloud Storage credential probe keeps Jest alive, and `--detectOpenHandles` cannot name it
+
+**What happened:** After every test run, Jest printed `Jest did not exit one second after the test run has completed`. In CI this hangs the job until it times out. `--detectOpenHandles` reported no handles at all, and using that flag even made the warning disappear, because it changes teardown timing.
+
+**Root cause:** `backend/src/index.js` constructs `new Storage()` at module scope. Requiring the app therefore builds an auth client, which resolves Application Default Credentials by probing the GCE metadata server. On a developer machine nothing answers that address, so the connection never settles. It is not a libuv handle Jest tracks, which is why `--detectOpenHandles` is blind to it; `process.getActiveResourcesInfo()` named it as `ConnectWrap` and `TCPSocketWrap`.
+
+**Rule going forward:**
+- When `--detectOpenHandles` reports nothing but Jest still will not exit, use `process.getActiveResourcesInfo()` in an `afterAll` instead, and bisect by running each suite alone.
+- Set `METADATA_SERVER_DETECTION=none` for any offline suite so the credential probe never starts.
+- Be aware this is a workaround for an import-time side effect: a module-scope client construction runs on every `require` of the app, including in tests that never touch it. Prefer lazy construction for clients that need credentials.
