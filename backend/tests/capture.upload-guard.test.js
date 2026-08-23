@@ -168,3 +168,22 @@ describe('SEC-07 — POST /capture size and type rejection', () => {
     expect(res.body.path).toMatch(/\.png$/);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────
+// The upload route reads multer's error contract directly: it branches on
+// `instanceof multer.MulterError` and on the LIMIT_FILE_SIZE code. Both are
+// checked above; this pins the remaining arm, so a future major version that
+// renames or reclassifies an error is caught here rather than in production.
+// ─────────────────────────────────────────────────────────────────
+describe('multer error contract', () => {
+  test('400 — a file sent under an unexpected field name is refused', async () => {
+    const res = await request(app)
+      .post('/capture')
+      .set(H)
+      .field('projectId', 'capture-project')
+      .attach('screenshot', TINY_PNG, { filename: 'shot.png', contentType: 'image/png' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/unexpected field/i);
+  });
+});

@@ -370,6 +370,9 @@ app.post('/capture', requireAuth('user'), requireMultipart, rejectOversizedUploa
       if (err.code === 'LIMIT_FILE_SIZE') {
         return res.status(413).json({ error: `Payload Too Large: File exceeds ${MAX_UPLOAD_MB}MB limit` });
       }
+      // Every other MulterError is a malformed request: an unexpected field, too
+      // many parts, a field name that is too long or nested too deeply. multer 2.x
+      // added codes to this set, and they all belong in this same 400.
       return res.status(400).json({ error: err.message });
     } else if (err) {
       // fileFilter rejections carry their own status; errorHandler honours it.
