@@ -4,8 +4,6 @@
 // ─────────────────────────────────────────────────────────────────
 'use strict';
 
-process.env.NODE_ENV             = 'test';
-process.env.FIRESTORE_EMULATOR_HOST = process.env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8080';
 
 const { sanitize, buildObjectPath, app } = require('../src/index');
 
