@@ -14,7 +14,8 @@ The repository is structured into distinct functional areas:
   - `docs/architecture.md` — Consolidated architecture decisions, Firestore schemas, and time-tracking specs.
   - `docs/planning/` — Sprint plans (`sprintplan2.md`, `projectplan.md`, `sprint21.md`).
 - `mdarchives/` — Archived and deprecated plans/documentation.
-- `.agent/` — Instructions and guidance for AI agents (including `AI_GUIDANCE.md`).
+- `AGENTS.md` — Project rules and guardrails for developers and AI agents (single source of truth).
+- `.agent/` — Legacy location; `AI_GUIDANCE.md` is now a stub pointing at `AGENTS.md`.
 
 ## Development & Local Setup
 
