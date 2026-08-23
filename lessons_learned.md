@@ -505,6 +505,7 @@ Run this before starting any new sprint:
 - When rejecting a request before its body is read, drain the remainder and answer on `end`. Draining discards bytes as they arrive; it does not buffer them, so the memory protection is unchanged.
 - Cap the drain. `Content-Length` is attacker-controlled, so draining without a ceiling lets one request cost the server an arbitrary amount of reading. Past the budget, destroy the request and accept that the client loses its answer.
 - Treat `ECONNRESET` in a test that asserts an error status as evidence about *when* the server replied, not as flakiness.
+- multer 2.x drains for its own errors: it waits for the request before calling `next(err)`, with a source comment naming EPIPE as the reason. Two things this does **not** give you. It cannot cover a guard that runs *before* multer, which is why the pre-multer guard drains for itself. And multer own drain has no ceiling, so a rejected upload with no `Content-Length` is read in full before the client is answered — the guard's budget does not apply to it.
 
 ---
 

@@ -175,6 +175,22 @@ function requireMultipart(req, res, next) {
   next();
 }
 
+// multer 2.x listens for 'error', 'aborted' and 'close' on the request and
+// surfaces them to the route; 1.x had no such listeners. These are plain Errors
+// with no status, so left alone they become a 500 and an ERROR-severity log
+// line. A Monitored User closing a laptop lid mid-Capture is an ordinary event
+// on the network theHammer runs over, not a server fault, and must not read as
+// one in the logs.
+const CLIENT_DISCONNECT_MESSAGES = new Set([
+  'Request closed',
+  'Request aborted',
+  'Request error'
+]);
+
+function isClientDisconnect(err) {
+  return Boolean(err) && CLIENT_DISCONNECT_MESSAGES.has(err.message);
+}
+
 /**
  * SEC-07 — refuse an oversized upload before multer buffers it.
  *
@@ -370,7 +386,16 @@ app.post('/capture', requireAuth('user'), requireMultipart, rejectOversizedUploa
       if (err.code === 'LIMIT_FILE_SIZE') {
         return res.status(413).json({ error: `Payload Too Large: File exceeds ${MAX_UPLOAD_MB}MB limit` });
       }
+      // Every other MulterError is a malformed request: an unexpected field, too
+      // many parts, a field name that is too long or nested too deeply. multer 2.x
+      // added LIMIT_FIELD_NESTING to that set, and it belongs in this same 400.
       return res.status(400).json({ error: err.message });
+    } else if (isClientDisconnect(err)) {
+      // The upload ended before it arrived. There may be no socket left to
+      // answer on, so say what happened at info level and stop.
+      logger.info(`[hammer-api] capture upload ended early: ${err.message}`);
+      if (res.headersSent) return;
+      return res.status(400).json({ error: 'Upload did not complete' });
     } else if (err) {
       // fileFilter rejections carry their own status; errorHandler honours it.
       return next(err);
@@ -632,4 +657,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { app, sanitize, buildObjectPath, sha256, rejectOversizedUpload, analystReportLimiter, videoExportLimiter };
+module.exports = { app, sanitize, buildObjectPath, sha256, rejectOversizedUpload, isClientDisconnect, analystReportLimiter, videoExportLimiter };

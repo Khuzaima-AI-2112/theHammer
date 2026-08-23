@@ -15,7 +15,7 @@ jest.mock('@google-cloud/storage', () => require('./helpers/gcsMock').createStor
 
 process.env.GCS_BUCKET = 'fake-bucket';
 
-const { app, rejectOversizedUpload } = require('../src/index');
+const { app, rejectOversizedUpload, isClientDisconnect } = require('../src/index');
 const { CONFIG_DEFAULTS } = require('../src/lib/defaults');
 const { clearDatabase, seedUser, seedProject } = require('./helpers/fixtures');
 
@@ -166,5 +166,47 @@ describe('SEC-07 — POST /capture size and type rejection', () => {
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
     expect(res.body.path).toMatch(/\.png$/);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────
+// The upload route reads multer's error contract directly: it branches on
+// `instanceof multer.MulterError` and on the LIMIT_FILE_SIZE code. Both are
+// checked above; this pins the remaining arm, so a future major version that
+// renames or reclassifies an error is caught here rather than in production.
+// ─────────────────────────────────────────────────────────────────
+describe('multer error contract', () => {
+  test('400 — a file sent under an unexpected field name is refused', async () => {
+    const res = await request(app)
+      .post('/capture')
+      .set(H)
+      .field('projectId', 'capture-project')
+      .attach('wrongField', TINY_PNG, { filename: 'shot.png', contentType: 'image/png' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/unexpected field/i);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────
+// multer 2.x listens for request 'error', 'aborted' and 'close' and surfaces
+// them to the route; 1.x did not. Untreated they become a 500 and an
+// ERROR-severity log for what is an ordinary dropped upload, so the route
+// classifies them. These cases pin that classification: the abort path cannot
+// be provoked through supertest, but the decision it turns on can be.
+// ─────────────────────────────────────────────────────────────────
+describe('SEC-07 — client disconnects are not server errors', () => {
+  test.each([
+    ['Request closed'],
+    ['Request aborted'],
+    ['Request error']
+  ])('recognises %s as a client disconnect', (message) => {
+    expect(isClientDisconnect(new Error(message))).toBe(true);
+  });
+
+  test('does not swallow a genuine server fault', () => {
+    expect(isClientDisconnect(new Error('Firestore unavailable'))).toBe(false);
+    expect(isClientDisconnect(null)).toBe(false);
+    expect(isClientDisconnect(undefined)).toBe(false);
   });
 });
