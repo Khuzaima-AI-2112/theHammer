@@ -82,10 +82,33 @@ app.use(express.json());
 const BUCKET_NAME = process.env.GCS_BUCKET;
 const gcs = new Storage();
 
+// ── Upload limits ────────────────────────────────────────────────
+// A Capture is always a PNG: buildObjectPath() names the object .png and the
+// bucket write hardcodes image/png, so anything else would be stored under a
+// content type it isn't.
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+const ACCEPTED_UPLOAD_TYPE = 'image/png';
+
+// The pre-multer guard reads Content-Length, which covers the whole multipart
+// envelope: the file plus its part headers, boundaries and the other fields.
+// The allowance keeps a legitimate at-the-limit file from being refused for the
+// envelope around it, and leaves multer's own limit as the exact per-file check.
+const MULTIPART_ENVELOPE_ALLOWANCE = 64 * 1024;
+const MAX_REQUEST_BYTES = MAX_UPLOAD_BYTES + MULTIPART_ENVELOPE_ALLOWANCE;
+
 // ── Multer (memory storage, 10 MB) ───────────────────────────────
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 }
+  limits: { fileSize: MAX_UPLOAD_BYTES },
+  // Runs as the part header is parsed, before the file contents are buffered.
+  fileFilter: (_req, file, cb) => {
+    if (file.mimetype !== ACCEPTED_UPLOAD_TYPE) {
+      const err = new Error(`Unsupported file type: expected ${ACCEPTED_UPLOAD_TYPE}, received ${file.mimetype}`);
+      err.isUnsupportedType = true;
+      return cb(err);
+    }
+    cb(null, true);
+  }
 });
 
 // ─────────────────────────────────────────────────────────────────
@@ -130,6 +153,40 @@ function requireMultipart(req, res, next) {
       error: 'Content-Type must be multipart/form-data',
       received: ct.slice(0, 120) || '(none)'
     });
+  }
+  next();
+}
+
+/**
+ * SEC-07 — refuse an oversized upload before multer buffers it.
+ *
+ * The verdict comes from the Content-Length header alone, so an over-limit
+ * request is answered without reading its body into memory. A request that
+ * declares no length, or one inside the limit, passes through to multer, whose
+ * own fileSize limit remains the exact per-file check.
+ */
+function rejectOversizedUpload(req, res, next) {
+  const declared = Number(req.headers['content-length']);
+  if (Number.isFinite(declared) && declared > MAX_REQUEST_BYTES) {
+    const reply = () => {
+      if (res.headersSent) return;
+      res.status(413).json({
+        error: `Payload Too Large: request exceeds ${MAX_UPLOAD_BYTES / (1024 * 1024)}MB limit`,
+        declaredBytes: declared
+      });
+    };
+
+    // Answering while the client is still uploading resets the socket, and the
+    // client sees ECONNRESET rather than the 413 — which would leave the
+    // extension retrying a Capture that can never succeed. So drain the rest of
+    // the request, then answer. Draining discards bytes as they arrive; nothing
+    // is buffered and multer never runs, which is the point of refusing here.
+    if (typeof req.resume !== 'function') return reply();
+    req.on('end', reply);
+    req.on('error', reply);
+    req.on('aborted', reply);
+    req.resume();
+    return;
   }
   next();
 }
@@ -276,12 +333,14 @@ app.post('/upload-url', requireAuth('user'), async (req, res, next) => {
 });
 
 // ─ POST /capture ──────────────────────────────────────────────────
-app.post('/capture', requireAuth('user'), requireMultipart, (req, res, next) => {
+app.post('/capture', requireAuth('user'), requireMultipart, rejectOversizedUpload, (req, res, next) => {
   upload.single('file')(req, res, (err) => {
     if (err instanceof multer.MulterError) {
       if (err.code === 'LIMIT_FILE_SIZE') {
         return res.status(413).json({ error: 'Payload Too Large: File exceeds 10MB limit' });
       }
+      return res.status(400).json({ error: err.message });
+    } else if (err && err.isUnsupportedType) {
       return res.status(400).json({ error: err.message });
     } else if (err) {
       return next(err);
@@ -543,4 +602,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { app, sanitize, buildObjectPath, sha256, analystReportLimiter, videoExportLimiter };
+module.exports = { app, sanitize, buildObjectPath, sha256, rejectOversizedUpload, analystReportLimiter, videoExportLimiter };
