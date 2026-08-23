@@ -83,20 +83,38 @@ const BUCKET_NAME = process.env.GCS_BUCKET;
 const gcs = new Storage();
 
 // ── Upload limits ────────────────────────────────────────────────
+// The ceiling itself lives in lib/defaults.js, which megamind.md names the OSOT
+// for configuration defaults and which /admin/me reports as the enforced upload
+// size. Read it, do not restate it.
+const { CONFIG_DEFAULTS } = require('./lib/defaults');
+const MAX_UPLOAD_BYTES = CONFIG_DEFAULTS.maxFileSizeBytes;
+const MAX_UPLOAD_MB = MAX_UPLOAD_BYTES / (1024 * 1024);
+
 // A Capture is always a PNG: buildObjectPath() names the object .png and the
 // bucket write hardcodes image/png, so anything else would be stored under a
 // content type it isn't.
-const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 const ACCEPTED_UPLOAD_TYPE = 'image/png';
 
 // The pre-multer guard reads Content-Length, which covers the whole multipart
 // envelope: the file plus its part headers, boundaries and the other fields.
 // The allowance keeps a legitimate at-the-limit file from being refused for the
 // envelope around it, and leaves multer's own limit as the exact per-file check.
+//
+// Two bounds this leaves open, both closed by that multer limit rather than by
+// the guard, and neither of which lets memory grow past MAX_UPLOAD_BYTES:
+//   - a body between the file limit and the limit plus the allowance
+//   - a chunked request, which carries no Content-Length to judge
 const MULTIPART_ENVELOPE_ALLOWANCE = 64 * 1024;
 const MAX_REQUEST_BYTES = MAX_UPLOAD_BYTES + MULTIPART_ENVELOPE_ALLOWANCE;
 
-// ── Multer (memory storage, 10 MB) ───────────────────────────────
+// How much of a refused upload the server will read and throw away so the client
+// can receive its 413 (see rejectOversizedUpload). Content-Length is
+// attacker-controlled, so draining without a ceiling would let one request cost
+// the server arbitrary bandwidth. The budget covers a plausibly oversized
+// Capture — a real client still gets its answer — and cuts off anything beyond.
+const DRAIN_BUDGET_BYTES = 2 * MAX_REQUEST_BYTES;
+
+// ── Multer (memory storage, PNG only, size-limited) ──────────────
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: MAX_UPLOAD_BYTES },
@@ -104,7 +122,7 @@ const upload = multer({
   fileFilter: (_req, file, cb) => {
     if (file.mimetype !== ACCEPTED_UPLOAD_TYPE) {
       const err = new Error(`Unsupported file type: expected ${ACCEPTED_UPLOAD_TYPE}, received ${file.mimetype}`);
-      err.isUnsupportedType = true;
+      err.status = 400;
       return cb(err);
     }
     cb(null, true);
@@ -168,10 +186,12 @@ function requireMultipart(req, res, next) {
 function rejectOversizedUpload(req, res, next) {
   const declared = Number(req.headers['content-length']);
   if (Number.isFinite(declared) && declared > MAX_REQUEST_BYTES) {
+    let replied = false;
     const reply = () => {
-      if (res.headersSent) return;
+      if (replied || res.headersSent) return;
+      replied = true;
       res.status(413).json({
-        error: `Payload Too Large: request exceeds ${MAX_UPLOAD_BYTES / (1024 * 1024)}MB limit`,
+        error: `Payload Too Large: request exceeds ${MAX_UPLOAD_MB}MB limit`,
         declaredBytes: declared
       });
     };
@@ -181,11 +201,22 @@ function rejectOversizedUpload(req, res, next) {
     // extension retrying a Capture that can never succeed. So drain the rest of
     // the request, then answer. Draining discards bytes as they arrive; nothing
     // is buffered and multer never runs, which is the point of refusing here.
-    if (typeof req.resume !== 'function') return reply();
+    //
+    // The drain is capped: Content-Length is attacker-controlled, so a request
+    // claiming to be enormous would otherwise cost the server that much reading.
+    // Past the budget the client loses its answer, which is the right trade at
+    // a size no real Capture reaches.
+    let drained = 0;
+    req.on('data', (chunk) => {
+      drained += chunk.length;
+      if (drained > DRAIN_BUDGET_BYTES) {
+        reply();
+        req.destroy();
+      }
+    });
     req.on('end', reply);
     req.on('error', reply);
     req.on('aborted', reply);
-    req.resume();
     return;
   }
   next();
@@ -337,12 +368,11 @@ app.post('/capture', requireAuth('user'), requireMultipart, rejectOversizedUploa
   upload.single('file')(req, res, (err) => {
     if (err instanceof multer.MulterError) {
       if (err.code === 'LIMIT_FILE_SIZE') {
-        return res.status(413).json({ error: 'Payload Too Large: File exceeds 10MB limit' });
+        return res.status(413).json({ error: `Payload Too Large: File exceeds ${MAX_UPLOAD_MB}MB limit` });
       }
       return res.status(400).json({ error: err.message });
-    } else if (err && err.isUnsupportedType) {
-      return res.status(400).json({ error: err.message });
     } else if (err) {
+      // fileFilter rejections carry their own status; errorHandler honours it.
       return next(err);
     }
     next();

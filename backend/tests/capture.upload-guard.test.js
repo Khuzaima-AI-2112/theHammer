@@ -8,28 +8,19 @@
 // ─────────────────────────────────────────────────────────────────
 'use strict';
 
+const { EventEmitter } = require('events');
 const request = require('supertest');
 
-jest.mock('@google-cloud/storage', () => {
-  const mockFile = jest.fn().mockImplementation(function (name) {
-    this.name = name;
-    this.save = jest.fn().mockResolvedValue();
-    this.getSignedUrl = jest.fn().mockResolvedValue(['https://example.test/read-url']);
-  });
-
-  return {
-    Storage: jest.fn().mockImplementation(() => ({
-      bucket: () => ({ file: (name) => new mockFile(name) })
-    }))
-  };
-});
+jest.mock('@google-cloud/storage', () => require('./helpers/gcsMock').createStorageMock());
 
 process.env.GCS_BUCKET = 'fake-bucket';
 
 const { app, rejectOversizedUpload } = require('../src/index');
+const { CONFIG_DEFAULTS } = require('../src/lib/defaults');
 const { clearDatabase, seedUser, seedProject } = require('./helpers/fixtures');
 
 const MB = 1024 * 1024;
+const MAX_BYTES = CONFIG_DEFAULTS.maxFileSizeBytes;
 const H = { 'x-dev-user-email': 'capture-user@test.com' };
 
 // A real, if tiny, PNG. Only the declared part type is inspected, but using a
@@ -50,33 +41,44 @@ afterAll(async () => {
 });
 
 // ─────────────────────────────────────────────────────────────────
-// The guard decides from headers alone. This is the part that makes it
-// "pre-multer": no request body is read to reach the verdict.
+// The guard decides from headers alone. This is what makes it pre-multer:
+// no request body is read to reach the verdict.
 // ─────────────────────────────────────────────────────────────────
 describe('SEC-07 — rejectOversizedUpload decides from headers alone', () => {
+  function fakeReq(contentLength) {
+    const req = new EventEmitter();
+    req.headers = contentLength === null ? {} : { 'content-length': String(contentLength) };
+    req.destroyed = false;
+    req.destroy = () => { req.destroyed = true; };
+    return req;
+  }
+
   function fakeRes() {
     return {
       statusCode: null,
       payload: null,
-      status(code) { this.statusCode = code; return this; },
+      headersSent: false,
+      status(code) { this.statusCode = code; this.headersSent = true; return this; },
       json(body) { this.payload = body; return this; }
     };
   }
 
-  test('refuses an over-limit Content-Length without touching the body', () => {
-    const req = { headers: { 'content-length': String(12 * MB) } };
+  test('refuses an over-limit Content-Length without reading the body', () => {
+    const req = fakeReq(12 * MB);
     const res = fakeRes();
     let nextCalled = false;
 
     rejectOversizedUpload(req, res, () => { nextCalled = true; });
 
+    // The verdict is reached before any byte arrives: no 'data' has been emitted.
     expect(nextCalled).toBe(false);
+    req.emit('end');
     expect(res.statusCode).toBe(413);
     expect(res.payload.error).toMatch(/too large/i);
   });
 
   test('passes a within-limit Content-Length through to multer', () => {
-    const req = { headers: { 'content-length': String(1 * MB) } };
+    const req = fakeReq(1 * MB);
     const res = fakeRes();
     let nextCalled = false;
 
@@ -87,13 +89,29 @@ describe('SEC-07 — rejectOversizedUpload decides from headers alone', () => {
   });
 
   test('passes a request with no Content-Length through to multer', () => {
-    const req = { headers: {} };
+    const req = fakeReq(null);
     const res = fakeRes();
     let nextCalled = false;
 
     rejectOversizedUpload(req, res, () => { nextCalled = true; });
 
     expect(nextCalled).toBe(true);
+  });
+
+  test('stops draining a body that claims an implausible size', () => {
+    const req = fakeReq(5 * 1024 * MB); // 5GB
+    const res = fakeRes();
+
+    rejectOversizedUpload(req, res, () => {});
+
+    // Feed it well past the drain budget; the guard must cut the request off
+    // rather than read an attacker-chosen number of bytes.
+    for (let i = 0; i < 64 && !req.destroyed; i += 1) {
+      req.emit('data', Buffer.alloc(1 * MB));
+    }
+
+    expect(req.destroyed).toBe(true);
+    expect(res.statusCode).toBe(413);
   });
 });
 
@@ -104,7 +122,7 @@ describe('SEC-07 — POST /capture size and type rejection', () => {
       .post('/capture')
       .set(H)
       .field('projectId', 'capture-project')
-      .attach('file', Buffer.alloc(12 * MB, 1), { filename: 'huge.png', contentType: 'image/png' });
+      .attach('file', Buffer.alloc(MAX_BYTES + 2 * MB, 1), { filename: 'huge.png', contentType: 'image/png' });
 
     expect(res.status).toBe(413);
     // Distinct wording proves the pre-multer guard fired, not multer's limit.
@@ -112,13 +130,13 @@ describe('SEC-07 — POST /capture size and type rejection', () => {
   });
 
   test('413 — multer’s own limit still backstops a body that slips past the guard', async () => {
-    // Just over multer's 10MB file limit but inside the guard's envelope
-    // allowance, so the guard passes it and multer must catch it.
+    // Just over multer's file limit but inside the guard's envelope allowance,
+    // so the guard passes it and multer must catch it.
     const res = await request(app)
       .post('/capture')
       .set(H)
       .field('projectId', 'capture-project')
-      .attach('file', Buffer.alloc(10 * MB + 1024, 1), { filename: 'big.png', contentType: 'image/png' });
+      .attach('file', Buffer.alloc(MAX_BYTES + 1024, 1), { filename: 'big.png', contentType: 'image/png' });
 
     expect(res.status).toBe(413);
     expect(res.body.error).toMatch(/File exceeds/i);
