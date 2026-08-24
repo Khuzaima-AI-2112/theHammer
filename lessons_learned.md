@@ -547,3 +547,16 @@ Run this before starting any new sprint:
 **Rule going forward:**
 - Before deleting a test, check what state it leaves behind and grep the rest of the file for tests that consume it. A comment describing state the test never set is the tell.
 - Fix such a test by giving it its own setup rather than by preserving the deleted one. Order-dependent tests pass in file order and fail under `--shuffle`, `.only`, or any future deletion.
+
+---
+
+### 46. Retiring an auth mechanism leaves incident-response procedures that fail silently
+
+**What happened:** Issue #4 removed the last of the API key surface from the backend. `docs/runbook.md` §3, "Revoke Compromised API Key", still instructed the on-call operator to open the Firestore Console, find the `api_keys` collection, and set `isActive: false` on the user's keys — then tell the user to generate a new Personal API Key from the Admin Portal.
+
+**Root cause:** The runbook was written against the old mechanism and nothing tied it to the code. Every step is individually plausible and the whole procedure is inert: the collection does not exist, so filtering it returns nothing, and an operator following the steps sees no error. Under a live credential compromise they would conclude the credential was revoked when nothing had been revoked at all. A stale comment misleads a reader; a stale runbook misleads an operator during an incident.
+
+**Rule going forward:**
+- When removing an authentication or authorisation mechanism, grep `docs/runbook.md` and any other operational procedure for it in the same PR. Code and tests are not the whole surface of an auth change.
+- A procedure that silently does nothing is worse than one that errors. Prefer steps that fail loudly when their assumptions no longer hold.
+- State revocation latency explicitly. `requireAuth` calls `verifyIdToken(token)` without `{ checkRevoked: true }`, so `revokeRefreshTokens(uid)` stops new tokens being minted but leaves an already-issued ID token accepted until it expires — up to an hour. A runbook that omits this implies an immediacy the system does not provide.

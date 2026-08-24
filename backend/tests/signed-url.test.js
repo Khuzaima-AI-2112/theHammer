@@ -4,7 +4,7 @@
 // Tasks covered:
 //   3.1 — Validate required fields; 400 with field name on missing
 //   3.3 — Returns { signedUrl, path }; path embedded in URL matches path field
-//   2.7 — 401 on missing/wrong API key (regression)
+//   2.7 — 401 on missing/wrong Authorization header (regression)
 //
 // GCS signing is mocked — unit tests should not make real network calls.
 // ─────────────────────────────────────────────────────────────────

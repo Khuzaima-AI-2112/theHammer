@@ -7,12 +7,15 @@
  * *absence* of that surface, so a future change that reintroduces it fails here
  * rather than quietly re-opening a retired authentication path.
  *
- * Authentication itself is covered by tests/auth.firebase-token.test.js.
+ * Authentication itself is covered by tests/auth.firebase-token.test.js, and
+ * the matching CORS assertion lives in tests/validation.test.js — that suite
+ * already loads the app, so asserting it here would cost a second app boot for
+ * one header check.
+ *
+ * Deliberately requires neither the app nor the emulator.
  */
 
 'use strict';
-
-const request = require('supertest');
 
 describe('Issue #4 — API key surface is gone from the backend', () => {
   test('the collections module exports no API_KEYS constant', () => {
@@ -29,17 +32,5 @@ describe('Issue #4 — API key surface is gone from the backend', () => {
   test('the key rotation worker module no longer exists', () => {
     expect(() => require.resolve('../src/worker/keyRotationWorker'))
       .toThrow(expect.objectContaining({ code: 'MODULE_NOT_FOUND' }));
-  });
-
-  test('CORS no longer advertises X-Api-Key, and still advertises Authorization', async () => {
-    const { app } = require('../src/index');
-
-    const res = await request(app).options('/health');
-
-    expect(res.status).toBe(204);
-    const allowed = res.headers['access-control-allow-headers'];
-    expect(allowed).not.toMatch(/x-api-key/i);
-    expect(allowed).toMatch(/Authorization/);
-    expect(allowed).toMatch(/Content-Type/);
   });
 });
