@@ -518,3 +518,45 @@ Run this before starting any new sprint:
 **Rule going forward:**
 - Give a header-based size guard an explicit envelope allowance above the per-file limit, and leave the parser's own per-file limit as the exact check.
 - Accept what this leaves open, and write it down: a body between the file limit and the limit plus the allowance, and a chunked request carrying no `Content-Length` at all, both reach the parser. Neither can grow memory past the per-file limit, which is what the guard exists to protect.
+
+---
+
+### 44. A deletion is not proven by a test that was already passing
+
+**What happened:** Issue #4 removed a retired API key surface. Two of the tests written to prove the removal passed *before* a single line was deleted, and would have been committed as evidence of work that had not happened yet.
+
+**Root cause:** Both tests could be satisfied by something other than the deletion.
+
+- `expect(() => require('../src/worker/keyRotationWorker')).toThrow({ code: 'MODULE_NOT_FOUND' })` was green while the file was still on disk. The worker's own `require('../../lib/firestore')` pointed at a path that does not exist, so loading it threw `MODULE_NOT_FOUND` for a reason that had nothing to do with the file being deleted. `require()` cannot distinguish "this module is gone" from "this module is present and broken".
+- `expect((await db.collection('api_keys').get()).empty).toBe(true)` was green because that suite never seeds a key. The assertion held vacuously, and would have gone on holding no matter what the route wrote.
+
+**Rule going forward:**
+- To assert a module is gone, use `require.resolve`, which only consults the filesystem, never the module body.
+- To assert a write no longer happens, seed the document the write would have touched and assert it is *unchanged*. An empty-collection assertion in a suite that seeds nothing proves nothing.
+- Run every new test against the *un*changed code first and read which ones pass. A test that is green before the fix is either testing the wrong thing or testing nothing; a deletion ticket makes this easy to miss, because "the behaviour is absent" is also true of behaviour that was never exercised.
+- Where a test is unavoidably green on arrival — a regression guard around code the change must not break — prove it can fail by mutating the code under test and watching it go red. The Firebase ID token test in `tests/auth.firebase-token.test.js` was verified this way.
+
+---
+
+### 45. Deleting a test can break the test after it
+
+**What happened:** Issue #4 deleted the integration test asserting that role updates sync to `api_keys`. The next test in the file, which checks that an analyst may generate reports, then failed: its comment read `// Analyst (user is currently analyst)`.
+
+**Root cause:** The deleted test had promoted the user to `analyst` as a side effect, and the following test read that role instead of establishing its own. The dependency was invisible in the passing suite and only surfaced when the earlier test was removed.
+
+**Rule going forward:**
+- Before deleting a test, check what state it leaves behind and grep the rest of the file for tests that consume it. A comment describing state the test never set is the tell.
+- Fix such a test by giving it its own setup rather than by preserving the deleted one. Order-dependent tests pass in file order and fail under `--shuffle`, `.only`, or any future deletion.
+
+---
+
+### 46. Retiring an auth mechanism leaves incident-response procedures that fail silently
+
+**What happened:** Issue #4 removed the last of the API key surface from the backend. `docs/runbook.md` §3, "Revoke Compromised API Key", still instructed the on-call operator to open the Firestore Console, find the `api_keys` collection, and set `isActive: false` on the user's keys — then tell the user to generate a new Personal API Key from the Admin Portal.
+
+**Root cause:** The runbook was written against the old mechanism and nothing tied it to the code. Every step is individually plausible and the whole procedure is inert: the collection does not exist, so filtering it returns nothing, and an operator following the steps sees no error. Under a live credential compromise they would conclude the credential was revoked when nothing had been revoked at all. A stale comment misleads a reader; a stale runbook misleads an operator during an incident.
+
+**Rule going forward:**
+- When removing an authentication or authorisation mechanism, grep `docs/runbook.md` and any other operational procedure for it in the same PR. Code and tests are not the whole surface of an auth change.
+- A procedure that silently does nothing is worse than one that errors. Prefer steps that fail loudly when their assumptions no longer hold.
+- State revocation latency explicitly. `requireAuth` calls `verifyIdToken(token)` without `{ checkRevoked: true }`, so `revokeRefreshTokens(uid)` stops new tokens being minted but leaves an already-issued ID token accepted until it expires — up to an hour. A runbook that omits this implies an immediacy the system does not provide.

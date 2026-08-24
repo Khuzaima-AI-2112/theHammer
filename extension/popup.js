@@ -1,6 +1,7 @@
 // popup.js — Sprint 5.17
 // Changes from Sprint 5.16:
-//   5.17 — loadConfig() added: fetches GET /config with X-Api-Key on every
+//   5.17 — loadConfig() added: fetches GET /config with the Firebase ID token
+//          in an Authorization: Bearer header on every
 //          popup open (when a key exists) and writes the result into
 //          chrome.storage.local as settings.cloudRunUrl, settings.retention,
 //          settings.maxSize.
@@ -17,7 +18,8 @@
 //   5.16 — Session restore ordering fixed (savedProjectId passed to populate)
 //   5.16 — Stage dropdown wired into session save
 // Retained from Sprint 5.15:
-//   5.15 — User dropdown removed; identity resolved server-side via X-Api-Key
+//   5.15 — User dropdown removed; identity resolved server-side from the
+//          Firebase ID token
 //   5.15 — Backend URL field read-only; settings save: apiKey + notify only
 //   5.15 — no-key-banner shown when API key absent
 // Retained from Sprint 4:

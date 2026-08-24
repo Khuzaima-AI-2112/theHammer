@@ -15,7 +15,7 @@
 //          sessionEnd, totalCaptures, firstCapturePath, lastCapturePath,
 //          schemaVersion: 1, deleteAfter (sessionStart + 365 days ISO).
 // Sprint 5.15 changes (retained):
-//   — userId guard removed; identity resolved server-side via X-Api-Key.
+//   — userId guard removed; identity resolved server-side from the Firebase ID token.
 //   — capture() returns { reason: 'no_api_key' } when key absent.
 //   — uploadBlobWithSignedUrl: userId removed from POST body.
 // Sprint 4 additions (retained):
@@ -117,7 +117,7 @@ async function sessionFlush(reason) {
   const body = {
     sessionId:        s.sessionId,
     projectId:        s.projectId,
-    // userId resolved server-side from X-Api-Key (5.15)
+    // userId resolved server-side from the Firebase ID token (5.15)
     sessionStart:     s.sessionStart,
     sessionEnd:       now,
     totalCaptures:    s.totalCaptures,

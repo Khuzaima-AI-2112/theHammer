@@ -73,23 +73,10 @@ async function seedMembership(projectId, userId, data = {}) {
   return docRef;
 }
 
-async function seedApiKey(id, userId, data = {}) {
-  const defaultKey = {
-    userId,
-    role: 'user',
-    isActive: true,
-    schemaVersion: 1
-  };
-  const docRef = db.collection(collections.API_KEYS).doc(id);
-  await docRef.set({ ...defaultKey, ...data });
-  return docRef;
-}
-
 module.exports = {
   HEADERS,
   clearDatabase,
   seedUser,
   seedProject,
-  seedMembership,
-  seedApiKey
+  seedMembership
 };

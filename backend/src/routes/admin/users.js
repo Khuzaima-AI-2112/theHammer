@@ -269,15 +269,7 @@ router.patch('/users/:id', requireAdmin, async (req, res, next) => {
       const snap = await tx.get(userRef);
       if (!snap.exists) throw Object.assign(new Error('user not found'), { status: 404 });
 
-      let keysToUpdate = [];
-      if (updates.role) {
-        const keysQuery = db.collection(collections.API_KEYS).where('userId', '==', userId);
-        const keysSnap = await tx.get(keysQuery);
-        keysSnap.forEach(k => keysToUpdate.push(k.ref));
-      }
-
       tx.update(userRef, updates);
-      keysToUpdate.forEach(ref => tx.update(ref, { role: updates.role, updatedAt: updates.updatedAt }));
     });
 
     const updatedSnap = await userRef.get();

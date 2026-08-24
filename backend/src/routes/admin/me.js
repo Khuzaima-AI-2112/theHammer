@@ -12,15 +12,15 @@
  *
  * GET /me/projects
  *   Returns the list of projects the caller is a member of.
- *   Auth: X-Api-Key header resolved against Firestore api_keys collection.
+ *   Auth: Firebase ID token in an Authorization: Bearer header.
  *   Response: 200 { projects: [...], total }
- *             401 { error: 'missing or invalid API key' }
+ *             401 { error: 'unauthenticated: missing Bearer token' }
  *
  * GET /config
  *   Returns global extension settings stored in Firestore config/global doc.
- *   Auth: X-Api-Key (any valid key holder may read config).
+ *   Auth: Firebase ID token (any authenticated user may read config).
  *   Response: 200 { retentionDays, maxFileSizeBytes, defaultCaptureQuality, ... }
- *             401 { error: 'missing or invalid API key' }
+ *             401 { error: 'unauthenticated: missing Bearer token' }
  *
  * PATCH /config
  *   Updates global extension settings. Admin-only (requireAdmin / IAP).
@@ -75,7 +75,7 @@ router.get('/me', requireAuth('user'), async (req, res, next) => {
 
 // ─────────────────────────────────────────────────────────────────
 // GET /me/projects  —  Sprint 5.8b
-// Resolves identity from X-Api-Key; returns only projects the caller
+// Resolves identity from the Firebase ID token; returns only projects the caller
 // is a member of, ordered by project name ascending.
 // ─────────────────────────────────────────────────────────────────
 
@@ -133,7 +133,7 @@ router.get('/me/projects', requireAuth('user'), async (req, res, next) => {
 // ─────────────────────────────────────────────────────────────────
 // GET /config  —  Sprint 5.8c
 // Returns global extension settings from Firestore config/global.
-// Readable by any holder of a valid API key (all roles).
+// Readable by any authenticated user (all roles).
 // Admins write this config via PATCH /config (task 5.12b).
 //
 // Firestore path: config/global

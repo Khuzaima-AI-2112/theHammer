@@ -7,6 +7,24 @@
 
 const { sanitize, buildObjectPath, app } = require('../src/index');
 
+// ── CORS header advertisement (issue #4) ─────────────────────────
+// Lives here rather than beside the other issue #4 assertions in
+// api-key-removal.test.js: this suite already loads the app, and that one
+// deliberately does not.
+describe('CORS Access-Control-Allow-Headers', () => {
+  const request = require('supertest');
+
+  test('no longer advertises X-Api-Key, and still advertises Authorization', async () => {
+    const res = await request(app).options('/health');
+
+    expect(res.status).toBe(204);
+    const allowed = res.headers['access-control-allow-headers'];
+    expect(allowed).not.toMatch(/x-api-key/i);
+    expect(allowed).toMatch(/Authorization/);
+    expect(allowed).toMatch(/Content-Type/);
+  });
+});
+
 // ── sanitize() ───────────────────────────────────────────────────
 describe('sanitize()', () => {
   test('strips path traversal sequences', () => {
@@ -77,10 +95,9 @@ describe('requireMultipart() pre-multer Content-Type guard', () => {
     const res = await request(app)
       .post('/capture')
       .set('Content-Type', 'application/json')
-      .set('X-Api-Key', process.env.API_KEY || 'test-key')
       .send(JSON.stringify({ projectId: 'p', userId: 'u' }));
 
-    // 400 = Content-Type guard fired; 401 = API key rejected first.
+    // 400 = Content-Type guard fired; 401 = auth rejected first.
     // Either confirms multer's buffer was never reached.
     expect([400, 401]).toContain(res.status);
     if (res.status === 400) {

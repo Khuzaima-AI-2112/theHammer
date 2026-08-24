@@ -33,16 +33,34 @@ If a video export job is stuck in the `processing` state for more than 15 minute
    ```
 3. Verify that the Cloud Run worker picks up the job on its next polling cycle.
 
-## 3. Revoke Compromised API Key
+## 3. Revoke a Compromised User Credential
 
-If a user's API key is leaked, it must be invalidated immediately to prevent unauthorized capture uploads or data access.
+API keys no longer exist (deprecated Sprint 23, removed from the code in issue
+#4). Authentication is a Firebase ID token in an `Authorization: Bearer` header,
+so revocation is a Firebase Auth operation, not a Firestore edit.
+
+**Read step 4 before you start.** Revocation is not immediate, and the previous
+version of this procedure edited an `api_keys` collection that no longer exists
+— it would have appeared to succeed while revoking nothing.
 
 **Procedure:**
-1. Identify the compromised API key or the `userId` associated with it.
-2. If you only know the `userId`, you can deactivate all their active keys:
-   - Navigate to the Firebase Console -> Firestore.
-   - Go to the `api_keys` collection.
-   - Filter by `userId == "TARGET_USER_ID"` and `isActive == true`.
-   - Update the `isActive` field to `false`.
-3. Inform the user to log into the Admin Portal and generate a new Personal API Key.
-4. Review Cloud Logging and the `activity` collection for any unauthorized actions performed by that key recently.
+1. Identify the `uid` of the affected user. The Firestore `users` document ID is
+   the uid; `GET /me` also returns it as `id`.
+2. Disable the account and revoke its refresh tokens, via the Firebase Console
+   (Authentication -> Users -> Disable account) or the Admin SDK:
+   ```javascript
+   const { getAuth } = require('firebase-admin/auth');
+   await getAuth().updateUser(uid, { disabled: true });
+   await getAuth().revokeRefreshTokens(uid);
+   ```
+3. Confirm the user re-authenticates through the Admin Portal once the account is
+   re-enabled. There is no key for them to regenerate.
+4. **Know the gap.** `backend/src/middleware/requireAuth.js` calls
+   `verifyIdToken(token)` without `{ checkRevoked: true }`, so an ID token already
+   issued stays accepted until it expires — up to one hour after revocation.
+   Revoking refresh tokens only stops new ones being minted. If the exposure
+   cannot tolerate that window, take the service offline rather than assuming
+   step 2 was immediate. Closing this gap is tracked separately; it is a
+   per-request behaviour change and was deliberately not made in issue #4.
+5. Review Cloud Logging and the `activity` collection for unauthorized actions
+   during the exposure window.
