@@ -77,10 +77,9 @@ describe('requireMultipart() pre-multer Content-Type guard', () => {
     const res = await request(app)
       .post('/capture')
       .set('Content-Type', 'application/json')
-      .set('X-Api-Key', process.env.API_KEY || 'test-key')
       .send(JSON.stringify({ projectId: 'p', userId: 'u' }));
 
-    // 400 = Content-Type guard fired; 401 = API key rejected first.
+    // 400 = Content-Type guard fired; 401 = auth rejected first.
     // Either confirms multer's buffer was never reached.
     expect([400, 401]).toContain(res.status);
     if (res.status === 400) {

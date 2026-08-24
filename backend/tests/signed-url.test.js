@@ -22,7 +22,6 @@ jest.mock('@google-cloud/storage', () => require('./helpers/gcsMock').createStor
 }));
 
 // Set required env vars before the app module loads
-process.env.API_KEY    = 'test-api-key';
 process.env.GCS_BUCKET = 'fake-bucket';
 
 const { db } = require('../src/lib/firestore');

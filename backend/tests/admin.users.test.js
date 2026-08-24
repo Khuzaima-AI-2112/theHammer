@@ -115,3 +115,51 @@ describe('POST + DELETE /admin/projects/:id/members', () => {
     expect(proj.data().memberCount).toBe(0);
   });
 });
+
+// ── Issue #4 — role updates after the api_keys sync was removed ───
+// PATCH used to gather api_keys refs inside its transaction and rewrite the
+// role onto each one. Removing that read changes the shape of the transaction,
+// so the role update itself needs a guard of its own; the second assertion
+// stops the retired collection from being written again.
+describe('PATCH /admin/users/:id — role updates', () => {
+  const targetId = 'test-patch-role-user';
+
+  beforeAll(async () => {
+    await seedUser(targetId, { email: 'patch-role@test.com', role: 'user' });
+  });
+
+  afterAll(async () => {
+    await db.collection('users').doc(targetId).delete().catch(() => {});
+  });
+
+  test('200 — persists the new role', async () => {
+    const res = await request(app).patch(`/admin/users/${targetId}`)
+      .set(H).send({ role: 'analyst' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.role).toBe('analyst');
+
+    const snap = await db.collection('users').doc(targetId).get();
+    expect(snap.data().role).toBe('analyst');
+  });
+
+  // Seeded raw rather than through a fixture helper: this document stands in
+  // for a key left behind in a real database after the code was removed. An
+  // empty-collection assertion would pass vacuously, since nothing in this
+  // suite writes keys either way.
+  test('leaves a leftover api_keys document untouched', async () => {
+    const keyRef = db.collection('api_keys').doc('leftover-key');
+    await keyRef.set({ userId: targetId, role: 'user', isActive: true });
+
+    const res = await request(app).patch(`/admin/users/${targetId}`)
+      .set(H).send({ role: 'admin' });
+    expect(res.status).toBe(200);
+    expect(res.body.role).toBe('admin');
+
+    const after = await keyRef.get();
+    expect(after.data().role).toBe('user');
+    expect(after.data()).not.toHaveProperty('updatedAt');
+
+    await keyRef.delete();
+  });
+});
