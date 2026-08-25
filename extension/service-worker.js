@@ -34,7 +34,42 @@ const ICON_DATA_URI =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ' +
   'AAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
 
-const FALLBACK_API_BASE = 'https://thehammer-backend-282689937365.northamerica-northeast1.run.app/api';
+// #26: no `/api` prefix. The backend mounts every route the extension calls at
+// the root — `app.use('/', require('./routes/admin/me'))` in backend/src/index.js
+// — so /api/config, /api/upload-url and /api/session-events are all 404.
+const FALLBACK_API_BASE = 'https://thehammer-backend-282689937365.northamerica-northeast1.run.app';
+
+// ─────────────────────────────────────────────────────────────────
+// #26 — apiBase(settings)
+//
+// Every call site used to read `settings.cloudRunUrl` raw and fall back to the
+// constant. A profile that cached the old prefixed URL keeps 404ing after the
+// constant is fixed, so the value is normalised where it is read as well as
+// being cleaned in storage below. Stripping is idempotent and safe to repeat.
+// ─────────────────────────────────────────────────────────────────
+function normaliseApiBase(url) {
+  return String(url ?? '')
+    .trim()
+    .replace(/\/+$/, '')     // trailing slashes
+    .replace(/\/api$/, '');  // the prefix that never existed on the backend
+}
+
+function apiBase(settings) {
+  return normaliseApiBase(settings?.cloudRunUrl) || FALLBACK_API_BASE;
+}
+
+// One-time cleanup of a cached bad URL, so the Settings panel and anything
+// reading storage directly stop showing a URL that cannot work. Reads are
+// normalised anyway, so nothing depends on this having run.
+(async () => {
+  const { settings } = await chrome.storage.local.get('settings');
+  const stored = settings?.cloudRunUrl;
+  if (!stored) return;
+  const cleaned = normaliseApiBase(stored);
+  if (cleaned === stored.trim()) return;
+  await chrome.storage.local.set({ settings: { ...settings, cloudRunUrl: cleaned } });
+  console.log('[Hammer SW] #26 cleaned cached API base:', stored, '->', cleaned);
+})();
 
 // ─────────────────────────────────────────────────────────────────
 // 6.1 / 6.2 / 6.3 — Session state helpers
@@ -151,7 +186,7 @@ async function sessionFlush(reason) {
   if (!s || s.flushed) return false;
 
   const { settings } = await chrome.storage.local.get('settings');
-  const cloudRunUrl = settings?.cloudRunUrl?.trim() || FALLBACK_API_BASE;
+  const cloudRunUrl = apiBase(settings);
   const token       = settings?.firebaseToken?.trim() || '';
   if (!token) return false;
 
@@ -315,7 +350,7 @@ function xhrPut(url, blob) {
   if (queue.length === 0) return;
 
   const { settings } = await chrome.storage.local.get('settings');
-  const cloudRunUrl = settings?.cloudRunUrl?.trim() || FALLBACK_API_BASE;
+  const cloudRunUrl = apiBase(settings);
   const token       = settings?.firebaseToken?.trim() || '';
   if (!cloudRunUrl || !token) return;
 
@@ -514,7 +549,7 @@ async function capture(tab, rect = null, dpr = 1, preCapturedDataUrl = null) {
   }
 
   const { settings } = await chrome.storage.local.get('settings');
-  const cloudRunUrl = settings?.cloudRunUrl?.trim() || FALLBACK_API_BASE;
+  const cloudRunUrl = apiBase(settings);
   const token       = settings?.firebaseToken?.trim() || '';
 
   if (!token) {
@@ -841,7 +876,7 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (!s || s.flushed) return;
 
   const { settings } = await chrome.storage.local.get('settings');
-  const cloudRunUrl = settings?.cloudRunUrl?.trim() || FALLBACK_API_BASE;
+  const cloudRunUrl = apiBase(settings);
   const token       = settings?.firebaseToken?.trim() || '';
 
   let enabled = false;
@@ -920,7 +955,7 @@ async function logInactivityEvent() {
   if (!s || s.flushed) return;
 
   const { settings } = await chrome.storage.local.get('settings');
-  const cloudRunUrl = settings?.cloudRunUrl?.trim() || FALLBACK_API_BASE;
+  const cloudRunUrl = apiBase(settings);
   const token       = settings?.firebaseToken?.trim() || '';
   const timerSeconds = settings?.inactivityTimerSeconds || 45;
 

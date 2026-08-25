@@ -3,6 +3,6 @@
     "@google-cloud/vertexai": "^1.12.0"
   },
   "scripts": {
-    "test:extension": "node --test extension/tests/session.test.js"
+    "test:extension": "node --test \"extension/tests/*.test.js\""
   }
 }
