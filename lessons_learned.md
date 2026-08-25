@@ -585,3 +585,13 @@ Run this before starting any new sprint:
 **Rule going forward:**
 - When a ticket cites test-case identifiers, open the document that defines them and quote the rows into the ticket before working on it. Identifiers are not self-explanatory and a plausible expansion of one is worth nothing.
 - Treat a `Done when` that cannot be traced back to its source as unstarted work. AGENTS.md rule 1 makes the condition absolute; that is only meaningful if the condition is the real one.
+
+### 49. A stub missing one global turns a success path into a silent failure path
+
+**What happened:** The service worker drains its offline queue at load, inside a top-level IIFE. The first `ACT-05` test seeded two queued captures, ran a snip, and asserted the queue was untouched — it came back empty, and the two captures had moved to `failed`. Nothing had gone wrong with the snip. The drain had run, and every item in it had thrown `ReferenceError: atob is not defined`, because `extension/tests/sw-harness.js` builds its own `vm` sandbox and `atob` was not among the globals it provided. The worker's own `try/catch` treated that as an upload failure and gave up on both captures, exactly as it would for a dead network.
+
+**Root cause:** Two things compounding. The sandbox is an allow-list of globals, so anything not listed is missing rather than wrong, and the missing thing only surfaces on a path the earlier tests never took. The worker then catches every error from that path identically, so an environment defect and a real upload failure are indistinguishable from the outside.
+
+**Rule going forward:**
+- When adding a test that reaches a new code path in the sandboxed worker, check the path's globals against the harness before trusting a failing assertion. A capture pipeline reaches for `atob`, `Blob`, `FormData`, `AbortController` and `XMLHttpRequest`, and none of them are in a bare `vm` context.
+- Do not write "state is unchanged" assertions against a module that does work at import time. Assert what the work should have achieved — here, that every queued capture was uploaded and none were given up on — which is what `ACT-05` was asking anyway.

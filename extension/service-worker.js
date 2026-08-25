@@ -479,6 +479,62 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     });
     return true; // async
   }
+  // ── #11: the two capture modes offered in the popup ──
+  // ACT-01 is protected by omission: plain screenshot capture (the toolbar
+  // popup's Capture Now, the floating button, Ctrl+Shift+S, the context menu)
+  // is not routed through any of this.
+  if (msg.type === 'CAPTURE_SNIP' || msg.type === 'CAPTURE_FULLPAGE') {
+    const snip = msg.type === 'CAPTURE_SNIP';
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (chrome.runtime.lastError) {
+        sendResponse({ ok: false, error: chrome.runtime.lastError.message });
+        return;
+      }
+      const tab = tabs && tabs[0];
+      if (!tab) {
+        sendResponse({ ok: false, error: 'No active tab' });
+        return;
+      }
+      const request = snip ? { type: 'SNIP_SELECT' } : { type: 'START_FULLPAGE_CAPTURE' };
+      chrome.tabs.sendMessage(tab.id, request, async (res) => {
+        // lastError must be read before the first await, or it is gone.
+        const noContentScript = chrome.runtime.lastError;
+        try {
+          if (noContentScript) {
+            // ACT-03: the content script is missing — a tab opened before the
+            // extension was loaded, the Web Store, the PDF viewer. Fall back to
+            // a plain visible-tab capture rather than refusing (AGENTS.md rule
+            // 4). Genuinely restricted URLs still stop inside capture().
+            console.warn('[Hammer SW] no content script, falling back to a full capture:',
+                         noContentScript.message);
+            sendResponse(captureReply(await capture(tab), { fellBack: true }));
+            return;
+          }
+          if (res?.reason === 'cancelled') {
+            // The person pressed Escape. Nothing to capture, nothing to say.
+            sendResponse({ ok: false, reason: 'cancelled' });
+            return;
+          }
+          if (snip) {
+            if (!res?.ok || !res.rect) {
+              sendResponse({ ok: false, error: res?.error || 'Could not determine the selected region' });
+              return;
+            }
+            sendResponse(captureReply(await capture(tab, res.rect, res.dpr)));
+          } else {
+            if (!res?.ok || !res.dataUrl) {
+              sendResponse({ ok: false, error: res?.error || 'Unknown error during full-page capture' });
+              return;
+            }
+            sendResponse(captureReply(await capture(tab, null, 1, res.dataUrl)));
+          }
+        } catch (err) {
+          sendResponse({ ok: false, error: err.message });
+        }
+      });
+    });
+    return true; // async
+  }
   if (msg.type !== 'CAPTURE') return false;
   if (sender.tab && sender.frameId !== 0) return false;
 
@@ -497,6 +553,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   return true;
 });
+
+// ─────────────────────────────────────────────────────────────────
+// captureReply — turn a capture() result into the popup's response shape.
+// Mirrors the mapping the CAPTURE handler has always used; `extra` carries
+// flags the caller wants alongside it, such as { fellBack: true } for ACT-03.
+// ─────────────────────────────────────────────────────────────────
+function captureReply(result, extra = {}) {
+  if (result === null)    return { ok: false, reason: 'blocked', ...extra };
+  if (result.reason)      return { ok: false, reason: result.reason, ...extra };
+  return { ok: true, path: result.path, ...extra };
+}
 
 // ─────────────────────────────────────────────────────────────────
 // capture(tab, rect, dpr) — shared by all three triggers
