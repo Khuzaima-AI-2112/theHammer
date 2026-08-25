@@ -1,5 +1,9 @@
 # The Disclosure states facts; it is not a consent agreement
 
+> **Superseded on 2026-08-25 by ADR 0011.** There is no Disclosure screen.
+> theHammer is an internal tool and the people it captures are the people
+> running it, so this decision has nothing left to apply to.
+
 theHammer shows a Monitored User what is collected before any Capture is
 possible, and they cannot decline it and keep using the extension. We decided to
 be explicit about that rather than dress it up: the Disclosure is a statement of

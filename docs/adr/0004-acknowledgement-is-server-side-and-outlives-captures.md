@@ -1,5 +1,9 @@
 # Acknowledgement records are server-side, versioned, and exempt from Storage Lifetime
 
+> **Superseded on 2026-08-25 by ADR 0011.** With no Disclosure screen there is
+> no Acknowledgement to record. Its exemption from the Storage Lifetime is moot
+> twice over — ADR 0010 removes the Storage Lifetime as well.
+
 An Acknowledgement is the Customer's evidence that a Monitored User was told
 what is collected. We decided to store it server-side in Firestore against user,
 Workspace, Disclosure Version and timestamp — not in browser storage, and not
