@@ -1,5 +1,8 @@
 # The Customer is the data controller; theHammer is a processor
 
+> **Superseded on 2026-08-25 by ADR 0008.** theHammer is not operated
+> commercially in any jurisdiction, so this decision has nothing left to apply to.
+
 theHammer captures screenshots of identifiable employees and reports their idle
 time to their employer, which is workplace monitoring. We decided that each
 Customer organisation is the party responsible for that monitoring, and
