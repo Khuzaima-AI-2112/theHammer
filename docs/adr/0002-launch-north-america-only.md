@@ -1,5 +1,8 @@
 # Launch to North America only; exclude EU and UK organisations
 
+> **Superseded on 2026-08-25 by ADR 0008.** theHammer is not operated
+> commercially in any jurisdiction, so this decision has nothing left to apply to.
+
 theHammer's first ten paying Customers are targeted in North America. We decided
 to make that an explicit contractual restriction rather than an accident of
 sales: the terms state that the service is not offered to organisations

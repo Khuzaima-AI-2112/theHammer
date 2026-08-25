@@ -560,3 +560,28 @@ Run this before starting any new sprint:
 - When removing an authentication or authorisation mechanism, grep `docs/runbook.md` and any other operational procedure for it in the same PR. Code and tests are not the whole surface of an auth change.
 - A procedure that silently does nothing is worse than one that errors. Prefer steps that fail loudly when their assumptions no longer hold.
 - State revocation latency explicitly. `requireAuth` calls `verifyIdToken(token)` without `{ checkRevoked: true }`, so `revokeRefreshTokens(uid)` stops new tokens being minted but leaves an already-issued ID token accepted until it expires — up to an hour. A runbook that omits this implies an immediacy the system does not provide.
+
+---
+
+### 47. State that only one code path advances can be replaced without ever being written down
+
+**What happened:** `sessionOnCapture()` in `extension/service-worker.js` started a new Session whenever the project changed, by overwriting `activeSession` in `chrome.storage.session`. The only function that writes a `session_events` document, `sessionFlush()`, was called from `onSuspend` and `windows.onRemoved` and from nowhere else. So every project switch destroyed a Session that had never been recorded, and the hour of work it represented never reached any report. Nothing failed, nothing logged, and the `uploads` documents were all written normally — the screenshots were there and only the time was missing.
+
+**Root cause:** The Session was treated as a variable rather than as a record with a lifecycle. Writing the record was attached to two lifecycle events of the *worker*, while the state itself was mutated by a third path that was not one of them. The gap is invisible in review because both halves read correctly on their own.
+
+**Rule going forward:**
+- Where a piece of state stands for a record that must be persisted, every path that replaces or clears it must go through the same write. Enumerate the writers of the state, then check each one against the list of places that persist it; if the two lists differ, that difference is a defect.
+- Be most suspicious where the loss is silent by construction. This one could not surface as an error because the losing path never intended to write anything.
+- A test that captures against one project and then another, asserting *two* documents, is the cheapest guard and did not exist. `extension/tests/session.test.js` now holds it.
+
+---
+
+### 48. A ticket that paraphrases its source can quietly describe a different feature
+
+**What happened:** Issue #11 was titled "Action icon states (ACT-01 to ACT-05)" and its body described an icon reflecting what the Session is doing. The Testing Plan, which is where `ACT-01` to `ACT-05` are actually defined, files them under "Priority 5 — the three-way action icon" and they cover screenshot mode, snip mode region select, snip on a restricted page, changing project mid-session, and the menu being open while a capture is queued. Only `ACT-04` had anything to do with Sessions. Acting on the ticket as written would have built a Session indicator and closed an issue whose other four cases — an entire unbuilt capture-mode feature — had not been touched.
+
+**Root cause:** The ticket restated its source from memory instead of quoting it, and the source is a `.docx` in `deliverables\` that no grep over the repo will find. The identifiers `ACT-01` to `ACT-05` appear nowhere in the codebase, so the paraphrase had nothing to contradict it.
+
+**Rule going forward:**
+- When a ticket cites test-case identifiers, open the document that defines them and quote the rows into the ticket before working on it. Identifiers are not self-explanatory and a plausible expansion of one is worth nothing.
+- Treat a `Done when` that cannot be traced back to its source as unstarted work. AGENTS.md rule 1 makes the condition absolute; that is only meaningful if the condition is the real one.

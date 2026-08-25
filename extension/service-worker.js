@@ -70,9 +70,32 @@ async function sessionClear() {
 
 // 6.1: Called at the start of every successful capture.
 // Returns { isFirstInSession, sessionStart } for inclusion in the upload body.
+//
+// ADR-0007: changing project ends the Session, but the change only becomes a
+// boundary once a capture lands against the new project. This function is the
+// only writer of Session state, so a project switched away from and back with
+// nothing captured in between never reaches here and leaves the Session intact
+// — which is the behaviour the Customer asked for, and it needs no timer.
 async function sessionOnCapture(projectId, capturePath) {
   let s = await sessionGet();
   const now = new Date().toISOString();
+
+  let boundaryCommitted = false;
+  if (s && !s.flushed && s.projectId !== projectId) {
+    // The boundary has just committed. Write the outgoing Session down before
+    // it is replaced — overwriting it in place is what used to make an hour of
+    // work vanish from the reports.
+    boundaryCommitted = true;
+    const written = await sessionFlush('project_changed');
+    if (!written) {
+      // Unlike 'suspend' and 'window_removed' there is no second trigger to
+      // retry from: the state a retry would read is about to be overwritten.
+      // Rule 4 — the capture loop is never blocked, so this is loud and lost.
+      console.error('[Hammer SW] outgoing session could not be written at a project boundary; its time is lost',
+                    '| id:', s.sessionId, '| project:', s.projectId);
+    }
+    s = null;
+  }
 
   if (!s || s.projectId !== projectId || s.flushed) {
     // Start a new session
@@ -87,6 +110,7 @@ async function sessionOnCapture(projectId, capturePath) {
     };
     await sessionSet(s);
     console.log('[Hammer SW] new session started | id:', s.sessionId);
+    await sessionIndicate(s, boundaryCommitted);
     return { isFirstInSession: true, sessionStart: s.sessionStart, sessionId: s.sessionId };
   }
 
@@ -94,18 +118,42 @@ async function sessionOnCapture(projectId, capturePath) {
   s.totalCaptures++;
   s.lastCapturePath = capturePath;
   await sessionSet(s);
+  await sessionIndicate(s, false);
   return { isFirstInSession: false, sessionStart: s.sessionStart, sessionId: s.sessionId };
 }
 
+// ADR-0007: the Customer asked that a person be able to tell when switching
+// project has started a new Session. The badge says so at the moment the
+// boundary commits — not when the project changed, which may yet come to
+// nothing — and clears itself on the following capture.
+async function sessionIndicate(s, boundaryCommitted) {
+  if (!chrome.action?.setBadgeText) return;
+  try {
+    await chrome.action.setTitle({
+      title: boundaryCommitted
+        ? `The Hammer — new session started for ${s.projectId}`
+        : `The Hammer — session running on ${s.projectId} (${s.totalCaptures})`
+    });
+    await chrome.action.setBadgeBackgroundColor({ color: '#1a73e8' });
+    await chrome.action.setBadgeText({ text: boundaryCommitted ? 'NEW' : '' });
+  } catch (err) {
+    // Rule 4: the capture loop is sacred. A badge that will not paint is not a
+    // reason to lose a screenshot.
+    console.warn('[Hammer SW] could not update the action badge:', err.message);
+  }
+}
+
 // 6.2 / 6.3: Write session_events doc to backend. Idempotent via flushed flag.
+// Returns true only when a session_events document reached the backend, so a
+// caller that is about to discard the Session can tell that it was recorded.
 async function sessionFlush(reason) {
   const s = await sessionGet();
-  if (!s || s.flushed) return;
+  if (!s || s.flushed) return false;
 
   const { settings } = await chrome.storage.local.get('settings');
   const cloudRunUrl = settings?.cloudRunUrl?.trim() || FALLBACK_API_BASE;
   const token       = settings?.firebaseToken?.trim() || '';
-  if (!token) return;
+  if (!token) return false;
 
   const now = new Date().toISOString();
 
@@ -125,7 +173,7 @@ async function sessionFlush(reason) {
     lastCapturePath:  s.lastCapturePath,
     schemaVersion:    1,
     deleteAfter,
-    flushReason:      reason   // 'suspend' | 'window_removed' — diagnostic only
+    flushReason:      reason   // 'suspend' | 'window_removed' | 'project_changed' — diagnostic only
   };
 
   // Mark flushed BEFORE the network call to prevent a race between the two
@@ -143,12 +191,14 @@ async function sessionFlush(reason) {
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     console.log('[Hammer SW] session_events written ✓ | id:', s.sessionId, '| reason:', reason);
+    return true;
   } catch (err) {
     console.error('[Hammer SW] session_events write failed:', err.message,
                   '| session:', s.sessionId);
     // Un-mark flushed so the other flush trigger can retry
     s.flushed = false;
     await sessionSet(s);
+    return false;
   }
 }
 
