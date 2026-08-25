@@ -304,13 +304,31 @@ document.addEventListener('DOMContentLoaded', async () => {
 //   { cloudRunUrl?: string, retention?: number, maxSize?: number }
 // All fields are optional; backend may return a subset.
 // ─────────────────────────────────────────────────────────────────
-const CONFIG_FALLBACK_URL = 'https://thehammer-backend-282689937365.northamerica-northeast1.run.app/api';
+// #26: no `/api` prefix — the backend serves /config and /me/projects at the
+// root, and the prefixed paths 404. Kept in step with FALLBACK_API_BASE in
+// service-worker.js.
+const CONFIG_FALLBACK_URL = 'https://thehammer-backend-282689937365.northamerica-northeast1.run.app';
+
+// #26: a profile that cached the old prefixed URL would keep 404ing after the
+// constant above is fixed, so normalise what comes out of storage too. The
+// service worker cleans the stored value on startup; this makes the popup
+// correct even if it opens first.
+function normaliseApiBase(url) {
+  return String(url ?? '')
+    .trim()
+    .replace(/\/+$/, '')
+    .replace(/\/api$/, '');
+}
+
+function apiBase(settings) {
+  return normaliseApiBase(settings?.cloudRunUrl) || CONFIG_FALLBACK_URL;
+}
 
 async function loadConfig(apiKey) {
   // Use the stored cloudRunUrl if present; otherwise use the hard-coded default.
   // This bootstraps cleanly on first install when storage is empty.
   const { settings: s } = await chrome.storage.local.get('settings');
-  const baseUrl = s?.cloudRunUrl?.trim() || CONFIG_FALLBACK_URL;
+  const baseUrl = apiBase(s);
 
   try {
     const controller = new AbortController();
@@ -328,7 +346,10 @@ async function loadConfig(apiKey) {
     const existing = (await chrome.storage.local.get('settings')).settings || {};
     const updated = { ...existing };
 
-    if (config.cloudRunUrl) updated.cloudRunUrl = config.cloudRunUrl.trim();
+    // #26: normalised on the way in as well. If the backend's own config still
+    // hands out a prefixed URL, storing it raw would undo the cleanup on every
+    // popup open.
+    if (config.cloudRunUrl) updated.cloudRunUrl = normaliseApiBase(config.cloudRunUrl);
     if (config.retention)   updated.retention   = config.retention;
     if (config.maxSize)     updated.maxSize      = config.maxSize;
     if (typeof config.inactivityTimerSeconds === 'number') {
@@ -361,7 +382,7 @@ async function loadConfig(apiKey) {
 // ─────────────────────────────────────────────────────────────────
 async function loadProjects(apiKey, savedProjectId) {
   const { settings } = await chrome.storage.local.get('settings');
-  const baseUrl = settings?.cloudRunUrl?.trim() || CONFIG_FALLBACK_URL;
+  const baseUrl = apiBase(settings);
 
   setProjectSelectPlaceholder('Loading projects…');
   try {
