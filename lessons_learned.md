@@ -586,7 +586,18 @@ Run this before starting any new sprint:
 - When a ticket cites test-case identifiers, open the document that defines them and quote the rows into the ticket before working on it. Identifiers are not self-explanatory and a plausible expansion of one is worth nothing.
 - Treat a `Done when` that cannot be traced back to its source as unstarted work. AGENTS.md rule 1 makes the condition absolute; that is only meaningful if the condition is the real one.
 
-### 49. A stub missing one global turns a success path into a silent failure path
+### 49. A silent fallback turns a wrong URL into no symptom at all
+
+**What happened:** Both hard-coded API base URLs in the extension ended in `/api`, and the backend serves every route the extension calls at the root. `/api/config`, `/api/me/projects`, `/api/upload-url` and `/api/session-events` are all 404. On a fresh install nothing works: projects do not load, screenshots exhaust their retries into the offline queue, and `session_events` are never written. Nobody noticed, for two reasons. `loadConfig()` catches its own failure and falls back to cached settings by design, so the only trace is a `console.warn` in a popup nobody has open. And a profile that already held a good cached `cloudRunUrl` kept working, so the developer machines were the least likely to see it.
+
+**Root cause:** The constant was never exercised by anything. No test named it, and the only code path that reads it on a healthy machine is the one that never runs, because storage already has a value. A fallback that is only reached in a state nobody is in is a fallback nobody has tested.
+
+**Rule going forward:**
+- Assert the shape of an outbound URL in a test, not just that a request was made. `extension/tests/api-base.test.js` pins the path so the prefix cannot come back from the constant or from a cached settings value.
+- When a `catch` exists to keep a feature working offline, make sure it cannot also hide a permanently broken configuration. "Falls back to cache" and "has never once succeeded" look identical from the outside.
+- A cached value that fixes itself is not fixed. Changing the constant alone would have left every existing profile 404ing, because storage wins over the constant.
+
+### 50. A stub missing one global turns a success path into a silent failure path
 
 **What happened:** The service worker drains its offline queue at load, inside a top-level IIFE. The first `ACT-05` test seeded two queued captures, ran a snip, and asserted the queue was untouched — it came back empty, and the two captures had moved to `failed`. Nothing had gone wrong with the snip. The drain had run, and every item in it had thrown `ReferenceError: atob is not defined`, because `extension/tests/sw-harness.js` builds its own `vm` sandbox and `atob` was not among the globals it provided. The worker's own `try/catch` treated that as an upload failure and gave up on both captures, exactly as it would for a dead network.
 
