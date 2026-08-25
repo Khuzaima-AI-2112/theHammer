@@ -34,6 +34,8 @@ const stageSelect        = document.getElementById('stage-select');
 const toolInput          = document.getElementById('tool-input');
 const saveBtn            = document.getElementById('save-btn');
 const captureBtn         = document.getElementById('capture-btn');
+const snipBtn            = document.getElementById('snip-btn');
+const fullpageBtn        = document.getElementById('fullpage-btn');
 const statusEl           = document.getElementById('status');
 const progressBar        = document.getElementById('progress-bar');
 const progressWrap       = document.getElementById('progress-wrap');
@@ -146,6 +148,53 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
     });
   });
+
+  // ── Snip / Full page (issue #11) ──
+  // Capture Now above is left exactly as it was: ACT-01 requires the plain
+  // screenshot path to be unchanged, so these two get their own handler rather
+  // than a shared one that both would have to route through.
+  //
+  // Note that Chrome closes this popup the moment the page takes focus, which
+  // for Snip is as soon as the person drags. The capture still completes — the
+  // service worker owns it — but the status line below is only seen when the
+  // popup survives, which is exactly the fallback and refusal cases.
+  function runCaptureMode(button, type) {
+    button.disabled = true;
+    setStatus(type === 'CAPTURE_SNIP' ? 'Select a region…' : 'Capturing…');
+    showProgress(0);
+    chrome.runtime.sendMessage({ type }, (response) => {
+      button.disabled = false;
+      hideProgress();
+      if (chrome.runtime.lastError) {
+        setStatus('Error: ' + chrome.runtime.lastError.message);
+        return;
+      }
+      if (response?.reason === 'cancelled') {
+        setStatus('Cancelled.');
+        return;
+      }
+      // ACT-03: they asked for a region and got the whole page. Saying nothing
+      // reads as a bug.
+      const fellBack = response?.fellBack
+        ? 'This page would not accept the overlay — captured the whole page instead. '
+        : '';
+      if (response?.ok) {
+        setStatus(fellBack ? fellBack + 'Uploaded ✓' : 'Uploaded ✓');
+        refreshHistory();
+      } else if (response?.reason === 'blocked') {
+        setStatus(fellBack + 'Blocked — set Project & save first.');
+      } else if (response?.reason === 'no_api_key' || response?.reason === 'unauthorized') {
+        setStatus('Sign in to your account.');
+        welcomeScreen.style.display = 'block';
+        captureControls.style.display = 'none';
+      } else {
+        setStatus(fellBack + 'Failed: ' + (response?.error ?? 'unknown'));
+      }
+    });
+  }
+
+  snipBtn.addEventListener('click',     () => runCaptureMode(snipBtn, 'CAPTURE_SNIP'));
+  fullpageBtn.addEventListener('click', () => runCaptureMode(fullpageBtn, 'CAPTURE_FULLPAGE'));
 
   // ── 4.3: listen for upload progress from service worker ──
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {

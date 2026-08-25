@@ -97,6 +97,12 @@
       }
       return false; // Sync response
     }
+    if (msg.type === 'SNIP_SELECT') {
+      // #11 / ACT-02 — drag a region to capture. Same response contract as
+      // CAPTURE_ELEMENT: CSS pixels in viewport coordinates, plus the dpr.
+      showSnipOverlay().then(sendResponse);
+      return true; // async
+    }
     if (msg.type === 'BLUR_SCREENSHOT') {
       showBlurOverlay(msg.dataUrl).then(dataUrl => {
         sendResponse({ dataUrl });
@@ -200,6 +206,146 @@
       return res.dataUrl;
     }
     throw new Error(res?.error || 'Stitching failed');
+  }
+
+  // ── #11 / ACT-02: choose a region to capture ──
+  //
+  // Deliberately not modelled on showBlurOverlay(). That one paints the
+  // screenshot onto a canvas because it needs the pixels to blur them; snip
+  // only needs the rectangle, so a plain translucent div is simpler and does
+  // not wait for an image to decode.
+  //
+  // Resolves { ok: true, rect, dpr } or { ok: false, reason: 'cancelled' }.
+  // The rectangle is in CSS pixels, viewport-relative — the identical contract
+  // CAPTURE_ELEMENT returns from getBoundingClientRect(), so the service
+  // worker and cropImage() need no new arithmetic.
+  function showSnipOverlay() {
+    return new Promise((resolve) => {
+      // The floating button would otherwise land in the screenshot, and it sits
+      // over the bottom-right corner of the region being chosen.
+      const floatBtn = document.getElementById('thehammer-float-btn');
+      const floatDisplay = floatBtn ? floatBtn.style.display : null;
+      if (floatBtn) floatBtn.style.display = 'none';
+
+      const overlay = document.createElement('div');
+      Object.assign(overlay.style, {
+        position:   'fixed',
+        top:        '0',
+        left:       '0',
+        width:      '100vw',
+        height:     '100vh',
+        zIndex:     '2147483647',
+        background: 'rgba(0,0,0,0.25)',
+        cursor:     'crosshair',
+        userSelect: 'none'
+      });
+
+      const box = document.createElement('div');
+      Object.assign(box.style, {
+        position:   'fixed',
+        display:    'none',
+        border:     '1px solid #01696f',
+        background: 'rgba(1,105,111,0.15)',
+        boxShadow:  '0 0 0 9999px rgba(0,0,0,0.25)',
+        pointerEvents: 'none'
+      });
+
+      const hint = document.createElement('div');
+      hint.textContent = 'Drag to select a region — Esc to cancel';
+      Object.assign(hint.style, {
+        position:     'fixed',
+        top:          '16px',
+        left:         '50%',
+        transform:    'translateX(-50%)',
+        padding:      '6px 12px',
+        borderRadius: '4px',
+        background:   '#01696f',
+        color:        '#fff',
+        font:         '13px system-ui, sans-serif',
+        pointerEvents: 'none'
+      });
+
+      let drawing = false;
+      let startX = 0, startY = 0;
+      let rect = null;
+
+      function measure(e) {
+        const x = Math.min(startX, e.clientX);
+        const y = Math.min(startY, e.clientY);
+        return {
+          x,
+          y,
+          width:  Math.abs(e.clientX - startX),
+          height: Math.abs(e.clientY - startY)
+        };
+      }
+
+      function onMouseDown(e) {
+        if (e.button !== 0) return;
+        e.preventDefault();
+        drawing = true;
+        startX = e.clientX;
+        startY = e.clientY;
+        box.style.display = 'block';
+      }
+
+      function onMouseMove(e) {
+        if (!drawing) return;
+        rect = measure(e);
+        box.style.left   = rect.x + 'px';
+        box.style.top    = rect.y + 'px';
+        box.style.width  = rect.width + 'px';
+        box.style.height = rect.height + 'px';
+      }
+
+      function onMouseUp(e) {
+        if (!drawing) return;
+        drawing = false;
+        rect = measure(e);
+        // A stray click is not a selection. Treat it the same as Escape so the
+        // service worker stays quiet rather than uploading a 1px screenshot.
+        if (rect.width <= 5 || rect.height <= 5) {
+          finish({ ok: false, reason: 'cancelled' });
+          return;
+        }
+        finish({ ok: true, rect, dpr: window.devicePixelRatio });
+      }
+
+      function onKeyDown(e) {
+        if (e.key !== 'Escape') return;
+        e.preventDefault();
+        e.stopPropagation();
+        finish({ ok: false, reason: 'cancelled' }); // ACT-02
+      }
+
+      function finish(result) {
+        document.removeEventListener('keydown', onKeyDown, true);
+        overlay.remove();
+        if (floatBtn) floatBtn.style.display = floatDisplay;
+        // The service worker calls captureVisibleTab as soon as this response
+        // lands. Two frames give the browser time to repaint the overlay away,
+        // otherwise it appears in the screenshot.
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => resolve(result));
+        });
+      }
+
+      overlay.addEventListener('mousedown', onMouseDown);
+      overlay.addEventListener('mousemove', onMouseMove);
+      overlay.addEventListener('mouseup', onMouseUp);
+      overlay.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        finish({ ok: false, reason: 'cancelled' });
+      });
+      document.addEventListener('keydown', onKeyDown, true);
+
+      overlay.appendChild(box);
+      overlay.appendChild(hint);
+      document.body.appendChild(overlay);
+      // The page keeps focus otherwise, and Escape never reaches us.
+      overlay.tabIndex = -1;
+      overlay.focus();
+    });
   }
 
   function showBlurOverlay(dataUrl) {
