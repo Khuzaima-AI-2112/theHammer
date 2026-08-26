@@ -3,6 +3,7 @@
     "@google-cloud/vertexai": "^1.12.0"
   },
   "scripts": {
-    "test:extension": "node --test \"extension/tests/*.test.js\""
+    "test:extension": "node --test \"extension/tests/*.test.js\"",
+    "test:portal": "node --test \"portal/tests/*.test.js\""
   }
 }
