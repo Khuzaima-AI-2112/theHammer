@@ -432,6 +432,85 @@ gcloud artifacts repositories describe thehammer `
 
 ---
 
+## Phase 8 — The First Administrator
+
+Everything above provisions infrastructure. This provisions the first *person*.
+
+theHammer is invite-only (ADR 0012): an administrator invites everyone else, and
+their `users` record is created when they accept. The first administrator is the
+one who cannot be invited, so the backend accepts a single configured address.
+
+**Skipping this leaves a working deployment that nobody can sign in to.** The
+extension will authenticate against Google, the window will close, and the popup
+will show "Could not load projects", because the caller has no `users` record.
+That was #33.
+
+### 8.1 Set the bootstrap address on the backend service
+
+```powershell
+gcloud run services update thehammer-backend `
+  --region northamerica-northeast1 `
+  --project $PROJECT_ID `
+  --update-env-vars BOOTSTRAP_ADMIN_EMAIL=founder@example.com
+# Expected: a new revision, serving 100% of traffic
+```
+
+Use the Google address the first administrator will actually sign in with. The
+comparison is case-insensitive and exact — no domain wildcards.
+
+### 8.2 Sign in once, and create the workspace
+
+The address holder signs in to the portal, then calls the workspace route with
+their Firebase ID token:
+
+```powershell
+# ID_TOKEN comes from the signed-in browser session (DevTools → Application →
+# IndexedDB → firebaseLocalStorageDb), or from the extension after sign-in.
+curl -X POST "$BACKEND_URL/admin/workspaces" `
+  -H "Authorization: Bearer $ID_TOKEN" `
+  -H "Content-Type: application/json" `
+  -d '{\"name\":\"The Hammer\"}'
+# Expected: 201, with an id and ownerId
+```
+
+That single call creates the workspace **and** the caller's `users` document
+with `role: admin`. Verify in the console: Firestore → `users` should hold one
+document keyed by the Firebase UID.
+
+### 8.3 Unset the bootstrap address
+
+```powershell
+gcloud run services update thehammer-backend `
+  --region northamerica-northeast1 `
+  --project $PROJECT_ID `
+  --remove-env-vars BOOTSTRAP_ADMIN_EMAIL
+```
+
+Not strictly required — the route already refuses a second workspace to the same
+owner — but the variable has no further purpose and anyone who can read the
+service configuration can see who holds it.
+
+### 8.4 Everyone after the first
+
+Administrators invite by email:
+
+```
+POST /admin/workspaces/invites   { "email": "...", "role": "user" }
+```
+
+The invitation is single-use and expires after seven days. **It is not emailed
+yet** — `POST /admin/workspaces/invites` writes the token to the service log
+with a `TODO` where the delivery should be, so the token has to be carried to
+the invitee by hand for now. The invitee signs in and calls:
+
+```
+POST /admin/workspaces/join      { "token": "..." }
+```
+
+which creates their `users` record with the role the invitation named.
+
+---
+
 ## What's Next — Sprint 1
 
 Once `verify.ps1` reports `11 passed, 0 failed`, the infrastructure is complete.
