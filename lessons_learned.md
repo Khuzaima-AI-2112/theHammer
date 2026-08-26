@@ -606,3 +606,14 @@ Run this before starting any new sprint:
 **Rule going forward:**
 - When adding a test that reaches a new code path in the sandboxed worker, check the path's globals against the harness before trusting a failing assertion. A capture pipeline reaches for `atob`, `Blob`, `FormData`, `AbortController` and `XMLHttpRequest`, and none of them are in a bare `vm` context.
 - Do not write "state is unchanged" assertions against a module that does work at import time. Assert what the work should have achieved — here, that every queued capture was uploaded and none were given up on — which is what `ACT-05` was asking anyway.
+
+### 51. A double-quoted shell string runs the backticks in your markdown
+
+**What happened:** A comment explaining the `/api` prefix was posted to the Customer's pull request with `gh pr comment --body "…"`. The body was markdown and contained `` `/api` `` in code spans. The shell expanded the backticks as command substitution before `gh` ever saw the string, so `/api` was executed as a command, produced nothing, and the text was posted with the phrase silently absent. The comment read as a confident explanation with the subject of the sentence missing. It was published to the Customer's repository in that state and had to be repaired afterwards with a `PATCH` on the comment.
+
+**Root cause:** Markdown's inline-code delimiter and `sh`'s command-substitution delimiter are the same character, and the failure is silent in both directions. The shell does not warn that it ran something; `gh` cannot know a word was removed before it arrived; and command substitution deletes the text rather than mangling it, so the result is still valid prose. Nothing between the keystroke and the Customer's inbox had any reason to object. Writing a body that happens to contain no backticks — which is most of them — makes the trap invisible until the one message that does.
+
+**Rule going forward:**
+- Never pass markdown to `gh` through a double-quoted string. Use a quoted heredoc, `--body-file - <<'EOF'`, so the shell performs no expansion at all, or write a real file and pass `--body-file`. The quotes around `EOF` are the part that matters.
+- This applies to every argument carrying prose, not just `--body`: `--title`, `--notes`, `gh issue create`, `gh release create`. Backticks, `$`, `!` and `\` are all live inside double quotes.
+- Read back anything published outside this repository. `gh pr view --comments` costs one command, and the Customer's repository is the worst place to discover a formatting habit.
