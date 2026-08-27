@@ -46,8 +46,8 @@ steps:
   # ── 5. Deploy backend to Cloud Run ─────────────────────────────────────────
   #
   # --allow-unauthenticated: Must be enabled because the Node.js application 
-  # handles all identity verification natively via Firebase ID Tokens and 
-  # X-Api-Key headers (checked by requireAuth / requireApiKey middlewares). 
+  # handles all identity verification natively via Firebase ID Tokens in an 
+  # Authorization: Bearer header (checked by the requireAuth middleware). 
   # If this is set to no-allow, the Google Front End (GFE) will reject 
   # all client traffic with a 401/403.
   #
@@ -96,7 +96,8 @@ steps:
         BACKEND_URL=$(gcloud run services describe thehammer-backend \
           --region northamerica-northeast1 --format 'value(status.url)')
         echo "Injecting backend URL: $$BACKEND_URL"
-        sed -i "s|__BACKEND_API_URL__|$$BACKEND_URL/api|g" portal/app.js
+        # No /api prefix: the backend mounts every route at the root (#26, #31).
+        sed -i "s|__BACKEND_API_URL__|$$BACKEND_URL|g" portal/app.js
 
   # ── 6. Build portal image ───────────────────────────────────────────────────
   - name: 'gcr.io/cloud-builders/docker'

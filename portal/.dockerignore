@@ -1,0 +1,10 @@
+# Blacklist, not the whitelist backend/.dockerignore uses. The whole point of
+# #31 is that a new portal asset must be deployed without anyone remembering to
+# add it, so the default here is "copied" and only build inputs are excluded.
+#
+# nginx.conf is deliberately absent: the Dockerfile COPYs it to
+# /etc/nginx/conf.d/, so it must stay in the build context. It is deleted from
+# the web root in the Dockerfile instead.
+Dockerfile
+.dockerignore
+tests

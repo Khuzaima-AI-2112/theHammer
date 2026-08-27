@@ -15,7 +15,7 @@
 //          sessionEnd, totalCaptures, firstCapturePath, lastCapturePath,
 //          schemaVersion: 1, deleteAfter (sessionStart + 365 days ISO).
 // Sprint 5.15 changes (retained):
-//   — userId guard removed; identity resolved server-side via X-Api-Key.
+//   — userId guard removed; identity resolved server-side from the Firebase ID token.
 //   — capture() returns { reason: 'no_api_key' } when key absent.
 //   — uploadBlobWithSignedUrl: userId removed from POST body.
 // Sprint 4 additions (retained):
@@ -34,7 +34,42 @@ const ICON_DATA_URI =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ' +
   'AAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
 
-const FALLBACK_API_BASE = 'https://thehammer-backend-282689937365.northamerica-northeast1.run.app/api';
+// #26: no `/api` prefix. The backend mounts every route the extension calls at
+// the root — `app.use('/', require('./routes/admin/me'))` in backend/src/index.js
+// — so /api/config, /api/upload-url and /api/session-events are all 404.
+const FALLBACK_API_BASE = 'https://thehammer-backend-282689937365.northamerica-northeast1.run.app';
+
+// ─────────────────────────────────────────────────────────────────
+// #26 — apiBase(settings)
+//
+// Every call site used to read `settings.cloudRunUrl` raw and fall back to the
+// constant. A profile that cached the old prefixed URL keeps 404ing after the
+// constant is fixed, so the value is normalised where it is read as well as
+// being cleaned in storage below. Stripping is idempotent and safe to repeat.
+// ─────────────────────────────────────────────────────────────────
+function normaliseApiBase(url) {
+  return String(url ?? '')
+    .trim()
+    .replace(/\/+$/, '')     // trailing slashes
+    .replace(/\/api$/, '');  // the prefix that never existed on the backend
+}
+
+function apiBase(settings) {
+  return normaliseApiBase(settings?.cloudRunUrl) || FALLBACK_API_BASE;
+}
+
+// One-time cleanup of a cached bad URL, so the Settings panel and anything
+// reading storage directly stop showing a URL that cannot work. Reads are
+// normalised anyway, so nothing depends on this having run.
+(async () => {
+  const { settings } = await chrome.storage.local.get('settings');
+  const stored = settings?.cloudRunUrl;
+  if (!stored) return;
+  const cleaned = normaliseApiBase(stored);
+  if (cleaned === stored.trim()) return;
+  await chrome.storage.local.set({ settings: { ...settings, cloudRunUrl: cleaned } });
+  console.log('[Hammer SW] #26 cleaned cached API base:', stored, '->', cleaned);
+})();
 
 // ─────────────────────────────────────────────────────────────────
 // 6.1 / 6.2 / 6.3 — Session state helpers
@@ -70,9 +105,32 @@ async function sessionClear() {
 
 // 6.1: Called at the start of every successful capture.
 // Returns { isFirstInSession, sessionStart } for inclusion in the upload body.
+//
+// ADR-0007: changing project ends the Session, but the change only becomes a
+// boundary once a capture lands against the new project. This function is the
+// only writer of Session state, so a project switched away from and back with
+// nothing captured in between never reaches here and leaves the Session intact
+// — which is the behaviour the Customer asked for, and it needs no timer.
 async function sessionOnCapture(projectId, capturePath) {
   let s = await sessionGet();
   const now = new Date().toISOString();
+
+  let boundaryCommitted = false;
+  if (s && !s.flushed && s.projectId !== projectId) {
+    // The boundary has just committed. Write the outgoing Session down before
+    // it is replaced — overwriting it in place is what used to make an hour of
+    // work vanish from the reports.
+    boundaryCommitted = true;
+    const written = await sessionFlush('project_changed');
+    if (!written) {
+      // Unlike 'suspend' and 'window_removed' there is no second trigger to
+      // retry from: the state a retry would read is about to be overwritten.
+      // Rule 4 — the capture loop is never blocked, so this is loud and lost.
+      console.error('[Hammer SW] outgoing session could not be written at a project boundary; its time is lost',
+                    '| id:', s.sessionId, '| project:', s.projectId);
+    }
+    s = null;
+  }
 
   if (!s || s.projectId !== projectId || s.flushed) {
     // Start a new session
@@ -87,6 +145,7 @@ async function sessionOnCapture(projectId, capturePath) {
     };
     await sessionSet(s);
     console.log('[Hammer SW] new session started | id:', s.sessionId);
+    await sessionIndicate(s, boundaryCommitted);
     return { isFirstInSession: true, sessionStart: s.sessionStart, sessionId: s.sessionId };
   }
 
@@ -94,18 +153,42 @@ async function sessionOnCapture(projectId, capturePath) {
   s.totalCaptures++;
   s.lastCapturePath = capturePath;
   await sessionSet(s);
+  await sessionIndicate(s, false);
   return { isFirstInSession: false, sessionStart: s.sessionStart, sessionId: s.sessionId };
 }
 
+// ADR-0007: the Customer asked that a person be able to tell when switching
+// project has started a new Session. The badge says so at the moment the
+// boundary commits — not when the project changed, which may yet come to
+// nothing — and clears itself on the following capture.
+async function sessionIndicate(s, boundaryCommitted) {
+  if (!chrome.action?.setBadgeText) return;
+  try {
+    await chrome.action.setTitle({
+      title: boundaryCommitted
+        ? `The Hammer — new session started for ${s.projectId}`
+        : `The Hammer — session running on ${s.projectId} (${s.totalCaptures})`
+    });
+    await chrome.action.setBadgeBackgroundColor({ color: '#1a73e8' });
+    await chrome.action.setBadgeText({ text: boundaryCommitted ? 'NEW' : '' });
+  } catch (err) {
+    // Rule 4: the capture loop is sacred. A badge that will not paint is not a
+    // reason to lose a screenshot.
+    console.warn('[Hammer SW] could not update the action badge:', err.message);
+  }
+}
+
 // 6.2 / 6.3: Write session_events doc to backend. Idempotent via flushed flag.
+// Returns true only when a session_events document reached the backend, so a
+// caller that is about to discard the Session can tell that it was recorded.
 async function sessionFlush(reason) {
   const s = await sessionGet();
-  if (!s || s.flushed) return;
+  if (!s || s.flushed) return false;
 
   const { settings } = await chrome.storage.local.get('settings');
-  const cloudRunUrl = settings?.cloudRunUrl?.trim() || FALLBACK_API_BASE;
+  const cloudRunUrl = apiBase(settings);
   const token       = settings?.firebaseToken?.trim() || '';
-  if (!token) return;
+  if (!token) return false;
 
   const now = new Date().toISOString();
 
@@ -117,7 +200,7 @@ async function sessionFlush(reason) {
   const body = {
     sessionId:        s.sessionId,
     projectId:        s.projectId,
-    // userId resolved server-side from X-Api-Key (5.15)
+    // userId resolved server-side from the Firebase ID token (5.15)
     sessionStart:     s.sessionStart,
     sessionEnd:       now,
     totalCaptures:    s.totalCaptures,
@@ -125,7 +208,7 @@ async function sessionFlush(reason) {
     lastCapturePath:  s.lastCapturePath,
     schemaVersion:    1,
     deleteAfter,
-    flushReason:      reason   // 'suspend' | 'window_removed' — diagnostic only
+    flushReason:      reason   // 'suspend' | 'window_removed' | 'project_changed' — diagnostic only
   };
 
   // Mark flushed BEFORE the network call to prevent a race between the two
@@ -143,12 +226,14 @@ async function sessionFlush(reason) {
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     console.log('[Hammer SW] session_events written ✓ | id:', s.sessionId, '| reason:', reason);
+    return true;
   } catch (err) {
     console.error('[Hammer SW] session_events write failed:', err.message,
                   '| session:', s.sessionId);
     // Un-mark flushed so the other flush trigger can retry
     s.flushed = false;
     await sessionSet(s);
+    return false;
   }
 }
 
@@ -265,7 +350,7 @@ function xhrPut(url, blob) {
   if (queue.length === 0) return;
 
   const { settings } = await chrome.storage.local.get('settings');
-  const cloudRunUrl = settings?.cloudRunUrl?.trim() || FALLBACK_API_BASE;
+  const cloudRunUrl = apiBase(settings);
   const token       = settings?.firebaseToken?.trim() || '';
   if (!cloudRunUrl || !token) return;
 
@@ -429,6 +514,62 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     });
     return true; // async
   }
+  // ── #11: the two capture modes offered in the popup ──
+  // ACT-01 is protected by omission: plain screenshot capture (the toolbar
+  // popup's Capture Now, the floating button, Ctrl+Shift+S, the context menu)
+  // is not routed through any of this.
+  if (msg.type === 'CAPTURE_SNIP' || msg.type === 'CAPTURE_FULLPAGE') {
+    const snip = msg.type === 'CAPTURE_SNIP';
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (chrome.runtime.lastError) {
+        sendResponse({ ok: false, error: chrome.runtime.lastError.message });
+        return;
+      }
+      const tab = tabs && tabs[0];
+      if (!tab) {
+        sendResponse({ ok: false, error: 'No active tab' });
+        return;
+      }
+      const request = snip ? { type: 'SNIP_SELECT' } : { type: 'START_FULLPAGE_CAPTURE' };
+      chrome.tabs.sendMessage(tab.id, request, async (res) => {
+        // lastError must be read before the first await, or it is gone.
+        const noContentScript = chrome.runtime.lastError;
+        try {
+          if (noContentScript) {
+            // ACT-03: the content script is missing — a tab opened before the
+            // extension was loaded, the Web Store, the PDF viewer. Fall back to
+            // a plain visible-tab capture rather than refusing (AGENTS.md rule
+            // 4). Genuinely restricted URLs still stop inside capture().
+            console.warn('[Hammer SW] no content script, falling back to a full capture:',
+                         noContentScript.message);
+            sendResponse(captureReply(await capture(tab), { fellBack: true }));
+            return;
+          }
+          if (res?.reason === 'cancelled') {
+            // The person pressed Escape. Nothing to capture, nothing to say.
+            sendResponse({ ok: false, reason: 'cancelled' });
+            return;
+          }
+          if (snip) {
+            if (!res?.ok || !res.rect) {
+              sendResponse({ ok: false, error: res?.error || 'Could not determine the selected region' });
+              return;
+            }
+            sendResponse(captureReply(await capture(tab, res.rect, res.dpr)));
+          } else {
+            if (!res?.ok || !res.dataUrl) {
+              sendResponse({ ok: false, error: res?.error || 'Unknown error during full-page capture' });
+              return;
+            }
+            sendResponse(captureReply(await capture(tab, null, 1, res.dataUrl)));
+          }
+        } catch (err) {
+          sendResponse({ ok: false, error: err.message });
+        }
+      });
+    });
+    return true; // async
+  }
   if (msg.type !== 'CAPTURE') return false;
   if (sender.tab && sender.frameId !== 0) return false;
 
@@ -449,6 +590,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 });
 
 // ─────────────────────────────────────────────────────────────────
+// captureReply — turn a capture() result into the popup's response shape.
+// Mirrors the mapping the CAPTURE handler has always used; `extra` carries
+// flags the caller wants alongside it, such as { fellBack: true } for ACT-03.
+// ─────────────────────────────────────────────────────────────────
+function captureReply(result, extra = {}) {
+  if (result === null)    return { ok: false, reason: 'blocked', ...extra };
+  if (result.reason)      return { ok: false, reason: result.reason, ...extra };
+  return { ok: true, path: result.path, ...extra };
+}
+
+// ─────────────────────────────────────────────────────────────────
 // capture(tab, rect, dpr) — shared by all three triggers
 // 6.1: calls sessionOnCapture() after a successful upload to log
 //      sessionStart / isFirstInSession on the uploads doc via the upload body.
@@ -464,7 +616,7 @@ async function capture(tab, rect = null, dpr = 1, preCapturedDataUrl = null) {
   }
 
   const { settings } = await chrome.storage.local.get('settings');
-  const cloudRunUrl = settings?.cloudRunUrl?.trim() || FALLBACK_API_BASE;
+  const cloudRunUrl = apiBase(settings);
   const token       = settings?.firebaseToken?.trim() || '';
 
   if (!token) {
@@ -791,7 +943,7 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (!s || s.flushed) return;
 
   const { settings } = await chrome.storage.local.get('settings');
-  const cloudRunUrl = settings?.cloudRunUrl?.trim() || FALLBACK_API_BASE;
+  const cloudRunUrl = apiBase(settings);
   const token       = settings?.firebaseToken?.trim() || '';
 
   let enabled = false;
@@ -870,7 +1022,7 @@ async function logInactivityEvent() {
   if (!s || s.flushed) return;
 
   const { settings } = await chrome.storage.local.get('settings');
-  const cloudRunUrl = settings?.cloudRunUrl?.trim() || FALLBACK_API_BASE;
+  const cloudRunUrl = apiBase(settings);
   const token       = settings?.firebaseToken?.trim() || '';
   const timerSeconds = settings?.inactivityTimerSeconds || 45;
 

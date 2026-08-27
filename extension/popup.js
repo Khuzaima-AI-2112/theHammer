@@ -1,6 +1,7 @@
 // popup.js — Sprint 5.17
 // Changes from Sprint 5.16:
-//   5.17 — loadConfig() added: fetches GET /config with X-Api-Key on every
+//   5.17 — loadConfig() added: fetches GET /config with the Firebase ID token
+//          in an Authorization: Bearer header on every
 //          popup open (when a key exists) and writes the result into
 //          chrome.storage.local as settings.cloudRunUrl, settings.retention,
 //          settings.maxSize.
@@ -17,7 +18,8 @@
 //   5.16 — Session restore ordering fixed (savedProjectId passed to populate)
 //   5.16 — Stage dropdown wired into session save
 // Retained from Sprint 5.15:
-//   5.15 — User dropdown removed; identity resolved server-side via X-Api-Key
+//   5.15 — User dropdown removed; identity resolved server-side from the
+//          Firebase ID token
 //   5.15 — Backend URL field read-only; settings save: apiKey + notify only
 //   5.15 — no-key-banner shown when API key absent
 // Retained from Sprint 4:
@@ -32,6 +34,8 @@ const stageSelect        = document.getElementById('stage-select');
 const toolInput          = document.getElementById('tool-input');
 const saveBtn            = document.getElementById('save-btn');
 const captureBtn         = document.getElementById('capture-btn');
+const snipBtn            = document.getElementById('snip-btn');
+const fullpageBtn        = document.getElementById('fullpage-btn');
 const statusEl           = document.getElementById('status');
 const progressBar        = document.getElementById('progress-bar');
 const progressWrap       = document.getElementById('progress-wrap');
@@ -144,6 +148,53 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
     });
   });
+
+  // ── Snip / Full page (issue #11) ──
+  // Capture Now above is left exactly as it was: ACT-01 requires the plain
+  // screenshot path to be unchanged, so these two get their own handler rather
+  // than a shared one that both would have to route through.
+  //
+  // Note that Chrome closes this popup the moment the page takes focus, which
+  // for Snip is as soon as the person drags. The capture still completes — the
+  // service worker owns it — but the status line below is only seen when the
+  // popup survives, which is exactly the fallback and refusal cases.
+  function runCaptureMode(button, type) {
+    button.disabled = true;
+    setStatus(type === 'CAPTURE_SNIP' ? 'Select a region…' : 'Capturing…');
+    showProgress(0);
+    chrome.runtime.sendMessage({ type }, (response) => {
+      button.disabled = false;
+      hideProgress();
+      if (chrome.runtime.lastError) {
+        setStatus('Error: ' + chrome.runtime.lastError.message);
+        return;
+      }
+      if (response?.reason === 'cancelled') {
+        setStatus('Cancelled.');
+        return;
+      }
+      // ACT-03: they asked for a region and got the whole page. Saying nothing
+      // reads as a bug.
+      const fellBack = response?.fellBack
+        ? 'This page would not accept the overlay — captured the whole page instead. '
+        : '';
+      if (response?.ok) {
+        setStatus(fellBack ? fellBack + 'Uploaded ✓' : 'Uploaded ✓');
+        refreshHistory();
+      } else if (response?.reason === 'blocked') {
+        setStatus(fellBack + 'Blocked — set Project & save first.');
+      } else if (response?.reason === 'no_api_key' || response?.reason === 'unauthorized') {
+        setStatus('Sign in to your account.');
+        welcomeScreen.style.display = 'block';
+        captureControls.style.display = 'none';
+      } else {
+        setStatus(fellBack + 'Failed: ' + (response?.error ?? 'unknown'));
+      }
+    });
+  }
+
+  snipBtn.addEventListener('click',     () => runCaptureMode(snipBtn, 'CAPTURE_SNIP'));
+  fullpageBtn.addEventListener('click', () => runCaptureMode(fullpageBtn, 'CAPTURE_FULLPAGE'));
 
   // ── 4.3: listen for upload progress from service worker ──
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -302,13 +353,31 @@ document.addEventListener('DOMContentLoaded', async () => {
 //   { cloudRunUrl?: string, retention?: number, maxSize?: number }
 // All fields are optional; backend may return a subset.
 // ─────────────────────────────────────────────────────────────────
-const CONFIG_FALLBACK_URL = 'https://thehammer-backend-282689937365.northamerica-northeast1.run.app/api';
+// #26: no `/api` prefix — the backend serves /config and /me/projects at the
+// root, and the prefixed paths 404. Kept in step with FALLBACK_API_BASE in
+// service-worker.js.
+const CONFIG_FALLBACK_URL = 'https://thehammer-backend-282689937365.northamerica-northeast1.run.app';
+
+// #26: a profile that cached the old prefixed URL would keep 404ing after the
+// constant above is fixed, so normalise what comes out of storage too. The
+// service worker cleans the stored value on startup; this makes the popup
+// correct even if it opens first.
+function normaliseApiBase(url) {
+  return String(url ?? '')
+    .trim()
+    .replace(/\/+$/, '')
+    .replace(/\/api$/, '');
+}
+
+function apiBase(settings) {
+  return normaliseApiBase(settings?.cloudRunUrl) || CONFIG_FALLBACK_URL;
+}
 
 async function loadConfig(apiKey) {
   // Use the stored cloudRunUrl if present; otherwise use the hard-coded default.
   // This bootstraps cleanly on first install when storage is empty.
   const { settings: s } = await chrome.storage.local.get('settings');
-  const baseUrl = s?.cloudRunUrl?.trim() || CONFIG_FALLBACK_URL;
+  const baseUrl = apiBase(s);
 
   try {
     const controller = new AbortController();
@@ -326,7 +395,10 @@ async function loadConfig(apiKey) {
     const existing = (await chrome.storage.local.get('settings')).settings || {};
     const updated = { ...existing };
 
-    if (config.cloudRunUrl) updated.cloudRunUrl = config.cloudRunUrl.trim();
+    // #26: normalised on the way in as well. If the backend's own config still
+    // hands out a prefixed URL, storing it raw would undo the cleanup on every
+    // popup open.
+    if (config.cloudRunUrl) updated.cloudRunUrl = normaliseApiBase(config.cloudRunUrl);
     if (config.retention)   updated.retention   = config.retention;
     if (config.maxSize)     updated.maxSize      = config.maxSize;
     if (typeof config.inactivityTimerSeconds === 'number') {
@@ -359,7 +431,7 @@ async function loadConfig(apiKey) {
 // ─────────────────────────────────────────────────────────────────
 async function loadProjects(apiKey, savedProjectId) {
   const { settings } = await chrome.storage.local.get('settings');
-  const baseUrl = settings?.cloudRunUrl?.trim() || CONFIG_FALLBACK_URL;
+  const baseUrl = apiBase(settings);
 
   setProjectSelectPlaceholder('Loading projects…');
   try {

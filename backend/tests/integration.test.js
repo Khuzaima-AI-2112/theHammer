@@ -1,15 +1,12 @@
 'use strict';
 
-process.env.NODE_ENV                = 'test';
-process.env.FIRESTORE_EMULATOR_HOST = process.env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8080';
 
 const request = require('supertest');
-const { clearDatabase, seedUser, seedApiKey } = require('./helpers/fixtures');
+const { clearDatabase, seedUser } = require('./helpers/fixtures');
 
 let app, db;
 let adminId = 'test-integration-admin';
 let userId = 'test-integration-user';
-let keyId = 'test-key-id';
 
 beforeAll(async () => {
   app = require('../src/index').app;
@@ -25,10 +22,6 @@ beforeAll(async () => {
   await seedUser(userId, {
     email: 'user@integration.test',
     displayName: 'Test User',
-    role: 'user'
-  });
-
-  await seedApiKey(keyId, userId, {
     role: 'user'
   });
 });
@@ -52,26 +45,16 @@ describe('Sprint 9 Integration Tests', () => {
     expect(typeof res.body.pendingExports).toBe('number');
   });
 
-  test('PATCH /admin/users/:id — role updates sync to api_keys', async () => {
-    // Admin updates user role to analyst
-    const patchRes = await request(app).patch(`/admin/users/${userId}`).set(H_ADMIN)
-      .send({ role: 'analyst' });
-    
-    expect(patchRes.status).toBe(200);
-    expect(patchRes.body.role).toBe('analyst');
-
-    // Verify the api_key was updated
-    const keyDoc = await db.collection('api_keys').doc(keyId).get();
-    expect(keyDoc.data().role).toBe('analyst');
-  });
-
   // Note: testing rate limiting with supertest and express-rate-limit 
   // requires hitting the limit in a loop.
   // The global limit is 60 req / min. The report generate limit for analysts is 10/hr.
   // We will just verify that the route returns 400 for bad input (meaning rate limiting didn't block first request), 
   // then we might hit rate limit if we loop. But to keep tests fast, we just verify auth works.
   test('POST /admin/reports/generate — Analyst can access, User cannot', async () => {
-    // Analyst (user is currently analyst)
+    // Promote explicitly. This used to rely on the api_keys sync test above
+    // having already set the role, which made the two tests order-dependent.
+    await db.collection('users').doc(userId).update({ role: 'analyst' });
+
     const resAnalyst = await request(app).post('/admin/reports/generate').set(H_USER)
       .send({ projectId: 'missing', reportType: 'executive_summary' });
     // Expect 404 or 400 because project doesn't exist, but NOT 403.

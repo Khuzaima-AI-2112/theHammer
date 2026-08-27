@@ -50,7 +50,7 @@ app.use((req, res, next) => {
     res.setHeader('Vary', 'Origin');
   }
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,DELETE,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type,X-Api-Key,Authorization');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization');
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
 });
@@ -82,10 +82,51 @@ app.use(express.json());
 const BUCKET_NAME = process.env.GCS_BUCKET;
 const gcs = new Storage();
 
-// ── Multer (memory storage, 10 MB) ───────────────────────────────
+// ── Upload limits ────────────────────────────────────────────────
+// The ceiling itself lives in lib/defaults.js, which megamind.md names the OSOT
+// for configuration defaults and which /admin/me reports as the enforced upload
+// size. Read it, do not restate it.
+const { CONFIG_DEFAULTS } = require('./lib/defaults');
+const MAX_UPLOAD_BYTES = CONFIG_DEFAULTS.maxFileSizeBytes;
+const MAX_UPLOAD_MB = MAX_UPLOAD_BYTES / (1024 * 1024);
+
+// A Capture is always a PNG: buildObjectPath() names the object .png and the
+// bucket write hardcodes image/png, so anything else would be stored under a
+// content type it isn't.
+const ACCEPTED_UPLOAD_TYPE = 'image/png';
+
+// The pre-multer guard reads Content-Length, which covers the whole multipart
+// envelope: the file plus its part headers, boundaries and the other fields.
+// The allowance keeps a legitimate at-the-limit file from being refused for the
+// envelope around it, and leaves multer's own limit as the exact per-file check.
+//
+// Two bounds this leaves open, both closed by that multer limit rather than by
+// the guard, and neither of which lets memory grow past MAX_UPLOAD_BYTES:
+//   - a body between the file limit and the limit plus the allowance
+//   - a chunked request, which carries no Content-Length to judge
+const MULTIPART_ENVELOPE_ALLOWANCE = 64 * 1024;
+const MAX_REQUEST_BYTES = MAX_UPLOAD_BYTES + MULTIPART_ENVELOPE_ALLOWANCE;
+
+// How much of a refused upload the server will read and throw away so the client
+// can receive its 413 (see rejectOversizedUpload). Content-Length is
+// attacker-controlled, so draining without a ceiling would let one request cost
+// the server arbitrary bandwidth. The budget covers a plausibly oversized
+// Capture — a real client still gets its answer — and cuts off anything beyond.
+const DRAIN_BUDGET_BYTES = 2 * MAX_REQUEST_BYTES;
+
+// ── Multer (memory storage, PNG only, size-limited) ──────────────
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 }
+  limits: { fileSize: MAX_UPLOAD_BYTES },
+  // Runs as the part header is parsed, before the file contents are buffered.
+  fileFilter: (_req, file, cb) => {
+    if (file.mimetype !== ACCEPTED_UPLOAD_TYPE) {
+      const err = new Error(`Unsupported file type: expected ${ACCEPTED_UPLOAD_TYPE}, received ${file.mimetype}`);
+      err.status = 400;
+      return cb(err);
+    }
+    cb(null, true);
+  }
 });
 
 // ─────────────────────────────────────────────────────────────────
@@ -130,6 +171,69 @@ function requireMultipart(req, res, next) {
       error: 'Content-Type must be multipart/form-data',
       received: ct.slice(0, 120) || '(none)'
     });
+  }
+  next();
+}
+
+// multer 2.x listens for 'error', 'aborted' and 'close' on the request and
+// surfaces them to the route; 1.x had no such listeners. These are plain Errors
+// with no status, so left alone they become a 500 and an ERROR-severity log
+// line. A Monitored User closing a laptop lid mid-Capture is an ordinary event
+// on the network theHammer runs over, not a server fault, and must not read as
+// one in the logs.
+const CLIENT_DISCONNECT_MESSAGES = new Set([
+  'Request closed',
+  'Request aborted',
+  'Request error'
+]);
+
+function isClientDisconnect(err) {
+  return Boolean(err) && CLIENT_DISCONNECT_MESSAGES.has(err.message);
+}
+
+/**
+ * SEC-07 — refuse an oversized upload before multer buffers it.
+ *
+ * The verdict comes from the Content-Length header alone, so an over-limit
+ * request is answered without reading its body into memory. A request that
+ * declares no length, or one inside the limit, passes through to multer, whose
+ * own fileSize limit remains the exact per-file check.
+ */
+function rejectOversizedUpload(req, res, next) {
+  const declared = Number(req.headers['content-length']);
+  if (Number.isFinite(declared) && declared > MAX_REQUEST_BYTES) {
+    let replied = false;
+    const reply = () => {
+      if (replied || res.headersSent) return;
+      replied = true;
+      res.status(413).json({
+        error: `Payload Too Large: request exceeds ${MAX_UPLOAD_MB}MB limit`,
+        declaredBytes: declared
+      });
+    };
+
+    // Answering while the client is still uploading resets the socket, and the
+    // client sees ECONNRESET rather than the 413 — which would leave the
+    // extension retrying a Capture that can never succeed. So drain the rest of
+    // the request, then answer. Draining discards bytes as they arrive; nothing
+    // is buffered and multer never runs, which is the point of refusing here.
+    //
+    // The drain is capped: Content-Length is attacker-controlled, so a request
+    // claiming to be enormous would otherwise cost the server that much reading.
+    // Past the budget the client loses its answer, which is the right trade at
+    // a size no real Capture reaches.
+    let drained = 0;
+    req.on('data', (chunk) => {
+      drained += chunk.length;
+      if (drained > DRAIN_BUDGET_BYTES) {
+        reply();
+        req.destroy();
+      }
+    });
+    req.on('end', reply);
+    req.on('error', reply);
+    req.on('aborted', reply);
+    return;
   }
   next();
 }
@@ -276,14 +380,24 @@ app.post('/upload-url', requireAuth('user'), async (req, res, next) => {
 });
 
 // ─ POST /capture ──────────────────────────────────────────────────
-app.post('/capture', requireAuth('user'), requireMultipart, (req, res, next) => {
+app.post('/capture', requireAuth('user'), requireMultipart, rejectOversizedUpload, (req, res, next) => {
   upload.single('file')(req, res, (err) => {
     if (err instanceof multer.MulterError) {
       if (err.code === 'LIMIT_FILE_SIZE') {
-        return res.status(413).json({ error: 'Payload Too Large: File exceeds 10MB limit' });
+        return res.status(413).json({ error: `Payload Too Large: File exceeds ${MAX_UPLOAD_MB}MB limit` });
       }
+      // Every other MulterError is a malformed request: an unexpected field, too
+      // many parts, a field name that is too long or nested too deeply. multer 2.x
+      // added LIMIT_FIELD_NESTING to that set, and it belongs in this same 400.
       return res.status(400).json({ error: err.message });
+    } else if (isClientDisconnect(err)) {
+      // The upload ended before it arrived. There may be no socket left to
+      // answer on, so say what happened at info level and stop.
+      logger.info(`[hammer-api] capture upload ended early: ${err.message}`);
+      if (res.headersSent) return;
+      return res.status(400).json({ error: 'Upload did not complete' });
     } else if (err) {
+      // fileFilter rejections carry their own status; errorHandler honours it.
       return next(err);
     }
     next();
@@ -543,4 +657,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { app, sanitize, buildObjectPath, sha256, analystReportLimiter, videoExportLimiter };
+module.exports = { app, sanitize, buildObjectPath, sha256, rejectOversizedUpload, isClientDisconnect, analystReportLimiter, videoExportLimiter };

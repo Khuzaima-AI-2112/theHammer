@@ -466,3 +466,154 @@ Run this before starting any new sprint:
 **Rule going forward:**
 - Always verify that any SHA-256 base image digest in a Dockerfile is exactly 64 characters long (excluding the `sha256:` prefix).
 - Test build images locally (e.g. run `docker build`) or dry-run pull the exact pinned tag+digest reference before pushing changes to the remote branch to catch checksum errors early.
+
+---
+
+### 40. Jest's default 5s hook budget is too tight for emulator-backed setup
+
+**What happened:** On a clean machine `npm test` reported 38 of 45 tests passing. All seven failures were in `admin.users.test.js`, every one of them `Exceeded timeout of 5000 ms for a hook`. The suite looked like it had seven product defects. It had none — the same suite passed 7/7 in isolation once the timeout was raised.
+
+**Root cause:** The suite had no Jest config file at all, so Jest's 5s default applied. `beforeAll` in the emulator-backed suites clears the whole emulator database over HTTP and then seeds fixtures, which comfortably exceeds 5s against a cold emulator. A warm emulator finishes inside 5s, so the failure only appears on the first run after a machine starts — which is exactly when a new developer meets it.
+
+**Rule going forward:**
+- Any suite whose hooks do network or emulator work needs an explicit `testTimeout`; do not rely on the Jest default.
+- Treat a whole-suite failure that is entirely `Exceeded timeout ... for a hook` as a harness problem until proven otherwise, not as a product defect.
+- Reproduce timing failures on a cold emulator. A green run proves nothing if a previous run left the emulator warm.
+
+---
+
+### 41. The Cloud Storage credential probe keeps Jest alive, and `--detectOpenHandles` cannot name it
+
+**What happened:** After every test run, Jest printed `Jest did not exit one second after the test run has completed`. In CI this hangs the job until it times out. `--detectOpenHandles` reported no handles at all, and using that flag even made the warning disappear, because it changes teardown timing.
+
+**Root cause:** `backend/src/index.js` constructs `new Storage()` at module scope. Requiring the app therefore builds an auth client, which resolves Application Default Credentials by probing the GCE metadata server. On a developer machine nothing answers that address, so the connection never settles. It is not a libuv handle Jest tracks, which is why `--detectOpenHandles` is blind to it; `process.getActiveResourcesInfo()` named it as `ConnectWrap` and `TCPSocketWrap`.
+
+**Rule going forward:**
+- When `--detectOpenHandles` reports nothing but Jest still will not exit, use `process.getActiveResourcesInfo()` in an `afterAll` instead, and bisect by running each suite alone.
+- Set `METADATA_SERVER_DETECTION=none` for any offline suite so the credential probe never starts.
+- Be aware this is a workaround for an import-time side effect: a module-scope client construction runs on every `require` of the app, including in tests that never touch it. Prefer lazy construction for clients that need credentials.
+
+---
+
+### 42. Replying early to a large upload resets the socket, and the client never sees the status
+
+**What happened:** A new pre-multer guard on `POST /capture` correctly refused a 12MB upload with 413, and the test failed with `read ECONNRESET`. The server was right and the client still could not read the answer.
+
+**Root cause:** Answering while the client is still uploading ends the response before the request body has been consumed. Node then tears down the socket, so the client sees a connection reset rather than the 413. For theHammer this is worse than a cosmetic problem: `AGENTS.md` Rule 4 makes a lost Capture non-negotiable, and the extension's retry logic would re-send an oversized Capture three times, never learning why it failed.
+
+**Rule going forward:**
+- When rejecting a request before its body is read, drain the remainder and answer on `end`. Draining discards bytes as they arrive; it does not buffer them, so the memory protection is unchanged.
+- Cap the drain. `Content-Length` is attacker-controlled, so draining without a ceiling lets one request cost the server an arbitrary amount of reading. Past the budget, destroy the request and accept that the client loses its answer.
+- Treat `ECONNRESET` in a test that asserts an error status as evidence about *when* the server replied, not as flakiness.
+- multer 2.x drains for its own errors: it waits for the request before calling `next(err)`, with a source comment naming EPIPE as the reason. Two things this does **not** give you. It cannot cover a guard that runs *before* multer, which is why the pre-multer guard drains for itself. And multer own drain has no ceiling, so a rejected upload with no `Content-Length` is read in full before the client is answered — the guard's budget does not apply to it.
+
+---
+
+### 43. `Content-Length` measures the multipart envelope, not the file
+
+**What happened:** A pre-multer size guard compared `Content-Length` against the 10MB file ceiling. A legitimate Capture at the ceiling was refused, because the request carries more than the file.
+
+**Root cause:** `Content-Length` covers the whole multipart body: every part header, every boundary, and the other form fields, as well as the file. Comparing it against a per-file limit therefore refuses valid files near that limit.
+
+**Rule going forward:**
+- Give a header-based size guard an explicit envelope allowance above the per-file limit, and leave the parser's own per-file limit as the exact check.
+- Accept what this leaves open, and write it down: a body between the file limit and the limit plus the allowance, and a chunked request carrying no `Content-Length` at all, both reach the parser. Neither can grow memory past the per-file limit, which is what the guard exists to protect.
+
+---
+
+### 44. A deletion is not proven by a test that was already passing
+
+**What happened:** Issue #4 removed a retired API key surface. Two of the tests written to prove the removal passed *before* a single line was deleted, and would have been committed as evidence of work that had not happened yet.
+
+**Root cause:** Both tests could be satisfied by something other than the deletion.
+
+- `expect(() => require('../src/worker/keyRotationWorker')).toThrow({ code: 'MODULE_NOT_FOUND' })` was green while the file was still on disk. The worker's own `require('../../lib/firestore')` pointed at a path that does not exist, so loading it threw `MODULE_NOT_FOUND` for a reason that had nothing to do with the file being deleted. `require()` cannot distinguish "this module is gone" from "this module is present and broken".
+- `expect((await db.collection('api_keys').get()).empty).toBe(true)` was green because that suite never seeds a key. The assertion held vacuously, and would have gone on holding no matter what the route wrote.
+
+**Rule going forward:**
+- To assert a module is gone, use `require.resolve`, which only consults the filesystem, never the module body.
+- To assert a write no longer happens, seed the document the write would have touched and assert it is *unchanged*. An empty-collection assertion in a suite that seeds nothing proves nothing.
+- Run every new test against the *un*changed code first and read which ones pass. A test that is green before the fix is either testing the wrong thing or testing nothing; a deletion ticket makes this easy to miss, because "the behaviour is absent" is also true of behaviour that was never exercised.
+- Where a test is unavoidably green on arrival — a regression guard around code the change must not break — prove it can fail by mutating the code under test and watching it go red. The Firebase ID token test in `tests/auth.firebase-token.test.js` was verified this way.
+
+---
+
+### 45. Deleting a test can break the test after it
+
+**What happened:** Issue #4 deleted the integration test asserting that role updates sync to `api_keys`. The next test in the file, which checks that an analyst may generate reports, then failed: its comment read `// Analyst (user is currently analyst)`.
+
+**Root cause:** The deleted test had promoted the user to `analyst` as a side effect, and the following test read that role instead of establishing its own. The dependency was invisible in the passing suite and only surfaced when the earlier test was removed.
+
+**Rule going forward:**
+- Before deleting a test, check what state it leaves behind and grep the rest of the file for tests that consume it. A comment describing state the test never set is the tell.
+- Fix such a test by giving it its own setup rather than by preserving the deleted one. Order-dependent tests pass in file order and fail under `--shuffle`, `.only`, or any future deletion.
+
+---
+
+### 46. Retiring an auth mechanism leaves incident-response procedures that fail silently
+
+**What happened:** Issue #4 removed the last of the API key surface from the backend. `docs/runbook.md` §3, "Revoke Compromised API Key", still instructed the on-call operator to open the Firestore Console, find the `api_keys` collection, and set `isActive: false` on the user's keys — then tell the user to generate a new Personal API Key from the Admin Portal.
+
+**Root cause:** The runbook was written against the old mechanism and nothing tied it to the code. Every step is individually plausible and the whole procedure is inert: the collection does not exist, so filtering it returns nothing, and an operator following the steps sees no error. Under a live credential compromise they would conclude the credential was revoked when nothing had been revoked at all. A stale comment misleads a reader; a stale runbook misleads an operator during an incident.
+
+**Rule going forward:**
+- When removing an authentication or authorisation mechanism, grep `docs/runbook.md` and any other operational procedure for it in the same PR. Code and tests are not the whole surface of an auth change.
+- A procedure that silently does nothing is worse than one that errors. Prefer steps that fail loudly when their assumptions no longer hold.
+- State revocation latency explicitly. `requireAuth` calls `verifyIdToken(token)` without `{ checkRevoked: true }`, so `revokeRefreshTokens(uid)` stops new tokens being minted but leaves an already-issued ID token accepted until it expires — up to an hour. A runbook that omits this implies an immediacy the system does not provide.
+
+---
+
+### 47. State that only one code path advances can be replaced without ever being written down
+
+**What happened:** `sessionOnCapture()` in `extension/service-worker.js` started a new Session whenever the project changed, by overwriting `activeSession` in `chrome.storage.session`. The only function that writes a `session_events` document, `sessionFlush()`, was called from `onSuspend` and `windows.onRemoved` and from nowhere else. So every project switch destroyed a Session that had never been recorded, and the hour of work it represented never reached any report. Nothing failed, nothing logged, and the `uploads` documents were all written normally — the screenshots were there and only the time was missing.
+
+**Root cause:** The Session was treated as a variable rather than as a record with a lifecycle. Writing the record was attached to two lifecycle events of the *worker*, while the state itself was mutated by a third path that was not one of them. The gap is invisible in review because both halves read correctly on their own.
+
+**Rule going forward:**
+- Where a piece of state stands for a record that must be persisted, every path that replaces or clears it must go through the same write. Enumerate the writers of the state, then check each one against the list of places that persist it; if the two lists differ, that difference is a defect.
+- Be most suspicious where the loss is silent by construction. This one could not surface as an error because the losing path never intended to write anything.
+- A test that captures against one project and then another, asserting *two* documents, is the cheapest guard and did not exist. `extension/tests/session.test.js` now holds it.
+
+---
+
+### 48. A ticket that paraphrases its source can quietly describe a different feature
+
+**What happened:** Issue #11 was titled "Action icon states (ACT-01 to ACT-05)" and its body described an icon reflecting what the Session is doing. The Testing Plan, which is where `ACT-01` to `ACT-05` are actually defined, files them under "Priority 5 — the three-way action icon" and they cover screenshot mode, snip mode region select, snip on a restricted page, changing project mid-session, and the menu being open while a capture is queued. Only `ACT-04` had anything to do with Sessions. Acting on the ticket as written would have built a Session indicator and closed an issue whose other four cases — an entire unbuilt capture-mode feature — had not been touched.
+
+**Root cause:** The ticket restated its source from memory instead of quoting it, and the source is a `.docx` in `deliverables\` that no grep over the repo will find. The identifiers `ACT-01` to `ACT-05` appear nowhere in the codebase, so the paraphrase had nothing to contradict it.
+
+**Rule going forward:**
+- When a ticket cites test-case identifiers, open the document that defines them and quote the rows into the ticket before working on it. Identifiers are not self-explanatory and a plausible expansion of one is worth nothing.
+- Treat a `Done when` that cannot be traced back to its source as unstarted work. AGENTS.md rule 1 makes the condition absolute; that is only meaningful if the condition is the real one.
+
+### 49. A silent fallback turns a wrong URL into no symptom at all
+
+**What happened:** Both hard-coded API base URLs in the extension ended in `/api`, and the backend serves every route the extension calls at the root. `/api/config`, `/api/me/projects`, `/api/upload-url` and `/api/session-events` are all 404. On a fresh install nothing works: projects do not load, screenshots exhaust their retries into the offline queue, and `session_events` are never written. Nobody noticed, for two reasons. `loadConfig()` catches its own failure and falls back to cached settings by design, so the only trace is a `console.warn` in a popup nobody has open. And a profile that already held a good cached `cloudRunUrl` kept working, so the developer machines were the least likely to see it.
+
+**Root cause:** The constant was never exercised by anything. No test named it, and the only code path that reads it on a healthy machine is the one that never runs, because storage already has a value. A fallback that is only reached in a state nobody is in is a fallback nobody has tested.
+
+**Rule going forward:**
+- Assert the shape of an outbound URL in a test, not just that a request was made. `extension/tests/api-base.test.js` pins the path so the prefix cannot come back from the constant or from a cached settings value.
+- When a `catch` exists to keep a feature working offline, make sure it cannot also hide a permanently broken configuration. "Falls back to cache" and "has never once succeeded" look identical from the outside.
+- A cached value that fixes itself is not fixed. Changing the constant alone would have left every existing profile 404ing, because storage wins over the constant.
+
+### 50. A stub missing one global turns a success path into a silent failure path
+
+**What happened:** The service worker drains its offline queue at load, inside a top-level IIFE. The first `ACT-05` test seeded two queued captures, ran a snip, and asserted the queue was untouched — it came back empty, and the two captures had moved to `failed`. Nothing had gone wrong with the snip. The drain had run, and every item in it had thrown `ReferenceError: atob is not defined`, because `extension/tests/sw-harness.js` builds its own `vm` sandbox and `atob` was not among the globals it provided. The worker's own `try/catch` treated that as an upload failure and gave up on both captures, exactly as it would for a dead network.
+
+**Root cause:** Two things compounding. The sandbox is an allow-list of globals, so anything not listed is missing rather than wrong, and the missing thing only surfaces on a path the earlier tests never took. The worker then catches every error from that path identically, so an environment defect and a real upload failure are indistinguishable from the outside.
+
+**Rule going forward:**
+- When adding a test that reaches a new code path in the sandboxed worker, check the path's globals against the harness before trusting a failing assertion. A capture pipeline reaches for `atob`, `Blob`, `FormData`, `AbortController` and `XMLHttpRequest`, and none of them are in a bare `vm` context.
+- Do not write "state is unchanged" assertions against a module that does work at import time. Assert what the work should have achieved — here, that every queued capture was uploaded and none were given up on — which is what `ACT-05` was asking anyway.
+
+### 51. A double-quoted shell string runs the backticks in your markdown
+
+**What happened:** A comment explaining the `/api` prefix was posted to the Customer's pull request with `gh pr comment --body "…"`. The body was markdown and contained `` `/api` `` in code spans. The shell expanded the backticks as command substitution before `gh` ever saw the string, so `/api` was executed as a command, produced nothing, and the text was posted with the phrase silently absent. The comment read as a confident explanation with the subject of the sentence missing. It was published to the Customer's repository in that state and had to be repaired afterwards with a `PATCH` on the comment.
+
+**Root cause:** Markdown's inline-code delimiter and `sh`'s command-substitution delimiter are the same character, and the failure is silent in both directions. The shell does not warn that it ran something; `gh` cannot know a word was removed before it arrived; and command substitution deletes the text rather than mangling it, so the result is still valid prose. Nothing between the keystroke and the Customer's inbox had any reason to object. Writing a body that happens to contain no backticks — which is most of them — makes the trap invisible until the one message that does.
+
+**Rule going forward:**
+- Never pass markdown to `gh` through a double-quoted string. Use a quoted heredoc, `--body-file - <<'EOF'`, so the shell performs no expansion at all, or write a real file and pass `--body-file`. The quotes around `EOF` are the part that matters.
+- This applies to every argument carrying prose, not just `--body`: `--title`, `--notes`, `gh issue create`, `gh release create`. Backticks, `$`, `!` and `\` are all live inside double quotes.
+- Read back anything published outside this repository. `gh pr view --comments` costs one command, and the Customer's repository is the worst place to discover a formatting habit.

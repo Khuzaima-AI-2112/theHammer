@@ -4,7 +4,7 @@
 // Tasks covered:
 //   3.1 — Validate required fields; 400 with field name on missing
 //   3.3 — Returns { signedUrl, path }; path embedded in URL matches path field
-//   2.7 — 401 on missing/wrong API key (regression)
+//   2.7 — 401 on missing/wrong Authorization header (regression)
 //
 // GCS signing is mocked — unit tests should not make real network calls.
 // ─────────────────────────────────────────────────────────────────
@@ -17,32 +17,11 @@ const request = require('supertest');
 // assert the path in the URL matches the path field in the response (task 3.3).
 const FAKE_SIGNED_URL_PREFIX = 'https://storage.googleapis.com/fake-bucket/';
 
-jest.mock('@google-cloud/storage', () => {
-  const mockGetSignedUrl = jest.fn().mockImplementation(function () {
-    // `this` is the File instance; grab the name from it
-    const objectPath = this.name;
-    return Promise.resolve([`${FAKE_SIGNED_URL_PREFIX}${objectPath}?X-Goog-Signature=abc`]);
-  });
-
-  const mockFile = jest.fn().mockImplementation(function (name) {
-    this.name = name;
-    this.getSignedUrl = mockGetSignedUrl.bind(this);
-    this.save = jest.fn().mockResolvedValue();
-  });
-
-  const mockBucket = jest.fn().mockImplementation(() => ({
-    file: (name) => new mockFile(name),
-  }));
-
-  return {
-    Storage: jest.fn().mockImplementation(() => ({
-      bucket: () => new mockBucket(),
-    })),
-  };
-});
+jest.mock('@google-cloud/storage', () => require('./helpers/gcsMock').createStorageMock({
+  signedUrlPrefix: 'https://storage.googleapis.com/fake-bucket/'
+}));
 
 // Set required env vars before the app module loads
-process.env.API_KEY    = 'test-api-key';
 process.env.GCS_BUCKET = 'fake-bucket';
 
 const { db } = require('../src/lib/firestore');
