@@ -118,7 +118,57 @@ function requireAuth(minRole) {
   };
 }
 
+/**
+ * Verify a Firebase ID token without requiring a Firestore user record.
+ *
+ * requireAuth refuses a caller who has no `users` document, which is right for
+ * every route that acts on an account that already exists. It is wrong for the
+ * two routes whose entire job is to create that document. Both carry comments
+ * saying they are for users who have just signed up, and both were unreachable
+ * by exactly that user, so the `users` collection could never gain its first
+ * record and invitations could never be accepted (#33).
+ *
+ * This middleware stops at identity: the token is genuine, and this is who
+ * presented it. Authorisation is left to the route, because the two have
+ * different answers — an unclaimed invitation for /workspaces/join, and the
+ * configured bootstrap address for /workspaces.
+ *
+ * It sets `req.firebaseUser`, deliberately not `req.hammerUser`. There is no
+ * Hammer user yet, and a half-populated one would be read downstream as a
+ * provisioned account with no role.
+ *
+ * There is no `x-dev-user-email` fallback here on purpose. requireAuth's exists
+ * so the suite can authenticate without minting tokens, and it still resolves a
+ * real Firestore record. A fallback on this path would skip the record too, and
+ * a header that turns any request into a valid identity is not something to add
+ * to the one code path that no longer checks provisioning. Tests mock the token
+ * verifier instead, as tests/auth.firebase-token.test.js already does.
+ */
+async function requireFirebaseUser(req, res, next) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'unauthenticated: missing Bearer token' });
+  }
+
+  try {
+    const { uid, email } = await getAuth().verifyIdToken(authHeader.split('Bearer ')[1]);
+
+    // Both callers key a user record by email — the invitation is matched on it
+    // and the bootstrap address is compared against it. A token without one
+    // cannot be turned into a user, so refuse rather than write a broken record.
+    if (!email) {
+      return res.status(403).json({ error: 'forbidden: token carries no email address' });
+    }
+
+    req.firebaseUser = { uid, email: email.toLowerCase() };
+    return next();
+  } catch (err) {
+    logger.error('[Auth] Token verification failed:', err.message);
+    return res.status(401).json({ error: 'unauthenticated: invalid token' });
+  }
+}
+
 const requireAdmin = requireAuth('admin');
 const requireAnalyst = requireAuth('analyst');
 
-module.exports = { requireAuth, requireAdmin, requireAnalyst };
+module.exports = { requireAuth, requireAdmin, requireAnalyst, requireFirebaseUser };
