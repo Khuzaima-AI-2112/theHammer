@@ -70,9 +70,9 @@ function pageByCursor(items, cursor) {
     const at = items.findIndex((u) => u.id === cursor);
     if (at !== -1) start = at + 1;
   }
-  const window  = items.slice(start, start + USERS_PAGE_SIZE + 1);
-  const hasMore = window.length > USERS_PAGE_SIZE;
-  const page    = hasMore ? window.slice(0, USERS_PAGE_SIZE) : window;
+  const lookahead = items.slice(start, start + USERS_PAGE_SIZE + 1);
+  const hasMore = lookahead.length > USERS_PAGE_SIZE;
+  const page    = hasMore ? lookahead.slice(0, USERS_PAGE_SIZE) : lookahead;
   return { page, nextCursor: hasMore ? page[page.length - 1].id : null };
 }
 
@@ -95,8 +95,10 @@ async function usersInProject(projectId) {
   return userSnaps
     .map((snap, i) => (snap.exists ? { ...serializeUser(snap), membership: memberships[i] } : null))
     .filter(Boolean)
-    // Plain comparison, not localeCompare: this has to match the byte order the
-    // unfiltered branch gets from Firestore's orderBy('email', 'asc').
+    // Plain comparison rather than localeCompare, to stay as close as possible to
+    // the orderBy('email', 'asc') the unfiltered branch gets. Not identical: JS
+    // compares UTF-16 code units and Firestore orders by UTF-8 bytes, which
+    // diverge above U+FFFF. Email addresses do not reach there.
     .sort((a, b) => {
       const x = a.email ?? '', y = b.email ?? '';
       return x < y ? -1 : x > y ? 1 : 0;
@@ -132,6 +134,7 @@ router.get('/users', requireAdmin, async (req, res, next) => {
     return res.json({ users, total: users.length, nextCursor });
   } catch (err) { next(err); }
 });
+
 // ─── GET /admin/users/:id ──────────────────────────────────────────────────
 router.get('/users/:id', requireAdmin, async (req, res, next) => {
   try {

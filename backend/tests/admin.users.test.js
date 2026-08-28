@@ -237,3 +237,70 @@ describe('GET /admin/users — ?projectId= filter', () => {
     expect(first.membership.admittedAt).toBe('2026-01-01T00:00:00.000Z');
   });
 });
+
+// The second "Done when" bullet on #46 is about a page boundary, so verifying it
+// needs a filtered set larger than one page. Seeded in one batch to stay quick.
+describe('GET /admin/users — ?projectId= paging past the first page', () => {
+  const projC = 'filter-project-big';
+  const SIZE  = 101;   // PAGE_SIZE + 1, so page two holds exactly one User
+  const idOf  = (i) => `big-user-${String(i).padStart(3, '0')}`;
+
+  beforeAll(async () => {
+    await seedProject(projC, { name: 'Filter Project Big' });
+    const batch = db.batch();
+    for (let i = 0; i < SIZE; i++) {
+      batch.set(db.collection('users').doc(idOf(i)), {
+        email: `${String(i).padStart(3, '0')}@big.test`,
+        displayName: `Big ${i}`,
+        role: 'user',
+        workspaceId: 'test-workspace',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        lastActiveAt: '2026-01-01T00:00:00.000Z',
+        schemaVersion: 1
+      });
+      batch.set(db.collection('project_memberships').doc(`${projC}_${idOf(i)}`), {
+        projectId: projC,
+        userId: idOf(i),
+        role: 'user',
+        admittedAt: '2026-01-01T00:00:00.000Z',
+        schemaVersion: 1
+      });
+    }
+    await batch.commit();
+  });
+
+  afterAll(async () => {
+    const batch = db.batch();
+    for (let i = 0; i < SIZE; i++) {
+      batch.delete(db.collection('users').doc(idOf(i)));
+      batch.delete(db.collection('project_memberships').doc(`${projC}_${idOf(i)}`));
+    }
+    batch.delete(db.collection('projects').doc(projC));
+    await batch.commit();
+  });
+
+  test('a non-null nextCursor always yields a non-empty next page', async () => {
+    const first = await request(app).get(`/admin/users?projectId=${projC}`).set(H);
+    expect(first.status).toBe(200);
+    expect(first.body.users).toHaveLength(100);
+    expect(first.body.nextCursor).toBe(idOf(99));
+
+    const second = await request(app)
+      .get(`/admin/users?projectId=${projC}&cursor=${first.body.nextCursor}`).set(H);
+    expect(second.body.users.map(u => u.id)).toEqual([idOf(100)]);
+    expect(second.body.nextCursor).toBeNull();
+  });
+
+  test('every page holds only members of the filtered project', async () => {
+    const first = await request(app).get(`/admin/users?projectId=${projC}`).set(H);
+    expect(first.body.users.every(u => u.membership.projectId === projC)).toBe(true);
+  });
+
+  test('total counts the rows in this page, as on the unfiltered branch', async () => {
+    const res = await request(app).get(`/admin/users?projectId=${projC}`).set(H);
+    // Deliberate: `total` means "rows in this page" on both branches. #46 asks for
+    // "the filtered count"; making it the full filtered count here would leave the
+    // two branches meaning different things by the same name.
+    expect(res.body.total).toBe(100);
+  });
+});
