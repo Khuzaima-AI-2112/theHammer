@@ -17,7 +17,7 @@
 // same style as unwrapList (#41), and removes the fallbacks — a seventh one
 // would only hide the next occurrence of this.
 //
-// There is no DOM harness for the portal, so normalizeProject is lifted out of
+// There is no DOM harness for the portal, so normaliseProject is lifted out of
 // the source and exercised directly; the call sites are checked statically, the
 // way list-envelopes.test.js checks unwrapList's.
 //
@@ -30,21 +30,14 @@ const path = require('node:path');
 
 const APP_JS = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
 
-/** Lift a top-level function out of app.js and make it callable here. */
-function lift(source, name) {
-  const start = source.indexOf('function ' + name + '(');
-  assert.notStrictEqual(start, -1, name + ' not found in app.js');
-  const end = source.indexOf('\n}', start);
-  assert.notStrictEqual(end, -1, 'could not find the end of ' + name);
-  return new Function('return (' + source.slice(start, end + 2) + ')')();
-}
+const { lift } = require('./lift');
 
-const normalizeProject = lift(APP_JS, 'normalizeProject');
+const normaliseProject = lift(APP_JS, 'normaliseProject');
 
 // ── The shape ────────────────────────────────────────────────────
 
 test('the backend id becomes the projectId the portal reads', () => {
-  const decoded = normalizeProject({ id: 'qB3Km18va9H9QEsjuW1M', name: 'Test' });
+  const decoded = normaliseProject({ id: 'qB3Km18va9H9QEsjuW1M', name: 'Test' });
 
   assert.strictEqual(decoded.projectId, 'qB3Km18va9H9QEsjuW1M');
 });
@@ -52,7 +45,7 @@ test('the backend id becomes the projectId the portal reads', () => {
 test('the decoded Project has exactly one id field, and it is populated', () => {
   // The third `Done when`: a rename on either side must fail a test rather than
   // render "undefined". Two id fields would let one of them rot unnoticed.
-  const decoded = normalizeProject({ id: 'abc123', name: 'Test' });
+  const decoded = normaliseProject({ id: 'abc123', name: 'Test' });
 
   const idFields = Object.keys(decoded).filter(k => /^(id|projectId)$/.test(k));
 
@@ -62,7 +55,7 @@ test('the decoded Project has exactly one id field, and it is populated', () => 
 });
 
 test('every other field survives the normalisation', () => {
-  const decoded = normalizeProject({
+  const decoded = normaliseProject({
     id: 'abc123',
     name: 'Test',
     adminId: 'u1',
@@ -87,7 +80,7 @@ test('a record carrying only projectId is refused, because id is the contract', 
   // tolerance that let #45 live undetected: /admin/projects serialises `id`, so
   // a record without one is a backend change the portal must not absorb quietly,
   // and the extension's own p?.projectId ?? p?.id is the shape of that mistake.
-  assert.throws(() => normalizeProject({ projectId: 'abc123', name: 'Test' }), /id/);
+  assert.throws(() => normaliseProject({ projectId: 'abc123', name: 'Test' }), /id/);
 });
 
 // ── Refusing the shape that caused the bug ───────────────────────
@@ -97,7 +90,7 @@ test('a Project with no usable id is refused rather than rendered as "undefined"
   // /admin/projects/undefined/activity to the backend.
   for (const junk of [{ name: 'Test' }, { id: '', name: 'Test' }, { id: null }, {}]) {
     assert.throws(
-      () => normalizeProject(junk),
+      () => normaliseProject(junk),
       (e) => /id/.test(e.message),
       'should have refused: ' + JSON.stringify(junk)
     );
@@ -106,7 +99,7 @@ test('a Project with no usable id is refused rather than rendered as "undefined"
 
 test('a missing id is marked as a decode failure, not blamed on the network', () => {
   try {
-    normalizeProject({ name: 'Test' });
+    normaliseProject({ name: 'Test' });
     assert.fail('a Project with no id should have thrown');
   } catch (err) {
     assert.strictEqual(err.isDecodeFailure, true,
@@ -118,7 +111,7 @@ test('a non-string id is refused, since the DOM would coerce it', () => {
   // The defect was coercion. A number or an object id would round-trip through
   // option.value as a string and reintroduce exactly this class of bug.
   for (const junk of [{ id: 42 }, { id: {} }, { id: [] }, { id: true }]) {
-    assert.throws(() => normalizeProject(junk), /id/,
+    assert.throws(() => normaliseProject(junk), /id/,
       'should have refused: ' + JSON.stringify(junk));
   }
 });
@@ -133,7 +126,7 @@ test('the /admin/projects list is normalised as it is decoded', () => {
   );
 
   assert.ok(assignment, 'no apiFetch assignment found for allProjects');
-  assert.match(assignment, /normalizeProject/,
+  assert.match(assignment, /normaliseProject/,
     'allProjects takes the raw response shape: ' + assignment.trim());
 });
 
@@ -143,7 +136,7 @@ test('a newly created Project is normalised before it joins allProjects', () => 
   const unshift = APP_JS.split('\n').find((l) => l.includes('allProjects.unshift'));
 
   assert.ok(unshift, 'no allProjects.unshift found');
-  assert.match(unshift, /normalizeProject/,
+  assert.match(unshift, /normaliseProject/,
     'the created Project skips normalisation: ' + unshift.trim());
 });
 
@@ -167,8 +160,11 @@ test('no Project record is read through a bare .id any more', () => {
   // bug that would silently return undefined again.
   const code = APP_JS.split('\n').filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l));
 
+  // Scoped to Project reads on purpose. An earlier draft banned `.id` on any
+  // variable named x anywhere in the file, which is not this test's business.
   const offenders = code.filter(l =>
-    /allProjects\b[^\n]*\bp\.id\b/.test(l) || /\bx\.id\b/.test(l));
+    /allProjects\b[^\n]*\bp\.id\b/.test(l) ||
+    /allProjects\.find\([^)]*\bx\.id\b/.test(l));
 
   assert.deepStrictEqual(offenders, [],
     'these read .id off a normalised Project: ' + offenders.join(' | '));

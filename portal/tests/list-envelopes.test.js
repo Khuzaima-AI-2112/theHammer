@@ -20,14 +20,7 @@ const path = require('node:path');
 
 const APP_JS = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
 
-/** Lift a top-level function out of app.js and make it callable here. */
-function lift(source, name) {
-  const start = source.indexOf('function ' + name + '(');
-  assert.notStrictEqual(start, -1, name + ' not found in app.js');
-  const end = source.indexOf('\n}', start);
-  assert.notStrictEqual(end, -1, 'could not find the end of ' + name);
-  return new Function('return (' + source.slice(start, end + 2) + ')')();
-}
+const { lift } = require('./lift');
 
 const unwrapList = lift(APP_JS, 'unwrapList');
 

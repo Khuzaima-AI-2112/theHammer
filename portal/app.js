@@ -290,7 +290,7 @@ function unwrapList(body, key) {
  * Deliberately strict about the source name. Accepting `id` or `projectId` here
  * would restore the very tolerance that let this survive six defensive patches.
  */
-function normalizeProject(p) {
+function normaliseProject(p) {
   const id = p?.id;
   if (typeof id !== 'string' || id === '') {
     const err = new Error('unexpected project shape: no usable id');
@@ -302,6 +302,7 @@ function normalizeProject(p) {
   const { id: _backendId, ...rest } = p;
   return { ...rest, projectId: id };
 }
+
 /**
  * What to put in a table when a list fails to load.
  *
@@ -372,7 +373,7 @@ async function loadProjects() {
   btn.disabled = true;
   renderSkeleton();
   try {
-    allProjects = unwrapList(await apiFetch('/admin/projects'), 'projects').map(normalizeProject);
+    allProjects = unwrapList(await apiFetch('/admin/projects'), 'projects').map(normaliseProject);
     renderProjects(filtered(allProjects));
     updateStats(allProjects);
     populateProjectFilter();       // populate users view project dropdown
@@ -558,7 +559,7 @@ async function submitCreate() {
         body: JSON.stringify({ name, webhookUrl, llmModel }) 
       });
       showToast(`Project "${name}" created.`, 'success');
-      allProjects.unshift({ ...normalizeProject(project), memberCount: 0 });
+      allProjects.unshift({ ...normaliseProject(project), memberCount: 0 });
     }
     closeModal('createModal');
     renderProjects(filtered(allProjects));
