@@ -617,3 +617,15 @@ Run this before starting any new sprint:
 - Never pass markdown to `gh` through a double-quoted string. Use a quoted heredoc, `--body-file - <<'EOF'`, so the shell performs no expansion at all, or write a real file and pass `--body-file`. The quotes around `EOF` are the part that matters.
 - This applies to every argument carrying prose, not just `--body`: `--title`, `--notes`, `gh issue create`, `gh release create`. Backticks, `$`, `!` and `\` are all live inside double quotes.
 - Read back anything published outside this repository. `gh pr view --comments` costs one command, and the Customer's repository is the worst place to discover a formatting habit.
+
+### 56. A Firestore query with no index works perfectly until there is data
+
+**What happened:** `GET /admin/projects` returned 500 the moment the Workspace contained its first Project: `9 FAILED_PRECONDITION: The query requires an index`. The query — `where('workspaceId','==',x).orderBy('createdAt','desc')` — had never had a composite index, and `firestore.indexes.json` had never listed one. It had been shipped, reviewed and deployed, and every environment it ran in had been empty, so it had never once failed. Auditing the rest found four of eight index-requiring queries with no index and a fifth with the wrong sort direction. The repo also carried two index files: `firebase.json` deploys the root one, and `infra/firestore.indexes.json` was deployed by nothing and had already drifted, defining a `reports` index on `generatedAt` when the code orders by `createdAt`.
+
+**Root cause:** The failure mode is invisible in exactly the conditions under which features get built. A fresh Firestore has no documents, an empty result needs no index, and the endpoint returns 200 with `[]`. The index requirement only appears in front of a user with real data — which, on this project, meant the first person to create a Project. Nothing in the code says a query needs an index, so nothing in review prompts the question, and the index file sits far enough from the routes that changing one never suggests changing the other.
+
+**Rule going forward:**
+- Every `.where(...).orderBy(...)` needs an entry in `firestore.indexes.json`. `npm run test:indexes` now reads the queries out of `backend/src/routes` and fails when one has no match, so this cannot be shipped again by not noticing.
+- Seed data before believing an endpoint works. An empty collection exercises none of the query planner.
+- Adding an index is additive and cannot break an existing query, so when an audit is uncertain, add it. **Removing** one is the dangerous direction: `firebase deploy --only firestore:indexes` deletes any index not in the file, so an entry that looks unused may be serving something the audit missed.
+- Keep exactly one copy of any config a deploy consumes. Two files that disagree guarantee the inert one eventually gets the careful edit.
