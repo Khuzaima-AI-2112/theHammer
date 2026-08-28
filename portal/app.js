@@ -273,6 +273,37 @@ function unwrapList(body, key) {
 }
 
 /**
+ * Settle a Project's identity at the door.
+ *
+ * The backend serialises a document's own id as `id` — the convention every
+ * serialiser under backend/src/routes/admin/ follows. The portal read
+ * `p.projectId` at sixteen sites, so that property was undefined on every
+ * Project it ever loaded (#45). Normalising here, rather than at the sixteen
+ * reads, leaves exactly one id field on an in-memory Project.
+ *
+ * The bug was silent because `option.value = undefined` reads back from the DOM
+ * as the *string* "undefined", which is truthy, so `if (!projectId) return;`
+ * passed it through and the request went out as
+ * /admin/projects/undefined/activity. Hence the refusal below: a Project with
+ * no usable id is a decode fault to report, not a row to render.
+ *
+ * Deliberately strict about the source name. Accepting `id` or `projectId` here
+ * would restore the very tolerance that let this survive six defensive patches.
+ */
+function normaliseProject(p) {
+  const id = p?.id;
+  if (typeof id !== 'string' || id === '') {
+    const err = new Error('unexpected project shape: no usable id');
+    // Marked like unwrapList's, so the caller's catch can tell a decode fault
+    // from a dead network and not blame connectivity for a 200.
+    err.isDecodeFailure = true;
+    throw err;
+  }
+  const { id: _backendId, ...rest } = p;
+  return { ...rest, projectId: id };
+}
+
+/**
  * What to put in a table when a list fails to load.
  *
  * A decode fault and a dead network want opposite things from the reader: one
@@ -342,7 +373,7 @@ async function loadProjects() {
   btn.disabled = true;
   renderSkeleton();
   try {
-    allProjects = unwrapList(await apiFetch('/admin/projects'), 'projects');
+    allProjects = unwrapList(await apiFetch('/admin/projects'), 'projects').map(normaliseProject);
     renderProjects(filtered(allProjects));
     updateStats(allProjects);
     populateProjectFilter();       // populate users view project dropdown
@@ -442,14 +473,14 @@ function renderProjects(list) {
       <td class="muted">${lastCapture}</td>
       <td>
         <div class="actions-cell">
-          <button class="btn-icon" onclick="openEditProjectModal('${esc(p.id || p.projectId)}')" aria-label="Edit project" title="Edit project">
+          <button class="btn-icon" onclick="openEditProjectModal('${esc(p.projectId)}')" aria-label="Edit project" title="Edit project">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
           </button>
-          <button class="btn-icon add" onclick="openAddMemberModal('${esc(p.id || p.projectId)}','${esc(p.name)}')"
+          <button class="btn-icon add" onclick="openAddMemberModal('${esc(p.projectId)}','${esc(p.name)}')"
             aria-label="Add member to ${esc(p.name)}" title="Add member">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M16 11c1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3 1.34 3 3 3zm-8 0c1.66 0 3-1.34 3-3S9.66 5 8 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg>
           </button>
-          <button class="btn-icon" onclick="openDeleteModal('${esc(p.id || p.projectId)}','${esc(p.name)}')"
+          <button class="btn-icon" onclick="openDeleteModal('${esc(p.projectId)}','${esc(p.name)}')"
             aria-label="Delete project ${esc(p.name)}" title="Delete project">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
           </button>
@@ -489,9 +520,9 @@ function openCreateModal() {
 }
 
 function openEditProjectModal(id) {
-  const p = allProjects.find(x => x.id === id || x.projectId === id);
+  const p = allProjects.find(x => x.projectId === id);
   if(!p) return;
-  editProjectId = p.id || p.projectId;
+  editProjectId = p.projectId;
   document.getElementById('createModalTitle').textContent = 'Edit Project';
   document.getElementById('projectNameInput').value = p.name || '';
   document.getElementById('projectWebhookInput').value = p.webhookUrl || '';
@@ -520,7 +551,7 @@ async function submitCreate() {
         body: JSON.stringify({ name, webhookUrl, llmModel }) 
       });
       showToast(`Project updated.`, 'success');
-      const idx = allProjects.findIndex(p => (p.id || p.projectId) === editProjectId);
+      const idx = allProjects.findIndex(p => p.projectId === editProjectId);
       if (idx !== -1) allProjects[idx] = { ...allProjects[idx], name, webhookUrl, llmModel };
     } else {
       const project = await apiFetch('/admin/projects', { 
@@ -528,7 +559,7 @@ async function submitCreate() {
         body: JSON.stringify({ name, webhookUrl, llmModel }) 
       });
       showToast(`Project "${name}" created.`, 'success');
-      allProjects.unshift({ ...project, memberCount: 0 });
+      allProjects.unshift({ ...normaliseProject(project), memberCount: 0 });
     }
     closeModal('createModal');
     renderProjects(filtered(allProjects));
