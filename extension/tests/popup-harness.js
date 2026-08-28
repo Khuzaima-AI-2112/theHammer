@@ -38,7 +38,10 @@ const EXPORTS = [
   'loadConfig',
   'loadProjects',
   'populateProjectSelect',
-  'setProjectSelectPlaceholder'
+  'setProjectSelectPlaceholder',
+  // #48: the tab toggle and the list it reveals.
+  'switchTab',
+  'refreshHistory'
 ];
 
 function storageArea(initial = {}) {

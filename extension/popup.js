@@ -569,12 +569,19 @@ async function refreshHistory() {
   });
 }
 
+// #48: both panels take an explicit display value. Assigning '' removes the
+// inline declaration rather than meaning "visible", so the element falls back to
+// the stylesheet — and popup.html hides #history-panel there, which meant the
+// History tab could never be shown. #capture-panel survived the same pattern
+// only because nothing in the stylesheet hides it. A toggle that has to know
+// what the stylesheet says to be correct is the defect; naming both values
+// removes the dependency.
 function switchTab(tab) {
   const isCapture = tab === 'capture';
   tabCapture.classList.toggle('active', isCapture);
   tabHistory.classList.toggle('active', !isCapture);
-  capturePanel.style.display = isCapture ? '' : 'none';
-  historyPanel.style.display = isCapture ? 'none' : '';
+  capturePanel.style.display = isCapture ? 'block' : 'none';
+  historyPanel.style.display = isCapture ? 'none' : 'block';
 }
 
 // ── Helpers ──
