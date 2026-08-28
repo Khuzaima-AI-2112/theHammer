@@ -618,6 +618,29 @@ Run this before starting any new sprint:
 - This applies to every argument carrying prose, not just `--body`: `--title`, `--notes`, `gh issue create`, `gh release create`. Backticks, `$`, `!` and `\` are all live inside double quotes.
 - Read back anything published outside this repository. `gh pr view --comments` costs one command, and the Customer's repository is the worst place to discover a formatting habit.
 
+### 52. The backend's envelope is not the shape the caller destructures
+
+**What happened:** `GET /me/projects` answers `{ projects, total }` and names each project's id `id`. The popup's `populateProjectSelect` is documented as taking an array of `{ projectId, name }`, and `loadProjects` handed it the envelope. `projects.forEach` threw inside `loadProjects`' own `try`, whose `catch` set the dropdown to "Could not load projects" and logged `GET /me/projects failed`. The request had returned **200**. Every capture failed too, because `service-worker.js` refuses to capture without `session.projectId` and the dropdown it is chosen from never populated. Two sessions went into the sign-in bridge instead, because all three visible symptoms pointed at auth.
+
+**Root cause:** Nothing pinned the contract on either side — no backend test names `/me/projects` at all, and the extension had no test that decoded a real response body. The mismatch survived review because both halves read correctly alone: the route returns a sensible envelope, the renderer takes a sensible array. Only the join is wrong, and no artefact in the repo describes the join. The error message then actively misdirected — "GET /me/projects failed" for a request that succeeded.
+
+**Rule going forward:**
+- Assert against a literal copy of the body the server actually sends, not a hand-written fixture of what you assume it sends. `extension/tests/projects-dropdown.test.js` builds its input with `backendProjects()`, mirroring `backend/src/routes/admin/me.js`.
+- Decode once, at the boundary. `normaliseProjects()` is the single place the wire format is converted, so the renderer keeps a contract worth testing against.
+- Refuse a body in an unrecognised shape. Coercing it to `[]` renders "no projects assigned" and hides the fault as a normal outcome.
+- A `catch` wrapping both the fetch and the render cannot tell a network failure from a decode failure. Name the causes apart in the message. This is lesson 49 a second time, one layer up: 49 was the request path, 52 is the response shape.
+
+### 53. A `vm` sandbox is a separate realm, so `instanceof` and `deepStrictEqual` lie
+
+**What happened:** `extension/tests/popup-harness.js` runs `popup.js` inside a `vm` context, as `sw-harness.js` does for the service worker. Two assertions failed against correct code. `assert.deepStrictEqual(popup.normaliseProjects(null), [])` reported *"Values have same structure but are not reference-equal"* — comparing `[]` with `[]`. Later, `assert.throws(fn, (e) => e instanceof Error && ...)` rejected an error that had genuinely been thrown, printing that very error in the failure output.
+
+**Root cause:** Every value the sandboxed code constructs carries the sandbox's prototypes, not the test's. `deepStrictEqual` compares prototypes and `instanceof` walks the test realm's chain, so both read a structurally identical cross-realm value as a mismatch. The failure output is the trap: it prints the value, the value looks right, and the natural next move is to doubt the code that is actually correct.
+
+**Rule going forward:**
+- Never assert `instanceof` on a value that crossed the `vm` boundary. Check what you actually care about — `e.message`, or `Array.isArray(x)`.
+- Map sandbox values into the test realm before `deepStrictEqual`: `out.map((x) => x.name)` builds a test-realm array, `out` does not. Asserting on `.length` also works.
+- This applies to every return value from `sw-harness.js` and `popup-harness.js`, not just the two that bit here.
+
 ### 56. A Firestore query with no index works perfectly until there is data
 
 **What happened:** `GET /admin/projects` returned 500 the moment the Workspace contained its first Project: `9 FAILED_PRECONDITION: The query requires an index`. The query — `where('workspaceId','==',x).orderBy('createdAt','desc')` — had never had a composite index, and `firestore.indexes.json` had never listed one. It had been shipped, reviewed and deployed, and every environment it ran in had been empty, so it had never once failed. Auditing the rest found four of eight index-requiring queries with no index and a fifth with the wrong sort direction. The repo also carried two index files: `firebase.json` deploys the root one, and `infra/firestore.indexes.json` was deployed by nothing and had already drifted, defining a `reports` index on `generatedAt` when the code orders by `createdAt`.
