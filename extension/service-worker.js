@@ -30,6 +30,11 @@
 // { ok: boolean, path?: string, reason?: string, error?: string }
 // reason values: 'blocked' | 'no_api_key' | 'no_project'
 
+// #39: refreshFirebaseToken()/authedFetch() live in auth.js because the popup
+// needs them too and the extension has no bundler. importScripts is synchronous
+// and runs before any listener fires, so the globals are always in place.
+importScripts('auth.js');
+
 const ICON_DATA_URI =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ' +
   'AAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
@@ -217,9 +222,9 @@ async function sessionFlush(reason) {
   await sessionSet(s);
 
   try {
-    const res = await fetch(`${cloudRunUrl}/session-events`, {
+    const res = await authedFetch(`${cloudRunUrl}/session-events`, {
       method:  'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify(body),
       // keepalive: true allows the fetch to outlive the SW suspension window
       keepalive: true
@@ -838,9 +843,9 @@ async function uploadBlobWithSignedUrl(blob, session, tabUrl, cloudRunUrl, token
     };
     if (semanticData) bodyObj.semanticData = semanticData;
 
-    const res = await fetch(`${cloudRunUrl}/upload-url`, {
+    const res = await authedFetch(`${cloudRunUrl}/upload-url`, {
       method:  'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify(bodyObj),
       signal: controller1.signal
     });
@@ -889,9 +894,8 @@ async function uploadViaProxy(blob, session, tabUrl, cloudRunUrl, token, session
   formData.append('sessionId',          sessionCtx.sessionId    ?? '');
 
   try {
-    const response = await fetch(`${cloudRunUrl}/capture`, {
+    const response = await authedFetch(`${cloudRunUrl}/capture`, {
       method:  'POST',
-      headers: { 'Authorization': `Bearer ${token}` },
       body:    formData,
       signal:  controller.signal
     });
@@ -949,8 +953,7 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   let enabled = false;
   if (token && cloudRunUrl) {
     try {
-      const res = await fetch(`${cloudRunUrl}/config`, {
-        headers: { 'Authorization': `Bearer ${token}` }
+      const res = await authedFetch(`${cloudRunUrl}/config`, {
       });
       if (res.ok) {
         const data = await res.json();
@@ -1031,11 +1034,10 @@ async function logInactivityEvent() {
     // The start of inactivity was timerSeconds ago
     const inactiveStart = new Date(Date.now() - (timerSeconds * 1000)).toISOString();
 
-    fetch(`${cloudRunUrl}/inactivity-events`, {
+    authedFetch(`${cloudRunUrl}/inactivity-events`, {
       method: 'POST',
       headers: { 
-        'Content-Type': 'application/json', 
-        'Authorization': `Bearer ${token}` 
+        'Content-Type': 'application/json'
       },
       body: JSON.stringify({
         eventId: crypto.randomUUID(),

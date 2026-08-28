@@ -263,6 +263,17 @@ function loadServiceWorker(opts = {}) {
   sandbox.globalThis = sandbox;
 
   const context = vm.createContext(sandbox);
+
+  // The worker calls importScripts('auth.js') at the top level (#39). Run the
+  // named file in this same context so its globals land where the worker looks
+  // for them — assigning after createContext still reaches the contextified
+  // global.
+  sandbox.importScripts = (...files) => {
+    for (const f of files) {
+      const full = path.join(__dirname, '..', f);
+      vm.runInContext(fs.readFileSync(full, 'utf8'), context, { filename: full });
+    }
+  };
   const source = fs.readFileSync(SW_PATH, 'utf8');
   const exportLine = `\n;globalThis.__hammer = { ${EXPORTS.join(', ')} };\n`;
   vm.runInContext(source + exportLine, context, { filename: SW_PATH });

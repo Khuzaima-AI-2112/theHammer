@@ -24,6 +24,7 @@ const path = require('path');
 const vm = require('vm');
 
 const POPUP_PATH = path.join(__dirname, '..', 'popup.js');
+const AUTH_PATH  = path.join(__dirname, '..', 'auth.js');
 
 // The top-level names the tests reach in for. Anything declared inside the
 // DOMContentLoaded handler (triggerSignIn, for one) is not in scope here and is
@@ -32,6 +33,8 @@ const EXPORTS = [
   'normaliseApiBase',
   'apiBase',
   'normaliseProjects',
+  'authedFetch',
+  'refreshFirebaseToken',
   'loadConfig',
   'loadProjects',
   'populateProjectSelect',
@@ -193,6 +196,12 @@ function loadPopup(opts = {}) {
   sandbox.self = sandbox;
 
   const context = vm.createContext(sandbox);
+
+  // popup.html loads auth.js before popup.js (#39), and popup.js calls
+  // authedFetch at the top level of loadConfig/loadProjects, so the order
+  // matters here for the same reason it does in the browser.
+  vm.runInContext(fs.readFileSync(AUTH_PATH, 'utf8'), context, { filename: AUTH_PATH });
+
   const source = fs.readFileSync(POPUP_PATH, 'utf8');
   const exportLine = `\n;globalThis.__hammer = { ${EXPORTS.join(', ')} };\n`;
   vm.runInContext(source + exportLine, context, { filename: POPUP_PATH });

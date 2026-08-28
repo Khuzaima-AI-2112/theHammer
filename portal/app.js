@@ -253,6 +253,17 @@ let knownTools    = new Set();
 // ── API ────────────────────────────────────────────────────────
 async function apiFetch(path, options = {}) {
   const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
+
+  // #39: read the token at call time. It used to be captured once inside
+  // onAuthStateChanged and reused for the life of the page, so every request
+  // more than an hour after sign-in carried an expired JWT and came back 401
+  // 'unauthenticated: invalid token' — most visibly on the New Project dialog,
+  // with nothing to suggest that reloading would fix it. getIdToken() serves
+  // from the SDK's cache and only goes to the network when the token is close
+  // to expiring, so calling it per request is correct and cheap.
+  const user = firebase.auth().currentUser;
+  if (user) idToken = await user.getIdToken();
+
   if (idToken) {
     headers['Authorization'] = `Bearer ${idToken}`;
   }
