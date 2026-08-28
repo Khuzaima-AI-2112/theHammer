@@ -94,3 +94,34 @@ async function authedFetch(url, options = {}) {
   const fresh = await refreshFirebaseToken();
   return fresh ? send(fresh) : res;
 }
+
+/**
+ * Is this the failure that only a real sign-in can clear?
+ *
+ * authedFetch already spends the refresh token once before it hands a 401 back,
+ * so a 401 that reaches a caller has survived that attempt: the refresh token is
+ * revoked or expired, and no amount of retrying will change the answer. Callers
+ * need to tell that apart from a dead network, because the two want opposite
+ * things — one wants the user to sign in, the other wants to wait and retry.
+ *
+ * Callers mark the status on the Error they throw (`err.status = res.status`).
+ */
+function isAuthExpired(err) {
+  return Number(err?.status) === 401;
+}
+
+/**
+ * What to tell the user when an upload finally gives up.
+ *
+ * Split out from the capture path so the choice is testable on its own. It is
+ * the whole point of #39's third `Done when`: an expired session used to be
+ * reported as "No connection", which sends the reader to check the one thing
+ * that is fine. See lessons_learned.md 52 and 55 for the same shape elsewhere.
+ */
+function uploadFailureNotice(err) {
+  return isAuthExpired(err)
+    ? { title: 'Sign in required',
+        message: 'Your session expired — sign in from the popup. Your capture is saved.' }
+    : { title: 'Upload queued',
+        message: 'No connection — will retry when online.' };
+}

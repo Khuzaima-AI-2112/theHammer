@@ -25,7 +25,12 @@ const EXPORTS = [
   'sessionClear',
   'sessionOnCapture',
   'sessionFlush',
-  'sessionIndicate'
+  'sessionIndicate',
+  // #39: the retry/notice pair. auth.js runs in this same context via the
+  // importScripts shim below, so its declarations are in scope here too.
+  'withRetry',
+  'isAuthExpired',
+  'uploadFailureNotice'
 ];
 
 // captureVisibleTab has to return something capture()'s own sanity check

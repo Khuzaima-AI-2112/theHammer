@@ -664,3 +664,15 @@ Run this before starting any new sprint:
 - Seed data before believing an endpoint works. An empty collection exercises none of the query planner.
 - Adding an index is additive and cannot break an existing query, so when an audit is uncertain, add it. **Removing** one is the dangerous direction: `firebase deploy --only firestore:indexes` deletes any index not in the file, so an entry that looks unused may be serving something the audit missed.
 - Keep exactly one copy of any config a deploy consumes. Two files that disagree guarantee the inert one eventually gets the careful edit.
+
+### 57. Refreshing once is only half the fix: the caller still has to say which failure it was
+
+**What happened:** #39 gave the extension a working token renewal. `authedFetch` spends the refresh token on a 401, retries once, and hands the original 401 back when the renewal fails — correct in isolation, and tested. But nothing downstream could tell that 401 apart from a dead network. `withRetry` caught it like any other error and retried three more times over seven seconds of backoff, and the capture path then reported **"No connection — will retry when online."** to someone whose session had simply expired. The ticket's third `Done when` said a 401 surviving one refresh must report that sign-in is required rather than retrying or reporting a generic failure; the first two thirds shipped and the last third did not.
+
+**Root cause:** The renewal was designed as a self-contained concern — one function, one file, its own tests — and it succeeded at being that. What it could not do alone was change what its callers *say*. The error crossing that boundary was a bare `Error` carrying a formatted message and nothing a caller could branch on, so every caller treated all failures identically, which they had always done. Fixing the mechanism did not fix the message, and the message is the whole of what the user experiences.
+
+**Rule going forward:**
+- An error that crosses a module boundary must carry something machine-readable — here `err.status` — not just a human sentence. A caller that has to regex a message will not bother, and will report the wrong cause.
+- Retry logic must be told which failures are worth retrying. A blanket `catch` retries the fatal ones too, and the wasted attempts always end on a message about the transport.
+- When a ticket's `Done when` has a clause about *what the user is told*, that clause needs its own test. `extension/tests/auth-expiry.test.js` asserts the expired-session notice does **not** mention the connection.
+- This is lessons 52 and 55 a third time: one message standing in for two different causes is what costs the next person the afternoon.
