@@ -373,6 +373,34 @@ function apiBase(settings) {
   return normaliseApiBase(settings?.cloudRunUrl) || CONFIG_FALLBACK_URL;
 }
 
+// #31: GET /me/projects answers `{ projects, total }` and names the id field
+// `id`, but the dropdown is built from an array of `{ projectId, name }`. The
+// object was passed straight through, so populateProjectSelect hit
+// `projects.forEach is not a function`, loadProjects caught it, and the popup
+// reported "Could not load projects" on a perfectly good 200. Absorb the wire
+// format here, at the one place the response is decoded, so the renderer keeps
+// its documented contract.
+function normaliseProjects(body) {
+  const list = Array.isArray(body) ? body : body?.projects;
+  // A body in neither shape is a wire-format fault, not an empty workspace.
+  // Returning [] here would render "— no projects assigned —" and hide the very
+  // thing this function exists to catch, so let it reach the catch below.
+  if (!Array.isArray(list)) {
+    throw new Error('unexpected /me/projects body');
+  }
+  return list.map((p) => ({ projectId: p?.projectId ?? p?.id, name: p?.name }));
+}
+
+// #31: 401, 403 and a decode fault all collapsed into "Could not load projects",
+// which is most of why the wire-format bug above survived two sessions. Lesson 49
+// is the same mechanism on the sibling /api bug: a catch that keeps the popup
+// alive also keeps the cause invisible. Name the causes apart.
+function projectsErrorMessage(err) {
+  if (err?.status === 401) return 'Session expired — sign in again';
+  if (err?.status === 403) return 'Account not provisioned';
+  return 'Could not load projects';
+}
+
 async function loadConfig(apiKey) {
   // Use the stored cloudRunUrl if present; otherwise use the hard-coded default.
   // This bootstraps cleanly on first install when storage is empty.
@@ -438,12 +466,16 @@ async function loadProjects(apiKey, savedProjectId) {
     const res = await fetch(`${baseUrl}/me/projects`, {
       headers: { 'Authorization': `Bearer ${apiKey}` }
     });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const projects = await res.json();
+    if (!res.ok) {
+      const httpErr = new Error(`HTTP ${res.status}`);
+      httpErr.status = res.status;
+      throw httpErr;
+    }
+    const projects = normaliseProjects(await res.json());
     populateProjectSelect(projects, savedProjectId);
   } catch (err) {
     console.warn('[Hammer popup] GET /me/projects failed:', err.message);
-    setProjectSelectPlaceholder('Could not load projects');
+    setProjectSelectPlaceholder(projectsErrorMessage(err));
   }
 }
 
