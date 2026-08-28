@@ -653,6 +653,17 @@ Run this before starting any new sprint:
 - Refresh once, then stop. A second 401 after a successful renewal is an authorisation problem, and retrying it turns a clear error into a loop.
 - Test anything auth-shaped at a point in time it was not written at. Every bug in this class is invisible for the first hour.
 
+### 55. A lesson only covers the code you actually audited
+
+**What happened:** Lesson 52 was written after `GET /me/projects` answered `{ projects, total }` and the extension destructured it as an array. Within the same session, the admin portal failed the same way on `GET /admin/users`: `allUsers = await apiFetch(url)` assigned `{ users, total, nextCursor }`, `updateUserStats` called `.filter()` on it, and the resulting `TypeError` was caught by the caller and reported to the user as **"Failed to load users. Check API connectivity."** on an HTTP **200**. `activityFeed` had it too. `reports` did not, having been written to read `data.reports`. So the same defect existed in three of four places, and the lesson written hours earlier prevented none of them.
+
+**Root cause:** The lesson was filed against the code that produced it. Nothing carried it across the boundary to the other consumer of the same API, and the two live in different directories with different test setups, so neither the fix nor its test had any reason to touch the portal. The defect is a property of the *contract* — a paginated envelope every caller must unwrap — but it was recorded as a property of one caller.
+
+**Rule going forward:**
+- When a bug turns out to be about a shared contract, grep for every consumer of that contract before closing it. `grep -n "await apiFetch" portal/app.js` against the backend's `res.json({` sites would have found both remaining cases in a minute.
+- Fix it in one named place per codebase and route every call site through it, so a new call site has an obvious right way to be written. `normaliseProjects()` in the extension and `unwrapList()` in the portal are the same fix on both sides of the same boundary.
+- A `catch` that reports a transport problem for a decode failure will send the next reader to check the network. Distinguish them, or the error message becomes the thing that costs the time.
+
 ### 56. A Firestore query with no index works perfectly until there is data
 
 **What happened:** `GET /admin/projects` returned 500 the moment the Workspace contained its first Project: `9 FAILED_PRECONDITION: The query requires an index`. The query — `where('workspaceId','==',x).orderBy('createdAt','desc')` — had never had a composite index, and `firestore.indexes.json` had never listed one. It had been shipped, reviewed and deployed, and every environment it ran in had been empty, so it had never once failed. Auditing the rest found four of eight index-requiring queries with no index and a fifth with the wrong sort direction. The repo also carried two index files: `firebase.json` deploys the root one, and `infra/firestore.indexes.json` was deployed by nothing and had already drifted, defining a `reports` index on `generatedAt` when the code orders by `createdAt`.
@@ -676,3 +687,14 @@ Run this before starting any new sprint:
 - Retry logic must be told which failures are worth retrying. A blanket `catch` retries the fatal ones too, and the wasted attempts always end on a message about the transport.
 - When a ticket's `Done when` has a clause about *what the user is told*, that clause needs its own test. `extension/tests/auth-expiry.test.js` asserts the expired-session notice does **not** mention the connection.
 - This is lessons 52 and 55 a third time: one message standing in for two different causes is what costs the next person the afternoon.
+
+### 58. Writing the rule in the same commit is not the same as applying it
+
+**What happened:** The commit that fixed #41 added lesson 55, whose third rule reads: *"A `catch` that reports a transport problem for a decode failure will send the next reader to check the network. Distinguish them, or the error message becomes the thing that costs the time."* That same commit left `Failed to load users. Check API connectivity.` hardcoded in the users table and the activity table, and `Failed to load — check API connectivity` in the projects table. `unwrapList` threw a precise decode error and all three call sites threw it away. The review that caught it found the same defect independently on both of its axes, which is how obvious it was from outside.
+
+**Root cause:** The lesson was written at the end of the work, as a summary of what had been understood, and understanding it felt like discharging it. Nothing tied the sentence to the code it described: the rule named a shape (`catch` conflating two causes) rather than a location, and no test asserted it, so the file could be committed with the rule and the violation touching each other in the same diff.
+
+**Rule going forward:**
+- When you add a rule to this file, grep the diff you are about to commit for the thing the rule forbids, before you commit it. The commit that names a defect is the most likely place to still contain it.
+- Prefer a rule that a test can hold down. `portal/tests/list-envelopes.test.js` now asserts the string "Check API connectivity" survives in exactly one place, and that every error row asks `listFailureMessage()` for its text. That is enforceable in a way the prose was not.
+- Errors that cross a boundary carry a flag, not a sentence: `err.isDecodeFailure` in the portal, `err.status` in the extension (lesson 57). A caller that has to read English to decide what happened will guess.
