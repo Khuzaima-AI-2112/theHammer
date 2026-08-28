@@ -687,3 +687,14 @@ Run this before starting any new sprint:
 - Retry logic must be told which failures are worth retrying. A blanket `catch` retries the fatal ones too, and the wasted attempts always end on a message about the transport.
 - When a ticket's `Done when` has a clause about *what the user is told*, that clause needs its own test. `extension/tests/auth-expiry.test.js` asserts the expired-session notice does **not** mention the connection.
 - This is lessons 52 and 55 a third time: one message standing in for two different causes is what costs the next person the afternoon.
+
+### 58. Writing the rule in the same commit is not the same as applying it
+
+**What happened:** The commit that fixed #41 added lesson 55, whose third rule reads: *"A `catch` that reports a transport problem for a decode failure will send the next reader to check the network. Distinguish them, or the error message becomes the thing that costs the time."* That same commit left `Failed to load users. Check API connectivity.` hardcoded in the users table and the activity table, and `Failed to load — check API connectivity` in the projects table. `unwrapList` threw a precise decode error and all three call sites threw it away. The review that caught it found the same defect independently on both of its axes, which is how obvious it was from outside.
+
+**Root cause:** The lesson was written at the end of the work, as a summary of what had been understood, and understanding it felt like discharging it. Nothing tied the sentence to the code it described: the rule named a shape (`catch` conflating two causes) rather than a location, and no test asserted it, so the file could be committed with the rule and the violation touching each other in the same diff.
+
+**Rule going forward:**
+- When you add a rule to this file, grep the diff you are about to commit for the thing the rule forbids, before you commit it. The commit that names a defect is the most likely place to still contain it.
+- Prefer a rule that a test can hold down. `portal/tests/list-envelopes.test.js` now asserts the string "Check API connectivity" survives in exactly one place, and that every error row asks `listFailureMessage()` for its text. That is enforceable in a way the prose was not.
+- Errors that cross a boundary carry a flag, not a sentence: `err.isDecodeFailure` in the portal, `err.status` in the extension (lesson 57). A caller that has to read English to decide what happened will guess.

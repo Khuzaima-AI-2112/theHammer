@@ -264,7 +264,26 @@ function unwrapList(body, key) {
   if (Array.isArray(body)) return body;
   const list = body?.[key];
   if (Array.isArray(list)) return list;
-  throw new Error(`unexpected ${key} response shape`);
+  const err = new Error(`unexpected ${key} response shape`);
+  // Marked so the caller's catch can tell a decode fault from a dead network.
+  // Without this every failure shares one message, which is the defect in
+  // lessons_learned.md 55 rule 3 — the rule this file's own commit added.
+  err.isDecodeFailure = true;
+  throw err;
+}
+
+/**
+ * What to put in a table when a list fails to load.
+ *
+ * A decode fault and a dead network want opposite things from the reader: one
+ * is a bug to report, the other is a thing to wait out. Sharing the string
+ * "Check API connectivity" between them is what sent the last reader to check
+ * the one part of the system that was working (#41).
+ */
+function listFailureMessage(err, what) {
+  return err?.isDecodeFailure
+    ? `Could not read the ${what} response — the server sent an unexpected shape. Report this; retrying will not help.`
+    : `Failed to load ${what}. Check API connectivity.`;
 }
 
 async function apiFetch(path, options = {}) {
@@ -330,7 +349,7 @@ async function loadProjects() {
     populateActivityProjectSelect(); // populate activity view project select
   } catch (err) {
     showToast(`Failed to load projects: ${err.message}`, 'error');
-    renderError();
+    renderError(err);
   } finally {
     btn.disabled = false;
   }
@@ -383,10 +402,10 @@ function renderSkeleton() {
     </tr>`).join('');
 }
 
-function renderError() {
+function renderError(err) {
   document.getElementById('projectsBody').innerHTML =
     `<tr><td colspan="5" style="text-align:center;padding:var(--space-8);color:var(--color-error)">
-      Failed to load — check API connectivity and try refreshing.
+      ${listFailureMessage(err, 'projects')}
     </td></tr>`;
 }
 
@@ -678,7 +697,7 @@ async function loadUsers() {
   } catch (err) {
     showToast(`Failed to load users: ${err.message}`, 'error');
     tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:var(--space-8);color:var(--color-error)">
-      Failed to load users. Check API connectivity.
+      ${listFailureMessage(err, 'users')}
     </td></tr>`;
   }
 }
@@ -907,7 +926,7 @@ async function loadActivity() {
   } catch (err) {
     showToast(`Failed to load activity: ${err.message}`, 'error');
     tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:var(--space-8);color:var(--color-error)">
-      Failed to load activity. Check API connectivity.
+      ${listFailureMessage(err, 'activity')}
     </td></tr>`;
   }
 }

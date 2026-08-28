@@ -78,3 +78,59 @@ for (const [variable, key] of [['allProjects', 'projects'], ['allUsers', 'users'
       variable + ' must be unwrapped with the ' + key + ' key: ' + assignment.trim());
   });
 }
+
+// ── #41 follow-up: the message has to name the right cause ──────────────
+//
+// Unwrapping alone did not finish the ticket. `unexpected users response shape`
+// still landed in the same catch as a fetch failure, and the table still said
+// "Check API connectivity" — the exact framing the third `Done when` forbids,
+// and the one lessons_learned.md 55 rule 3 was written about.
+
+const listFailureMessage = lift(APP_JS, 'listFailureMessage');
+
+test('a decode failure is marked so the caller can tell it from a dead network', () => {
+  try {
+    unwrapList({ nope: true }, 'users');
+    assert.fail('a bad shape should have thrown');
+  } catch (err) {
+    assert.strictEqual(err.isDecodeFailure, true,
+      'without this flag every failure shares one message');
+    assert.match(err.message, /unexpected users response shape/);
+  }
+});
+
+test('a decode failure is not reported as a connection problem', () => {
+  const err = Object.assign(new Error('unexpected users response shape'), { isDecodeFailure: true });
+  const msg = listFailureMessage(err, 'users');
+
+  assert.doesNotMatch(msg, /connectivity|connection/i,
+    'blaming the network for a 200 is the whole defect in #41');
+  assert.match(msg, /unexpected shape|bug/i);
+});
+
+test('a genuine transport failure still tells the reader to check the connection', () => {
+  const msg = listFailureMessage(new TypeError('Failed to fetch'), 'users');
+
+  assert.match(msg, /Check API connectivity/);
+});
+
+test('the message names the list that failed', () => {
+  assert.match(listFailureMessage(new Error('x'), 'activity'), /activity/);
+  assert.match(listFailureMessage(new Error('x'), 'projects'), /projects/);
+});
+
+test('no error row hardcodes the connectivity message any more', () => {
+  // Prose in the comments may quote the old string; code must not.
+  const code = APP_JS.split('\n').filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
+  const hits = code.split('Check API connectivity').length - 1;
+
+  assert.strictEqual(hits, 1,
+    'the sentence should survive in exactly one place: listFailureMessage');
+});
+
+test('every list error row routes through listFailureMessage', () => {
+  for (const what of ['users', 'activity', 'projects']) {
+    assert.ok(APP_JS.includes(`listFailureMessage(err, '${what}')`),
+      `the ${what} error row should ask listFailureMessage for its text`);
+  }
+});
