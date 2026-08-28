@@ -485,7 +485,7 @@ async function loadProjects(savedProjectId) {
 //   2+ projects — show dropdown; restore savedProjectId if it appears in list
 // ─────────────────────────────────────────────────────────────────
 function populateProjectSelect(projects, savedProjectId) {
-  projectDropdown.style.display = '';
+  projectDropdown.style.display = 'block';
   projectSingle.style.display   = 'none';
   projectSingle.textContent     = '';
   projectSelect.innerHTML       = '';
@@ -529,7 +529,7 @@ function populateProjectSelect(projects, savedProjectId) {
 }
 
 function setProjectSelectPlaceholder(msg) {
-  projectDropdown.style.display = '';
+  projectDropdown.style.display = 'block';
   projectSingle.style.display   = 'none';
   projectSelect.innerHTML       = `<option value="">${msg}</option>`;
 }

@@ -79,7 +79,7 @@ test('an empty history renders the empty state rather than nothing', async () =>
   assert.match(list.children[0].textContent, /no uploads yet/i);
 });
 
-test('recorded captures are listed newest-first with their size', async () => {
+test('recorded captures are listed in stored order with their size', async () => {
   const popup = boot({
     ...SETTINGS,
     history: [
@@ -92,6 +92,6 @@ test('recorded captures are listed newest-first with their size', async () => {
 
   const list = popup.el('history-list');
   assert.strictEqual(list.children.length, 2, 'both captures should be listed');
-  assert.match(list.children[0].innerHTML, /5921\.png/, 'the newest capture should be first');
+  assert.match(list.children[0].innerHTML, /5921\.png/, 'rows follow the order they are stored in');
   assert.match(list.children[0].innerHTML, /70\.1 KB/, 'the size should be shown in KB');
 });
