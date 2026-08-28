@@ -28,4 +28,11 @@ process.env.METADATA_SERVER_DETECTION = 'none';
 // and with no ADC on the machine it throws 'Unable to detect a Project Id'. The
 // emulator accepts any id; this one matches the project the fixtures' wipe
 // endpoint addresses, so the app and clearDatabase share a namespace.
+//
+// `demo-hammer` is not a Google Cloud project and must never become one.
+// AGENTS.md permits this folder exactly two live targets, `thehammer` and
+// `hammer-dev` (ADR-0006); this id is addressable only because
+// FIRESTORE_EMULATOR_HOST is set above, which routes every Firestore call to
+// the emulator. If that line is ever removed, this one becomes a request to a
+// project that does not exist rather than a silent success.
 process.env.GCLOUD_PROJECT = process.env.GCLOUD_PROJECT || 'demo-hammer';

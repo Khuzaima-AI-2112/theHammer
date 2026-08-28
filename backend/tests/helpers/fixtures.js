@@ -15,12 +15,16 @@ const HEADERS = {
 const [EMULATOR_HOST, EMULATOR_PORT] =
   (process.env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8085').split(':');
 
+// Likewise the project id: env.js lets GCLOUD_PROJECT be overridden, and a wipe
+// hardcoded to demo-hammer would then clear a namespace the app is not using.
+const EMULATOR_PROJECT = process.env.GCLOUD_PROJECT || 'demo-hammer';
+
 function clearDatabase() {
   return new Promise((resolve, reject) => {
     const req = http.request({
       hostname: EMULATOR_HOST,
       port: Number(EMULATOR_PORT),
-      path: '/emulator/v1/projects/demo-hammer/databases/(default)/documents',
+      path: `/emulator/v1/projects/${EMULATOR_PROJECT}/databases/(default)/documents`,
       method: 'DELETE'
     }, (res) => {
       res.on('data', () => {});
