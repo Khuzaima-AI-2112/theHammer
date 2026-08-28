@@ -58,29 +58,80 @@ function nowISO() { return new Date().toISOString(); }
 
 // ─── GET /admin/users ──────────────────────────────────────────────────────
 // Returns up to 100 users per page, ordered by email asc.
-// Supports ?role= filter and ?cursor= for next-page token.
+// Supports ?role= and ?projectId= filters, and ?cursor= for next-page token.
+const USERS_PAGE_SIZE = 100;
+
+// Pages a list already ordered by email asc, using a user id as the cursor.
+// Same contract as the collection query it stands in for: the cursor is
+// exclusive, and nextCursor is non-null only when a further page really exists.
+function pageByCursor(items, cursor) {
+  let start = 0;
+  if (cursor) {
+    const at = items.findIndex((u) => u.id === cursor);
+    if (at !== -1) start = at + 1;
+  }
+  const window  = items.slice(start, start + USERS_PAGE_SIZE + 1);
+  const hasMore = window.length > USERS_PAGE_SIZE;
+  const page    = hasMore ? window.slice(0, USERS_PAGE_SIZE) : window;
+  return { page, nextCursor: hasMore ? page[page.length - 1].id : null };
+}
+
+// Firestore cannot join, so a Project filter resolves membership first and then
+// reads those Users. Paging then happens over the filtered list, which is what
+// stops a filtered page coming back empty while nextCursor is non-null (#46).
+// Each User carries its membership, so the portal's "Admitted" column has a
+// date to render.
+async function usersInProject(projectId) {
+  const membSnap = await db.collection(collections.MEMBERSHIPS)
+    .where('projectId', '==', projectId)
+    .get();
+  if (membSnap.empty) return [];
+
+  const memberships = membSnap.docs.map(serializeMembership);
+  const userSnaps   = await Promise.all(
+    memberships.map((m) => db.collection(collections.USERS).doc(m.userId).get())
+  );
+
+  return userSnaps
+    .map((snap, i) => (snap.exists ? { ...serializeUser(snap), membership: memberships[i] } : null))
+    .filter(Boolean)
+    // Plain comparison, not localeCompare: this has to match the byte order the
+    // unfiltered branch gets from Firestore's orderBy('email', 'asc').
+    .sort((a, b) => {
+      const x = a.email ?? '', y = b.email ?? '';
+      return x < y ? -1 : x > y ? 1 : 0;
+    });
+}
+
 router.get('/users', requireAdmin, async (req, res, next) => {
   try {
-    const PAGE_SIZE = 100;
+    const role = req.query.role && VALID_ROLES.includes(req.query.role) ? req.query.role : null;
+
+    if (req.query.projectId) {
+      let members = await usersInProject(req.query.projectId);
+      if (role) members = members.filter((u) => u.role === role);
+      const { page, nextCursor } = pageByCursor(members, req.query.cursor);
+      return res.json({ users: page, total: page.length, nextCursor });
+    }
+
     let query = db.collection(collections.USERS).orderBy('email', 'asc');
-    if (req.query.role && VALID_ROLES.includes(req.query.role)) {
+    if (role) {
       query = db.collection(collections.USERS)
-        .where('role', '==', req.query.role)
+        .where('role', '==', role)
         .orderBy('email', 'asc');
     }
     if (req.query.cursor) {
       const cursorSnap = await db.collection(collections.USERS).doc(req.query.cursor).get();
       if (cursorSnap.exists) query = query.startAfter(cursorSnap);
     }
-    const snap  = await query.limit(PAGE_SIZE + 1).get();
-    const hasMore = snap.docs.length > PAGE_SIZE;
-    const docs  = hasMore ? snap.docs.slice(0, PAGE_SIZE) : snap.docs;
+    const snap  = await query.limit(USERS_PAGE_SIZE + 1).get();
+    const hasMore = snap.docs.length > USERS_PAGE_SIZE;
+    const docs  = hasMore ? snap.docs.slice(0, USERS_PAGE_SIZE) : snap.docs;
     const users = docs.map(serializeUser);
     const nextCursor = hasMore ? docs[docs.length - 1].id : null;
     return res.json({ users, total: users.length, nextCursor });
   } catch (err) { next(err); }
 });
-
 // ─── GET /admin/users/:id ──────────────────────────────────────────────────
 router.get('/users/:id', requireAdmin, async (req, res, next) => {
   try {

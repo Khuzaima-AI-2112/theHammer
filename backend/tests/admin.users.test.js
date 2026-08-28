@@ -163,3 +163,77 @@ describe('PATCH /admin/users/:id — role updates', () => {
     await keyRef.delete();
   });
 });
+
+describe('GET /admin/users — ?projectId= filter', () => {
+  const projA = 'filter-project-a';
+  const projB = 'filter-project-b';
+  // Emails are chosen so the expected email-asc order is unambiguous.
+  const alice = 'filter-user-alice';   // member of A, role user
+  const bob   = 'filter-user-bob';     // member of A, role analyst
+  const carol = 'filter-user-carol';   // member of B only
+
+  beforeAll(async () => {
+    await seedProject(projA, { name: 'Filter Project A' });
+    await seedProject(projB, { name: 'Filter Project B' });
+
+    await seedUser(alice, { email: 'a-alice@filter.test', role: 'user' });
+    await seedUser(bob,   { email: 'b-bob@filter.test',   role: 'analyst' });
+    await seedUser(carol, { email: 'c-carol@filter.test', role: 'user' });
+
+    await seedMembership(projA, alice, { admittedAt: '2026-01-01T00:00:00.000Z' });
+    await seedMembership(projA, bob,   { admittedAt: '2026-01-02T00:00:00.000Z' });
+    await seedMembership(projB, carol, { admittedAt: '2026-01-03T00:00:00.000Z' });
+  });
+
+  afterAll(async () => {
+    for (const id of [alice, bob, carol]) {
+      await db.collection('users').doc(id).delete().catch(() => {});
+    }
+    for (const [p, u] of [[projA, alice], [projA, bob], [projB, carol]]) {
+      await db.collection('project_memberships').doc(`${p}_${u}`).delete().catch(() => {});
+    }
+    for (const p of [projA, projB]) {
+      await db.collection('projects').doc(p).delete().catch(() => {});
+    }
+  });
+
+  test('returns only the named project\'s members, with a second project seeded', async () => {
+    const res = await request(app).get(`/admin/users?projectId=${projA}`).set(H);
+    expect(res.status).toBe(200);
+    expect(res.body.users.map(u => u.id)).toEqual([alice, bob]);
+  });
+
+  test('total reflects the filtered count, not the workspace count', async () => {
+    const all = await request(app).get('/admin/users').set(H);
+    const res = await request(app).get(`/admin/users?projectId=${projA}`).set(H);
+    expect(res.body.total).toBe(2);
+    expect(all.body.total).toBeGreaterThan(res.body.total);
+  });
+
+  test('composes with ?role=', async () => {
+    const res = await request(app).get(`/admin/users?projectId=${projA}&role=analyst`).set(H);
+    expect(res.body.users.map(u => u.id)).toEqual([bob]);
+    expect(res.body.total).toBe(1);
+  });
+
+  test('a cursor pages within the filtered set, never over the whole collection', async () => {
+    const res = await request(app).get(`/admin/users?projectId=${projA}&cursor=${alice}`).set(H);
+    expect(res.body.users.map(u => u.id)).toEqual([bob]);
+    expect(res.body.nextCursor).toBeNull();
+  });
+
+  test('a project with no members returns an empty page and a null cursor', async () => {
+    const res = await request(app).get('/admin/users?projectId=no-such-project').set(H);
+    expect(res.status).toBe(200);
+    expect(res.body.users).toEqual([]);
+    expect(res.body.total).toBe(0);
+    expect(res.body.nextCursor).toBeNull();
+  });
+
+  test('each filtered user carries the membership the portal renders as "Admitted"', async () => {
+    const res = await request(app).get(`/admin/users?projectId=${projA}`).set(H);
+    const [first] = res.body.users;
+    expect(first.membership.projectId).toBe(projA);
+    expect(first.membership.admittedAt).toBe('2026-01-01T00:00:00.000Z');
+  });
+});
