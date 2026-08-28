@@ -641,6 +641,18 @@ Run this before starting any new sprint:
 - Map sandbox values into the test realm before `deepStrictEqual`: `out.map((x) => x.name)` builds a test-realm array, `out` does not. Asserting on `.length` also works.
 - This applies to every return value from `sw-harness.js` and `popup-harness.js`, not just the two that bit here.
 
+### 54. Storing a refresh token is not the same as spending one
+
+**What happened:** A Firebase ID token is valid for one hour. The portal captured one inside `onAuthStateChanged` into a module-level `let idToken` and reused that string for the life of the page; the extension wrote one into `chrome.storage.local` at sign-in and read it back on every call thereafter. Both worked perfectly for an hour and then failed completely. The portal's New Project dialog returned 401 `unauthenticated: invalid token` with no hint that a page reload would fix it. The extension's dropdown emptied and every capture stopped. The extension had been storing `firebaseRefreshToken` and `firebaseApiKey` at every sign-in since the flow was written — the exact two values needed to renew — and nothing in `extension/` had ever read either of them.
+
+**Root cause:** The sign-in flow was built and tested in the minutes after signing in, which is the one window in which the bug cannot appear. Nothing in the codebase said "this value expires", and the shape of the code actively suggested otherwise: a token stored in `settings` next to `cloudRunUrl` and `notify` reads as configuration, and configuration does not go stale. Storing the refresh token made it look handled. It was the *appearance* of a renewal mechanism with none of the substance, which is worse than not storing it at all — a missing value would have prompted the question.
+
+**Rule going forward:**
+- Any credential with a lifetime needs a named thing that renews it, and a test that proves the renewal happens. `extension/tests/token-refresh.test.js` drives a 401 through `authedFetch` and asserts the retry carries the new token; `portal/tests/token-freshness.test.js` asserts `apiFetch` reads the token per call rather than once.
+- Trigger the renewal on the **401 the server actually sends**, not on a clock you keep yourself. It costs one wasted request, needs no assumption about expiry, and catches a token revoked early as well as one aged out.
+- Refresh once, then stop. A second 401 after a successful renewal is an authorisation problem, and retrying it turns a clear error into a loop.
+- Test anything auth-shaped at a point in time it was not written at. Every bug in this class is invisible for the first hour.
+
 ### 56. A Firestore query with no index works perfectly until there is data
 
 **What happened:** `GET /admin/projects` returned 500 the moment the Workspace contained its first Project: `9 FAILED_PRECONDITION: The query requires an index`. The query — `where('workspaceId','==',x).orderBy('createdAt','desc')` — had never had a composite index, and `firestore.indexes.json` had never listed one. It had been shipped, reviewed and deployed, and every environment it ran in had been empty, so it had never once failed. Auditing the rest found four of eight index-requiring queries with no index and a fifth with the wrong sort direction. The repo also carried two index files: `firebase.json` deploys the root one, and `infra/firestore.indexes.json` was deployed by nothing and had already drifted, defining a `reports` index on `generatedAt` when the code orders by `createdAt`.
@@ -652,3 +664,15 @@ Run this before starting any new sprint:
 - Seed data before believing an endpoint works. An empty collection exercises none of the query planner.
 - Adding an index is additive and cannot break an existing query, so when an audit is uncertain, add it. **Removing** one is the dangerous direction: `firebase deploy --only firestore:indexes` deletes any index not in the file, so an entry that looks unused may be serving something the audit missed.
 - Keep exactly one copy of any config a deploy consumes. Two files that disagree guarantee the inert one eventually gets the careful edit.
+
+### 57. Refreshing once is only half the fix: the caller still has to say which failure it was
+
+**What happened:** #39 gave the extension a working token renewal. `authedFetch` spends the refresh token on a 401, retries once, and hands the original 401 back when the renewal fails — correct in isolation, and tested. But nothing downstream could tell that 401 apart from a dead network. `withRetry` caught it like any other error and retried three more times over seven seconds of backoff, and the capture path then reported **"No connection — will retry when online."** to someone whose session had simply expired. The ticket's third `Done when` said a 401 surviving one refresh must report that sign-in is required rather than retrying or reporting a generic failure; the first two thirds shipped and the last third did not.
+
+**Root cause:** The renewal was designed as a self-contained concern — one function, one file, its own tests — and it succeeded at being that. What it could not do alone was change what its callers *say*. The error crossing that boundary was a bare `Error` carrying a formatted message and nothing a caller could branch on, so every caller treated all failures identically, which they had always done. Fixing the mechanism did not fix the message, and the message is the whole of what the user experiences.
+
+**Rule going forward:**
+- An error that crosses a module boundary must carry something machine-readable — here `err.status` — not just a human sentence. A caller that has to regex a message will not bother, and will report the wrong cause.
+- Retry logic must be told which failures are worth retrying. A blanket `catch` retries the fatal ones too, and the wasted attempts always end on a message about the transport.
+- When a ticket's `Done when` has a clause about *what the user is told*, that clause needs its own test. `extension/tests/auth-expiry.test.js` asserts the expired-session notice does **not** mention the connection.
+- This is lessons 52 and 55 a third time: one message standing in for two different causes is what costs the next person the afternoon.

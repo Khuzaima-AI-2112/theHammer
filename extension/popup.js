@@ -96,8 +96,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   if (token) {
     // ── 5.17: Fire GET /config and GET /me/projects in parallel ──
-    await loadConfig(token);
-    await loadProjects(token, session?.projectId || '');
+    await loadConfig();
+    await loadProjects(session?.projectId || '');
   } else {
     setProjectSelectPlaceholder('Sign in to view projects');
   }
@@ -284,9 +284,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         authStatusText.textContent = 'Signed in with Firebase';
         authLoginBtn.textContent = 'Sign Out';
         
-        await loadConfig(token);
+        await loadConfig();
         const { session: s2 } = await chrome.storage.local.get('session');
-        await loadProjects(token, s2?.projectId || '');
+        await loadProjects(s2?.projectId || '');
       } else {
         setStatus('Sign-in cancelled.');
       }
@@ -401,7 +401,7 @@ function projectsErrorMessage(err) {
   return 'Could not load projects';
 }
 
-async function loadConfig(apiKey) {
+async function loadConfig() {
   // Use the stored cloudRunUrl if present; otherwise use the hard-coded default.
   // This bootstraps cleanly on first install when storage is empty.
   const { settings: s } = await chrome.storage.local.get('settings');
@@ -410,10 +410,7 @@ async function loadConfig(apiKey) {
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 8000);
-    const res = await fetch(`${baseUrl}/config`, {
-      headers: { 'Authorization': `Bearer ${apiKey}` },
-      signal: controller.signal
-    });
+    const res = await authedFetch(`${baseUrl}/config`, { signal: controller.signal });
     clearTimeout(timeout);
 
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -457,15 +454,13 @@ async function loadConfig(apiKey) {
 // 5.16 — loadProjects
 // Now called AFTER loadConfig so it reads the authoritative cloudRunUrl.
 // ─────────────────────────────────────────────────────────────────
-async function loadProjects(apiKey, savedProjectId) {
+async function loadProjects(savedProjectId) {
   const { settings } = await chrome.storage.local.get('settings');
   const baseUrl = apiBase(settings);
 
   setProjectSelectPlaceholder('Loading projects…');
   try {
-    const res = await fetch(`${baseUrl}/me/projects`, {
-      headers: { 'Authorization': `Bearer ${apiKey}` }
-    });
+    const res = await authedFetch(`${baseUrl}/me/projects`);
     if (!res.ok) {
       const httpErr = new Error(`HTTP ${res.status}`);
       httpErr.status = res.status;

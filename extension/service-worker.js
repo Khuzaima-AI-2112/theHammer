@@ -30,6 +30,11 @@
 // { ok: boolean, path?: string, reason?: string, error?: string }
 // reason values: 'blocked' | 'no_api_key' | 'no_project'
 
+// #39: refreshFirebaseToken()/authedFetch() live in auth.js because the popup
+// needs them too and the extension has no bundler. importScripts is synchronous
+// and runs before any listener fires, so the globals are always in place.
+importScripts('auth.js');
+
 const ICON_DATA_URI =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ' +
   'AAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
@@ -217,9 +222,9 @@ async function sessionFlush(reason) {
   await sessionSet(s);
 
   try {
-    const res = await fetch(`${cloudRunUrl}/session-events`, {
+    const res = await authedFetch(`${cloudRunUrl}/session-events`, {
       method:  'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify(body),
       // keepalive: true allows the fetch to outlive the SW suspension window
       keepalive: true
@@ -302,6 +307,11 @@ async function withRetry(uploadFn) {
       return await uploadFn();
     } catch (err) {
       lastErr = err;
+      // #39: a 401 has already survived one refresh inside authedFetch, so the
+      // refresh token is revoked or expired. Three more attempts over seven
+      // seconds cannot change that, and they end on a message about the
+      // network. Give up at once and let the caller say "sign in".
+      if (isAuthExpired(err)) throw err;
       console.warn(`[Hammer SW] attempt ${attempt + 1} failed:`, err.message);
       if (attempt < RETRY_DELAYS_MS.length - 1) {
         await sleep(RETRY_DELAYS_MS[attempt]);
@@ -753,10 +763,14 @@ async function capture(tab, rect = null, dpr = 1, preCapturedDataUrl = null) {
       uploadBlobWithSignedUrl(blob, session, tab.url, cloudRunUrl, token, sessionCtx, semanticData)
     );
   } catch (uploadErr) {
-    console.error('[Hammer SW] all retries failed, queuing:', uploadErr.message);
+    console.error('[Hammer SW] upload failed, queuing:', uploadErr.message);
+    // The capture is kept either way: AGENTS.md rule 4 says a screenshot must
+    // never be lost because a backend feature is down. Only the reason we give
+    // for keeping it differs.
     const base64 = await blobToBase64(blob);
     await queueAdd(base64, session, tab.url, semanticData);
-    await showNotification('Upload queued', 'No connection — will retry when online.');
+    const notice = uploadFailureNotice(uploadErr);
+    await showNotification(notice.title, notice.message);
     return null;
   }
 
@@ -838,16 +852,18 @@ async function uploadBlobWithSignedUrl(blob, session, tabUrl, cloudRunUrl, token
     };
     if (semanticData) bodyObj.semanticData = semanticData;
 
-    const res = await fetch(`${cloudRunUrl}/upload-url`, {
+    const res = await authedFetch(`${cloudRunUrl}/upload-url`, {
       method:  'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify(bodyObj),
       signal: controller1.signal
     });
     clearTimeout(t1);
     if (!res.ok) {
       const text = await res.text().catch(() => res.status.toString());
-      throw new Error(`/upload-url HTTP ${res.status}: ${text.slice(0, 200)}`);
+      const err = new Error(`/upload-url HTTP ${res.status}: ${text.slice(0, 200)}`);
+      err.status = res.status;   // #39: lets withRetry spot a dead session
+      throw err;
     }
     signedUrlResponse = await res.json();
   } catch (err) {
@@ -889,16 +905,17 @@ async function uploadViaProxy(blob, session, tabUrl, cloudRunUrl, token, session
   formData.append('sessionId',          sessionCtx.sessionId    ?? '');
 
   try {
-    const response = await fetch(`${cloudRunUrl}/capture`, {
+    const response = await authedFetch(`${cloudRunUrl}/capture`, {
       method:  'POST',
-      headers: { 'Authorization': `Bearer ${token}` },
       body:    formData,
       signal:  controller.signal
     });
     clearTimeout(timeoutId);
     if (!response.ok) {
       const text = await response.text().catch(() => response.status.toString());
-      throw new Error(`/capture HTTP ${response.status} — ${text.slice(0, 200)}`);
+      const err = new Error(`/capture HTTP ${response.status} — ${text.slice(0, 200)}`);
+      err.status = response.status;   // #39: lets withRetry spot a dead session
+      throw err;
     }
     return await response.json();
   } catch (err) {
@@ -949,8 +966,7 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   let enabled = false;
   if (token && cloudRunUrl) {
     try {
-      const res = await fetch(`${cloudRunUrl}/config`, {
-        headers: { 'Authorization': `Bearer ${token}` }
+      const res = await authedFetch(`${cloudRunUrl}/config`, {
       });
       if (res.ok) {
         const data = await res.json();
@@ -1031,11 +1047,10 @@ async function logInactivityEvent() {
     // The start of inactivity was timerSeconds ago
     const inactiveStart = new Date(Date.now() - (timerSeconds * 1000)).toISOString();
 
-    fetch(`${cloudRunUrl}/inactivity-events`, {
+    authedFetch(`${cloudRunUrl}/inactivity-events`, {
       method: 'POST',
       headers: { 
-        'Content-Type': 'application/json', 
-        'Authorization': `Bearer ${token}` 
+        'Content-Type': 'application/json'
       },
       body: JSON.stringify({
         eventId: crypto.randomUUID(),
