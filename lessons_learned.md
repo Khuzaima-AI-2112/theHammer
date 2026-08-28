@@ -698,3 +698,14 @@ Run this before starting any new sprint:
 - When you add a rule to this file, grep the diff you are about to commit for the thing the rule forbids, before you commit it. The commit that names a defect is the most likely place to still contain it.
 - Prefer a rule that a test can hold down. `portal/tests/list-envelopes.test.js` now asserts the string "Check API connectivity" survives in exactly one place, and that every error row asks `listFailureMessage()` for its text. That is enforceable in a way the prose was not.
 - Errors that cross a boundary carry a flag, not a sentence: `err.isDecodeFailure` in the portal, `err.status` in the extension (lesson 57). A caller that has to read English to decide what happened will guess.
+
+### 59. Clearing an inline style is not the same as making something visible
+
+**What happened:** The extension popup's History tab showed a blank panel. `switchTab` revealed a panel with `historyPanel.style.display = isCapture ? 'none' : ''`, and `popup.html` carried `#history-panel { display: none; }`. Assigning `''` removes the inline declaration rather than setting a value, so the element fell back to the stylesheet and stayed hidden. Clicking History hid the capture controls and revealed nothing — not even `refreshHistory()`'s "No uploads yet." empty state, because the element holding that message was inside the hidden panel. Three captures had uploaded successfully and were confirmed in Firestore while the tab that exists to show them had never worked.
+
+**Root cause:** The same line worked for the sibling panel purely by accident: nothing in the stylesheet hides `#capture-panel`, so falling back to the cascade landed on `display: block`. Two panels written identically, one correct and one not, with the difference living in a CSS file the JavaScript never mentions. The absent empty state was the tell and was misread as "there is no history", which sent the investigation at the recording of captures rather than the display of them.
+
+**Rule going forward:**
+- Assign the value you mean. `style.display = 'block'` and `'none'`, never `''`. A toggle that needs to know what the stylesheet says in order to be correct will break the next time the stylesheet changes.
+- When a panel renders nothing at all — not even its own empty state — suspect the container before the data. An empty list and a hidden list look identical from outside and have opposite causes.
+- A stub DOM has no stylesheet, so `''` and `'block'` are indistinguishable in `popup-harness.js` unless the assertion names the expected value. `extension/tests/history-tab.test.js` asserts the explicit string and rejects `''` for exactly that reason. Where the real bug lives in the cascade, the test has to pin what the cascade never sees.
