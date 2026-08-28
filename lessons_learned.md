@@ -653,6 +653,17 @@ Run this before starting any new sprint:
 - Refresh once, then stop. A second 401 after a successful renewal is an authorisation problem, and retrying it turns a clear error into a loop.
 - Test anything auth-shaped at a point in time it was not written at. Every bug in this class is invisible for the first hour.
 
+### 55. A lesson only covers the code you actually audited
+
+**What happened:** Lesson 52 was written after `GET /me/projects` answered `{ projects, total }` and the extension destructured it as an array. Within the same session, the admin portal failed the same way on `GET /admin/users`: `allUsers = await apiFetch(url)` assigned `{ users, total, nextCursor }`, `updateUserStats` called `.filter()` on it, and the resulting `TypeError` was caught by the caller and reported to the user as **"Failed to load users. Check API connectivity."** on an HTTP **200**. `activityFeed` had it too. `reports` did not, having been written to read `data.reports`. So the same defect existed in three of four places, and the lesson written hours earlier prevented none of them.
+
+**Root cause:** The lesson was filed against the code that produced it. Nothing carried it across the boundary to the other consumer of the same API, and the two live in different directories with different test setups, so neither the fix nor its test had any reason to touch the portal. The defect is a property of the *contract* — a paginated envelope every caller must unwrap — but it was recorded as a property of one caller.
+
+**Rule going forward:**
+- When a bug turns out to be about a shared contract, grep for every consumer of that contract before closing it. `grep -n "await apiFetch" portal/app.js` against the backend's `res.json({` sites would have found both remaining cases in a minute.
+- Fix it in one named place per codebase and route every call site through it, so a new call site has an obvious right way to be written. `normaliseProjects()` in the extension and `unwrapList()` in the portal are the same fix on both sides of the same boundary.
+- A `catch` that reports a transport problem for a decode failure will send the next reader to check the network. Distinguish them, or the error message becomes the thing that costs the time.
+
 ### 56. A Firestore query with no index works perfectly until there is data
 
 **What happened:** `GET /admin/projects` returned 500 the moment the Workspace contained its first Project: `9 FAILED_PRECONDITION: The query requires an index`. The query — `where('workspaceId','==',x).orderBy('createdAt','desc')` — had never had a composite index, and `firestore.indexes.json` had never listed one. It had been shipped, reviewed and deployed, and every environment it ran in had been empty, so it had never once failed. Auditing the rest found four of eight index-requiring queries with no index and a fifth with the wrong sort direction. The repo also carried two index files: `firebase.json` deploys the root one, and `infra/firestore.indexes.json` was deployed by nothing and had already drifted, defining a `reports` index on `generatedAt` when the code orders by `createdAt`.
