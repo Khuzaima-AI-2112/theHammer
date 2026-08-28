@@ -57,17 +57,41 @@ router.post('/projects', requireAdmin, async (req, res, next) => {
       return res.status(400).json({ error: 'name must be 1–128 characters' });
     }
     const now = nowISO();
-    const ref = await db.collection(collections.PROJECTS).add({
-      workspaceId: req.hammerUser.workspaceId,
-      name,
-      webhookUrl,
-      llmModel,
-      adminId:       req.hammerUser.id,
-      memberCount:   0,
-      createdAt:     now,
-      updatedAt:     now,
-      schemaVersion: 1,
+
+    // #47: the creator must be a member, not merely the adminId. Every read
+    // path that decides who may use a Project resolves project_memberships,
+    // so a Project created without one is invisible to its own creator.
+    // Written in the same transaction as the Project, and with the same
+    // memberCount discipline as POST /projects/:id/members, so the count and
+    // the membership rows cannot disagree.
+    const ref = db.collection(collections.PROJECTS).doc();
+    const membershipRef = db.collection(collections.MEMBERSHIPS)
+      .doc(`${ref.id}_${req.hammerUser.id}`);
+
+    await db.runTransaction(async (tx) => {
+      tx.set(ref, {
+        workspaceId: req.hammerUser.workspaceId,
+        name,
+        webhookUrl,
+        llmModel,
+        // adminId records who created the Project. It grants no access on its
+        // own; the membership row below is what does.
+        adminId:       req.hammerUser.id,
+        memberCount:   1,
+        createdAt:     now,
+        updatedAt:     now,
+        schemaVersion: 1,
+      });
+      tx.set(membershipRef, {
+        projectId:     ref.id,
+        userId:        req.hammerUser.id,
+        role:          'user',
+        admittedAt:    now,
+        admittedBy:    req.hammerUser.id,
+        schemaVersion: 1,
+      });
     });
+
     const snap = await ref.get();
     return res.status(201).json(serializeDoc(snap));
   } catch (err) { next(err); }

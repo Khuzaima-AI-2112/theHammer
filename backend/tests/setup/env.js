@@ -21,5 +21,18 @@
  * no-credentials error rather than resolving ADC.
  */
 process.env.NODE_ENV = 'test';
-process.env.FIRESTORE_EMULATOR_HOST = process.env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8080';
+process.env.FIRESTORE_EMULATOR_HOST = process.env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8085';
 process.env.METADATA_SERVER_DETECTION = 'none';
+
+// firebase-admin's initializeApp() resolves a project id from the environment,
+// and with no ADC on the machine it throws 'Unable to detect a Project Id'. The
+// emulator accepts any id; this one matches the project the fixtures' wipe
+// endpoint addresses, so the app and clearDatabase share a namespace.
+//
+// `demo-hammer` is not a Google Cloud project and must never become one.
+// AGENTS.md permits this folder exactly two live targets, `thehammer` and
+// `hammer-dev` (ADR-0006); this id is addressable only because
+// FIRESTORE_EMULATOR_HOST is set above, which routes every Firestore call to
+// the emulator. If that line is ever removed, this one becomes a request to a
+// project that does not exist rather than a silent success.
+process.env.GCLOUD_PROJECT = process.env.GCLOUD_PROJECT || 'demo-hammer';

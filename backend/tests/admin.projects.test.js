@@ -2,7 +2,7 @@
  * Sprint 5.2–5.5  —  /admin/projects routes
  *
  * Test runner: Jest
- * Firestore:   Firestore Emulator  (FIRESTORE_EMULATOR_HOST=127.0.0.1:8080)
+ * Firestore:   Firestore Emulator  (FIRESTORE_EMULATOR_HOST=127.0.0.1:8085)
  * Auth shim:   X-Dev-User-Email (requireRole dev fallback, NODE_ENV=test)
  */
 
@@ -39,6 +39,8 @@ describe('POST /admin/projects', () => {
 
   afterEach(async () => {
     if (createdId) {
+      await db.collection('project_memberships')
+        .doc(`${createdId}_test-admin-id-projects`).delete().catch(() => {});
       await db.collection('projects').doc(createdId).delete().catch(() => {});
       createdId = null;
     }
@@ -54,7 +56,8 @@ describe('POST /admin/projects', () => {
     expect(res.body).toMatchObject({
       name:          'Test Project Alpha',
       adminId:       'test-admin-id-projects',
-      memberCount:   0,
+      // #47: the creator is admitted as a member by the same transaction.
+      memberCount:   1,
       schemaVersion: 1,
     });
     expect(res.body.id).toBeTruthy();
@@ -150,5 +153,52 @@ describe('DELETE /admin/projects/:id', () => {
   test('404 — non-existent project', async () => {
     const res = await request(app).delete('/admin/projects/ghost-project-xyz').set(H);
     expect(res.status).toBe(404);
+  });
+});
+
+// #47 — creating a Project wrote no membership row for its creator, so the
+// Admin who had just created it saw "— no projects assigned —" in the
+// extension. adminId records who created the Project and confers no access;
+// every read path resolves access through project_memberships.
+describe('POST /admin/projects — the creator becomes a member (#47)', () => {
+  let createdId;
+
+  afterEach(async () => {
+    if (createdId) {
+      await db.collection('project_memberships')
+        .doc(`${createdId}_test-admin-id-projects`).delete().catch(() => {});
+      await db.collection('projects').doc(createdId).delete().catch(() => {});
+      createdId = null;
+    }
+  });
+
+  test('the creator can select the new Project immediately', async () => {
+    const created = await request(app)
+      .post('/admin/projects')
+      .set(H)
+      .send({ name: 'Creator Visible Project' });
+    expect(created.status).toBe(201);
+    createdId = created.body.id;
+
+    const mine = await request(app).get('/me/projects').set(H);
+    expect(mine.status).toBe(200);
+    expect(mine.body.projects.map(p => p.id)).toContain(createdId);
+  });
+
+  test('writes exactly one membership row, and memberCount agrees with it', async () => {
+    const created = await request(app)
+      .post('/admin/projects')
+      .set(H)
+      .send({ name: 'Membership Count Project' });
+    expect(created.status).toBe(201);
+    createdId = created.body.id;
+
+    const rows = await db.collection('project_memberships')
+      .where('projectId', '==', createdId).get();
+    expect(rows.docs.map(d => d.data().userId)).toEqual(['test-admin-id-projects']);
+    expect(rows.docs[0].data().admittedBy).toBe('test-admin-id-projects');
+
+    const project = await db.collection('projects').doc(createdId).get();
+    expect(project.data().memberCount).toBe(rows.size);
   });
 });
