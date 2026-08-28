@@ -5,6 +5,14 @@
       "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "projectId",  "order": "ASCENDING"  },
+        { "fieldPath": "uploadedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "uploads",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "projectId",  "order": "ASCENDING"  },
         { "fieldPath": "tool",       "order": "ASCENDING"  },
         { "fieldPath": "uploadedAt", "order": "DESCENDING" }
       ]
@@ -16,6 +24,39 @@
         { "fieldPath": "projectId",  "order": "ASCENDING"  },
         { "fieldPath": "userId",     "order": "ASCENDING"  },
         { "fieldPath": "uploadedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "projects",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "workspaceId", "order": "ASCENDING"  },
+        { "fieldPath": "createdAt",   "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "reports",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "projectId", "order": "ASCENDING"  },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "invitations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "workspaceId", "order": "ASCENDING"  },
+        { "fieldPath": "status",      "order": "ASCENDING"  },
+        { "fieldPath": "createdAt",   "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "project_memberships",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "projectId",  "order": "ASCENDING" },
+        { "fieldPath": "admittedAt", "order": "ASCENDING" }
       ]
     },
     {

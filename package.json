@@ -4,6 +4,7 @@
   },
   "scripts": {
     "test:extension": "node --test \"extension/tests/*.test.js\"",
-    "test:portal": "node --test \"portal/tests/*.test.js\""
+    "test:portal": "node --test \"portal/tests/*.test.js\"",
+    "test:indexes": "node --test \"infra/tests/*.test.js\""
   }
 }
