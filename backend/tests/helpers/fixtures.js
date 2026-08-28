@@ -9,11 +9,17 @@ const HEADERS = {
   analyst: { 'x-dev-user-email': 'analyst-fixture@test.com', 'content-type': 'application/json' }
 };
 
+// The emulator's address is whatever tests/setup/env.js resolved, so the wipe
+// and the app under test always talk to the same emulator. Hardcoding 8080 here
+// meant an unrelated process on that port was silently addressed instead.
+const [EMULATOR_HOST, EMULATOR_PORT] =
+  (process.env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8085').split(':');
+
 function clearDatabase() {
   return new Promise((resolve, reject) => {
     const req = http.request({
-      hostname: '127.0.0.1',
-      port: 8080,
+      hostname: EMULATOR_HOST,
+      port: Number(EMULATOR_PORT),
       path: '/emulator/v1/projects/demo-hammer/databases/(default)/documents',
       method: 'DELETE'
     }, (res) => {
