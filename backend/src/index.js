@@ -36,11 +36,20 @@ const PORT = process.env.PORT || 8080;
 app.set('trust proxy', 1);
 
 // ── CORS ──────────────────────────────────────────────────────────
-const EXTENSION_ID   = process.env.EXTENSION_ID || '';
+// EXTENSION_ID names one or more extensions. manifest.json declares no "key",
+// so Chrome derives an extension's id from the folder it is loaded from and each
+// unpacked copy carries its own; every id that has to reach this API needs an
+// origin here (#54). Split on whitespace as well as commas: gcloud's
+// --set-env-vars separates KEY=VALUE pairs with commas, so a comma inside a
+// value truncates it silently, which is why cloudbuild.yaml uses a space.
+// Never '*' — each id stays named.
+const EXTENSION_IDS = (process.env.EXTENSION_ID || '')
+  .split(/[\s,]+/)
+  .filter(Boolean);
 const ALLOWED_ORIGINS = [
   ...(process.env.NODE_ENV !== 'production' ? ['http://localhost:3000'] : []),
   ...(process.env.ADMIN_ORIGIN ? [process.env.ADMIN_ORIGIN] : []),
-  ...(EXTENSION_ID ? [`chrome-extension://${EXTENSION_ID}`] : []),
+  ...EXTENSION_IDS.map((id) => `chrome-extension://${id}`),
 ];
 
 app.use((req, res, next) => {
@@ -653,7 +662,7 @@ if (require.main === module) {
   app.listen(PORT, () => {
     logger.info(`[hammer-api] listening on :${PORT}`);
     logger.info(`[hammer-api] GCS_BUCKET=${BUCKET_NAME || '(not set)'}`);
-    logger.info(`[hammer-api] EXTENSION_ID=${EXTENSION_ID || '(not set — CORS for extension disabled)'}`);
+    logger.info(`[hammer-api] EXTENSION_ID=${EXTENSION_IDS.join(', ') || '(not set — CORS for extension disabled)'}`);
   });
 }
 
