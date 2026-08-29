@@ -82,7 +82,7 @@ steps:
       - '--service-account'
       - 'thehammer-backend@$PROJECT_ID.iam.gserviceaccount.com'
       - '--set-env-vars'
-      - 'NODE_ENV=production,GCS_BUCKET=thehammer-storage-2026,EXTENSION_ID=ndmbjlbmcdlmijglkfcelbiejmghiikm,ADMIN_ORIGIN=https://thehammer-portal-282689937365.northamerica-northeast1.run.app'
+      - 'NODE_ENV=production,GCS_BUCKET=thehammer-storage-2026,EXTENSION_ID=effbpmnbheohelnnpgpjdknofinhnagc ndmbjlbmcdlmijglkfcelbiejmghiikm,ADMIN_ORIGIN=https://thehammer-portal-282689937365.northamerica-northeast1.run.app'
 
   # ── 5a. Inject backend URL into Portal ──────────────────────────────────────
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
