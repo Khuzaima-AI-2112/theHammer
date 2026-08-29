@@ -12,8 +12,10 @@ steps:
         npm install
         firebase emulators:exec --only firestore --project demo-hammer 'npm test'
     env:
+      # No FIRESTORE_EMULATOR_HOST here, deliberately: emulators:exec exports it
+      # to the process it runs, taking the port from firebase.json, which is the
+      # only place that port is declared (#57).
       - 'NODE_ENV=test'
-      - 'FIRESTORE_EMULATOR_HOST=127.0.0.1:8080'
 
   # ── 3. Build backend image ──────────────────────────────────────────────────
   - name: 'gcr.io/cloud-builders/docker'
