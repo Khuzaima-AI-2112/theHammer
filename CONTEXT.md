@@ -16,6 +16,11 @@ _Avoid_: recording, screen grab, snapshot, screenshot event
 One continuous period of work by one Monitored User against one Project.
 _Avoid_: shift, run, work block
 
+**Project**:
+One named body of work inside a Workspace. It is what a Capture is filed
+under, what a Session belongs to, and what progress is reported against.
+_Avoid_: job, client, account, workstream, board
+
 **Workspace**:
 One Customer organisation's isolated tenant. It is the boundary for data
 isolation and for legal responsibility: everything inside one Workspace belongs
@@ -66,3 +71,15 @@ _Avoid_: productivity score, efficiency score, utilisation
 The identifier of the Disclosure text a Monitored User acknowledged. A material
 change to what is collected produces a new version and re-prompts.
 _Avoid_: consent version, terms version, revision
+
+**Persona**:
+The part a Monitored User plays while they demonstrate somebody else’s
+product. A Persona is not a real person and is never the Monitored User’s
+own identity.
+_Avoid_: role, user type, actor, character, profile
+
+**Storyboard**:
+An ordered set of Captures, with a note against each one, that demonstrates
+a single workflow. A Session measures time; a Storyboard tells a story. The
+two do not have to agree.
+_Avoid_: sequence, slideshow, deck, reel, walkthrough
