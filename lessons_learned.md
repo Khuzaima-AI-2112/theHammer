@@ -746,3 +746,15 @@ Run this before starting any new sprint:
 - Cost a cleanup only after finding the code to clean. "Remove the now-redundant Y" is a scope estimate resting on Y's existence; here it was a third of the predicted blast radius and it was zero.
 - A read of a field nothing writes is a dead path, and it names the feature that has never worked. `u.membership` was consumed in `renderUsers` and produced by no one — the same shape of tell as lesson 54's stored token that nothing spends, and worth grepping both directions when a filter looks implemented on one side only.
 - Repeat the evidence, not the conclusion, when carrying a finding across documents. This claim survived from #41's body into #46 into a handoff without anyone re-reading `filterUsers`, because each copy looked like a citation of the last.
+
+### 63. A comma-delimited flag cannot carry a comma-delimited value
+
+**What happened:** `EXTENSION_ID` had to grow from one Chrome extension id to two, because `manifest.json` declares no `"key"` and each unpacked copy therefore has its own id. The obvious encoding — `EXTENSION_ID=id-a,id-b` — is silently wrong in `cloudbuild.yaml`. `gcloud run deploy --set-env-vars` separates `KEY=VALUE` pairs with commas, so it would have read `EXTENSION_ID=id-a` and then tried to parse `id-b` as a pair of its own. Production would have come back trusting one extension, with no error anywhere: the deploy succeeds, the service starts, and the only symptom is a CORS preflight returning no `access-control-allow-origin` to one developer. The fix was a space between the ids and a `split(/[\s,]+/)` that accepts either.
+
+**Root cause:** Two layers claimed the same delimiter, and only one of them got to use it. Nothing in the toolchain reports the collision — `gcloud` cannot know that a value was meant to contain a comma, and the receiving code cannot know its input was truncated before it arrived. The same shape sits in every delimiter-joined flag: `--set-secrets`, `--update-labels`, and Cloud Build's own `--substitutions`.
+
+**Rule going forward:**
+- Before putting a list in an environment variable, check what delimiter the thing that *sets* it already uses, and pick a different one. `gcloud`'s `KEY=VALUE` flags own the comma; a space costs nothing and collides with nothing.
+- Accept more separators than you emit. `split(/[\s,]+/)` with a `.filter(Boolean)` takes commas, spaces, padding and empty entries, so the next person writing the value by hand in the console cannot get it wrong.
+- Assert the parse, not the string. A one-line script that splits the `--set-env-vars` argument the way `gcloud` will and prints the pairs it yields turns "looks right" into "is right", and costs one command.
+- A config fault that deploys cleanly is worse than one that fails the build. This one would have surfaced as a broken capture loop on one machine — read as an extension bug, not a deploy bug, and debugged in the wrong repository.
