@@ -897,6 +897,58 @@ function updateUserStats(list) {
 // ACTIVITY VIEW  (5.12)
 // ═══════════════════════════════════════════════════════════════
 
+/**
+ * Export the selected Project's Captures as one ZIP.
+ *
+ * apiFetch cannot serve this: it sets Content-Type: application/json and
+ * parses every response body as JSON, and this response is an archive. A
+ * plain <a download> cannot serve it either, because the request has to
+ * carry a bearer token and an anchor sets no headers. So the bytes are
+ * fetched here and handed to the browser as a blob.
+ *
+ * The token is read at call time, not reused from sign-in (#39).
+ */
+async function exportProjectCaptures() {
+  const projectId = document.getElementById('activityProjectSelect').value;
+  if (!projectId) {
+    showToast('Select a project first', 'error');
+    return;
+  }
+
+  const btn = document.getElementById('activityExportBtn');
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Exporting...';
+
+  try {
+    const user = firebase.auth().currentUser;
+    if (user) idToken = await user.getIdToken();
+
+    const res = await fetch(`${API_BASE}/admin/projects/${encodeURIComponent(projectId)}/export`, {
+      headers: idToken ? { Authorization: `Bearer ${idToken}` } : {}
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || `HTTP ${res.status}`);
+    }
+
+    const url = URL.createObjectURL(await res.blob());
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${projectId}-captures.zip`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    showToast('Export downloaded', 'success');
+  } catch (err) {
+    showToast(err.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = label;
+  }
+}
+
 function populateActivityProjectSelect() {
   const sel = document.getElementById('activityProjectSelect');
   const cur = sel.value;

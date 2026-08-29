@@ -83,7 +83,7 @@ app.use((req, res, next) => {
 });
 
 // ── Per-Role Rate Limiters ─────────────────────────────────────────
-const { analystReportLimiter, videoExportLimiter } = require('./middleware/rateLimiters');
+const { analystReportLimiter, exportLimiter } = require('./middleware/rateLimiters');
 
 app.use(express.json());
 
@@ -612,6 +612,7 @@ app.use('/admin',  require('./routes/admin/users'));
 app.use('/admin',  require('./routes/admin/activity'));
 app.use('/admin',  require('./routes/admin/reports'));
 app.use('/admin',  require('./routes/admin/dashboard'));
+app.use('/admin',  require('./routes/admin/exports'));
 app.use('/admin',  require('./routes/admin/workspaces'));
 
 // ─────────────────────────────────────────────────────────────────
@@ -666,4 +667,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { app, sanitize, buildObjectPath, sha256, rejectOversizedUpload, isClientDisconnect, analystReportLimiter, videoExportLimiter };
+module.exports = { app, sanitize, buildObjectPath, sha256, rejectOversizedUpload, isClientDisconnect, analystReportLimiter, exportLimiter };
