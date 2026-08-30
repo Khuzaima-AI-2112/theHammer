@@ -73,9 +73,11 @@ change to what is collected produces a new version and re-prompts.
 _Avoid_: consent version, terms version, revision
 
 **Persona**:
-The part a Monitored User plays while they demonstrate somebody else’s
-product. A Persona is not a real person and is never the Monitored User’s
-own identity.
+The part a Monitored User works in when a Capture is made. It is a part, not
+a person: one Monitored User can work in several, and the part may be one they
+hold in reality or one they adopt to demonstrate somebody else’s product. It
+labels work and controls nothing — unlike the portal’s Role, which controls
+what a person may do and labels nothing.
 _Avoid_: role, user type, actor, character, profile
 
 **Storyboard**:

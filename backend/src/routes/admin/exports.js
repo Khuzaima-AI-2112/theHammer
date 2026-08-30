@@ -96,6 +96,7 @@ router.get('/projects/:id/export', requireAdmin, exportLimiter, async (req, res,
         gcsPath: v.gcsPath ?? v.path ?? null,
         uploadedAt: v.uploadedAt,
         tool: v.tool ?? '',
+        stage: v.stage ?? '',
         tabUrl: v.tabUrl ?? ''
       };
     }).reverse(); // oldest first — the order the Storyboard is built in
@@ -116,7 +117,7 @@ router.get('/projects/:id/export', requireAdmin, exportLimiter, async (req, res,
     archive.pipe(res);
 
     const bucket = storage.bucket(BUCKET);
-    const index = ['number,file,uploadedAt,tool,tabUrl'];
+    const index = ['number,file,uploadedAt,tool,stage,tabUrl'];
 
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
@@ -133,6 +134,7 @@ router.get('/projects/:id/export', requireAdmin, exportLimiter, async (req, res,
         csvCell(name),
         csvCell(isoFor(row.uploadedAt)),
         csvCell(row.tool),
+        csvCell(row.stage),
         csvCell(row.tabUrl)
       ].join(','));
     }
