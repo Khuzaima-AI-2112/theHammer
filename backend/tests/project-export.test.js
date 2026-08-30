@@ -44,6 +44,7 @@ async function seedUpload(id, data) {
     projectId: 'persona-buyer',
     userId: 'admin-export-id',
     tool: 'Softomedia',
+    stage: 'media-buyer',
     tabUrl: 'https://softomedia.example/campaigns',
     path: `persona-buyer/${id}.png`,
     bucket: 'fake-bucket',
@@ -119,8 +120,8 @@ describe('GET /admin/projects/:id/export', () => {
     test('carries an index with one row per Capture', () => {
       const raw = body.toString('latin1');
       expect(raw).toContain('index.csv');
-      expect(raw).toContain('number,file,uploadedAt,tool,tabUrl');
-      expect(raw).toContain('001,001_2026-08-30T09-00-00.png,2026-08-30T09:00:00.000Z,Softomedia,https://softomedia.example/campaigns');
+      expect(raw).toContain('number,file,uploadedAt,tool,stage,tabUrl');
+      expect(raw).toContain('001,001_2026-08-30T09-00-00.png,2026-08-30T09:00:00.000Z,Softomedia,media-buyer,https://softomedia.example/campaigns');
       expect(raw).toContain('003,003_2026-08-30T09-11-30.png');
     });
   });

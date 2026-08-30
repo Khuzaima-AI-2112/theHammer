@@ -71,9 +71,14 @@ describe('POST /upload-url — auth', () => {
 // Each field tested in isolation — 400 with the missing field name in response
 // ─────────────────────────────────────────────────────────────────
 describe('POST /upload-url — field validation (task 3.1)', () => {
+  // `tool` was in this list until #66. It was required here and optional on
+  // /capture, and that single disagreement decided which upload path a Capture
+  // took: an empty Tool box made this route answer 400, the extension fell back
+  // to /capture, and only that fallback wrote an uploads document. Filling the
+  // box in therefore made Captures disappear from the portal and the export.
+  // The two routes now agree, and upload-paths-parity.test.js holds them to it.
   const cases = [
     { omit: 'project', label: 'missing project' },
-    { omit: 'tool',    label: 'missing tool' },
   ];
 
   cases.forEach(({ omit, label }) => {
@@ -91,14 +96,17 @@ describe('POST /upload-url — field validation (task 3.1)', () => {
     });
   });
 
-  test('400 lists all missing fields when both are absent', async () => {
+  test('400 names the field that is missing, and only that field', async () => {
+    // Was "lists all missing fields when both are absent" before #66, when tool
+    // was also required. project is now the only required field, so the shape of
+    // the answer is what matters: the caller is told which field, by name.
     const res = await request(app)
       .post('/upload-url')
       .set(VALID_HEADERS)
       .send({});
 
     expect(res.status).toBe(400);
-    expect(res.body.missing).toEqual(expect.arrayContaining(['project', 'tool']));
+    expect(res.body.missing).toEqual(['project']);
   });
 });
 

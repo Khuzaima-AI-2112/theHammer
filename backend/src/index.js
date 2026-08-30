@@ -266,6 +266,10 @@ async function firestoreWrite(objectPath, fields) {
         projectId:  fields.projectId,
         userId:     fields.userId,
         tool:       fields.tool,
+        // The Persona this Capture was taken in (#63). The extension has always
+        // sent it on both upload paths; nothing has ever read it. Firestore
+        // rejects undefined, so an absent stage is stored as the empty string.
+        stage:      fields.stage ?? '',
         tabUrl:     fields.tabUrl,
         uploadedAt: fields.uploadedAt,
         hasSemanticData: fields.hasSemanticData || false,
@@ -336,10 +340,13 @@ app.get('/health', async (_req, res) => {
 // ─ POST /upload-url ───────────────────────────────────────────────
 app.post('/upload-url', requireAuth('user'), async (req, res, next) => {
   try {
-    const { project, tool } = req.body || {};
+    const { project, tool, stage, tabUrl } = req.body || {};
     const missing = [];
     if (!project) missing.push('project');
-    if (!tool)    missing.push('tool');
+    // `tool` used to be required here and optional on /capture (#66). That one
+    // disagreement decided which path a Capture took: an empty Tool box made
+    // this route answer 400, the extension fell back to /capture, and only then
+    // was the Capture recorded. Filling the box in silently stopped that.
     if (missing.length > 0) return res.status(400).json({ error: 'Missing required fields', missing });
     if (!BUCKET_NAME) return res.status(500).json({ error: 'Server misconfiguration: GCS_BUCKET not set' });
 
@@ -349,8 +356,14 @@ app.post('/upload-url', requireAuth('user'), async (req, res, next) => {
       return res.status(403).json({ error: 'Forbidden: Project not found or belongs to another workspace' });
     }
 
-    const objectPath = buildObjectPath(sanitize(project), req.hammerUser.id, sanitize(tool, 32));
-    
+    // Mirrors /capture: an absent tool is an empty path segment, not the string
+    // "undefined".
+    const safeProject = sanitize(project);
+    const safeTool    = tool   ? sanitize(tool, 32)   : '';
+    const safeStage   = stage  ? sanitize(stage, 32)  : '';
+    const safeTabUrl  = tabUrl ? String(tabUrl).slice(0, 500) : '';
+    const objectPath  = buildObjectPath(safeProject, req.hammerUser.id, safeTool);
+
     if (req.body.semanticData) {
       const jsonPath = objectPath.replace(/\.png$/, '.json');
       const jsonFile = gcs.bucket(BUCKET_NAME).file(jsonPath);
@@ -370,7 +383,28 @@ app.post('/upload-url', requireAuth('user'), async (req, res, next) => {
       expires: Date.now() + 15 * 60 * 1000
     });
     
-    dispatchWebhook(sanitize(project), {
+    // #66: record the Capture here, not only on the /capture fallback.
+    //
+    // This is the path the extension takes first, and until now it wrote nothing
+    // to Firestore. The image reached the bucket and the Activity view, the ZIP
+    // export and every report — all of which read `uploads` — never saw it.
+    //
+    // The document is written before the bytes arrive, because the bytes never
+    // come through this process: the extension PUTs them straight to the signed
+    // URL. So `size` is whatever the extension declared, and is null when it
+    // declared nothing. A row that exists with an unknown size is worth far more
+    // than no row at all.
+    const firestoreErr = await firestoreWrite(objectPath, {
+      path: objectPath, bucket: BUCKET_NAME,
+      size: Number.isFinite(Number(req.body?.size)) ? Number(req.body.size) : null,
+      projectId: safeProject, userId: req.hammerUser.id, tool: safeTool,
+      stage: safeStage, tabUrl: safeTabUrl,
+      uploadedAt: new Date().toISOString(),
+      hasSemanticData: !!req.body.semanticData
+    });
+    if (firestoreErr) logger.error('[hammer-api] upload-url metadata write failed:', firestoreErr);
+
+    dispatchWebhook(safeProject, {
       text: `New screenshot capture initiated`,
       attachments: [{
         title: 'Capture Details',
@@ -413,7 +447,7 @@ app.post('/capture', requireAuth('user'), requireMultipart, rejectOversizedUploa
   });
 }, async (req, res, next) => {
   try {
-    const { projectId, tool, tabUrl } = req.body || {};
+    const { projectId, tool, tabUrl, stage } = req.body || {};
     const missing = [];
     if (!projectId) missing.push('projectId');
     if (missing.length > 0) return res.status(400).json({ error: 'Missing required fields', missing });
@@ -430,6 +464,7 @@ app.post('/capture', requireAuth('user'), requireMultipart, rejectOversizedUploa
     const safeProject  = sanitize(projectId);
     const safeUser     = req.hammerUser.id;
     const safeTool     = tool   ? sanitize(tool, 32)    : '';
+    const safeStage    = stage  ? sanitize(stage, 32)   : '';
     const safeTabUrl   = tabUrl ? tabUrl.slice(0, 500)  : '';
     const objectPath   = buildObjectPath(safeProject, safeUser, safeTool);
     const uploadedAt   = new Date().toISOString();
@@ -439,7 +474,7 @@ app.post('/capture', requireAuth('user'), requireMultipart, rejectOversizedUploa
       resumable: false,
       metadata: {
         contentType: 'image/png',
-        metadata: { projectId: safeProject, userId: safeUser, tool: safeTool, tabUrl: safeTabUrl, uploadedAt }
+        metadata: { projectId: safeProject, userId: safeUser, tool: safeTool, stage: safeStage, tabUrl: safeTabUrl, uploadedAt }
       }
     });
 
@@ -460,7 +495,7 @@ app.post('/capture', requireAuth('user'), requireMultipart, rejectOversizedUploa
     const firestoreErr = await firestoreWrite(objectPath, {
       path: objectPath, bucket: BUCKET_NAME, size: req.file.size,
       projectId: safeProject, userId: safeUser, tool: safeTool,
-      tabUrl: safeTabUrl, uploadedAt, hasSemanticData
+      stage: safeStage, tabUrl: safeTabUrl, uploadedAt, hasSemanticData
     });
 
     const [readUrl] = await blob.getSignedUrl({

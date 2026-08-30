@@ -845,6 +845,12 @@ async function uploadBlobWithSignedUrl(blob, session, tabUrl, cloudRunUrl, token
       project:           session.projectId,
       tool:              session.tool  ?? '',
       stage:             session.stage ?? '',
+      // #66: this path records the Capture before the bytes are PUT, so the
+      // backend never sees them and cannot learn these two for itself. The
+      // proxy path has always sent both; sending them here is what makes the
+      // two paths record the same thing.
+      tabUrl:            tabUrl ?? '',
+      size:              blob?.size ?? null,
       // 6.1 — session fields for backend to stamp on the uploads doc
       isFirstInSession:  sessionCtx.isFirstInSession  ?? false,
       sessionStart:      sessionCtx.sessionStart       ?? null,
