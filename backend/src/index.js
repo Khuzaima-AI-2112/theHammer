@@ -157,6 +157,30 @@ function buildObjectPath(projectId, userId, tool, now = new Date()) {
   return `${sanitize(projectId)}/${sanitize(userId)}/${ts}${toolPart}_${rand}.png`;
 }
 
+// The tail buildObjectPath() produces: an ISO instant with every separator
+// hyphenated, an optional sanitised tool, and two random bytes.
+const OBJECT_TAIL_RE =
+  /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z(_[a-zA-Z0-9_.\-]{1,32})?_[0-9a-f]{4}\.png$/;
+
+// A Capture that fell back to the proxy after /upload-url had already
+// recorded it must land on the SAME object path, so the second write updates
+// that document instead of creating a twin (the uploads doc id IS the path).
+// Otherwise one Capture is two rows, and the first points at bytes that were
+// never PUT — which is what an export cannot download.
+//
+// The path arrives from the client, so it is honoured only where the client
+// could already write: under its own project and user prefix, in the exact
+// shape buildObjectPath emits. Anything else is ignored rather than refused —
+// a fresh path still records the Capture, and rule 4 says never lose one.
+function resumableObjectPath(candidate, projectId, userId) {
+  if (typeof candidate !== 'string' || candidate.length > 512) return null;
+  if (candidate.includes('..')) return null;
+  const prefix = `${projectId}/${userId}/`;
+  if (!candidate.startsWith(prefix)) return null;
+  const tail = candidate.slice(prefix.length);
+  return OBJECT_TAIL_RE.test(tail) ? candidate : null;
+}
+
 function sha256(str) {
   return crypto.createHash('sha256').update(str).digest('hex');
 }
@@ -466,7 +490,11 @@ app.post('/capture', requireAuth('user'), requireMultipart, rejectOversizedUploa
     const safeTool     = tool   ? sanitize(tool, 32)    : '';
     const safeStage    = stage  ? sanitize(stage, 32)   : '';
     const safeTabUrl   = tabUrl ? tabUrl.slice(0, 500)  : '';
-    const objectPath   = buildObjectPath(safeProject, safeUser, safeTool);
+    // #66 follow-up: resume the path /upload-url already recorded, when the
+    // extension is falling back after its PUT failed. Same path, same doc id,
+    // so the Capture stays one row.
+    const objectPath   = resumableObjectPath(req.body?.resumePath, safeProject, safeUser)
+                      ?? buildObjectPath(safeProject, safeUser, safeTool);
     const uploadedAt   = new Date().toISOString();
 
     const blob = gcs.bucket(BUCKET_NAME).file(objectPath);
@@ -702,4 +730,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { app, sanitize, buildObjectPath, sha256, rejectOversizedUpload, isClientDisconnect, analystReportLimiter, exportLimiter };
+module.exports = { app, sanitize, buildObjectPath, resumableObjectPath, sha256, rejectOversizedUpload, isClientDisconnect, analystReportLimiter, exportLimiter };

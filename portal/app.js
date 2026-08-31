@@ -1062,8 +1062,8 @@ function renderActivity(list) {
   tbody.innerHTML = sorted.map(u => {
     const tool    = u.tool ? `<span class="tool-badge">${esc(u.tool)}</span>` : '<span class="tool-badge">—</span>';
     const user    = esc(u.userId || '—');
-    const path    = u.path || '—';
-    const size    = u.size ? fmtBytes(u.size) : '—';
+    const path    = u.gcsPath || '—';
+    const size    = u.fileSizeBytes ? fmtBytes(u.fileSizeBytes) : '—';
     const time    = u.uploadedAt ? fmtRelative(u.uploadedAt) : '—';
     const fullTime = u.uploadedAt ? new Date(u.uploadedAt).toLocaleString() : '';
 

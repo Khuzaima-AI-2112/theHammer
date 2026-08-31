@@ -229,10 +229,15 @@ function loadServiceWorker(opts = {}) {
     }
   };
 
-  // A PUT that always succeeds, so the signed-URL upload path completes
-  // without reaching the /capture proxy fallback.
+  // A PUT that succeeds, so the signed-URL upload path completes without
+  // reaching the /capture proxy fallback.
+  //
+  // `opts.putFails` makes it fail instead. That is not a hypothetical: the
+  // PUT goes from the extension straight to Cloud Storage, so it is refused
+  // whenever the bucket CORS policy does not name the extension origin, and
+  // it is the one case that sends a single Capture down both upload paths.
   class FakeXHR {
-    constructor() { this.upload = {}; this.status = 200; this.responseText = ''; }
+    constructor() { this.upload = {}; this.status = opts.putFails ? 403 : 200; this.responseText = ''; }
     open() {}
     setRequestHeader() {}
     send() { setTimeout(() => this.onload && this.onload(), 0); }

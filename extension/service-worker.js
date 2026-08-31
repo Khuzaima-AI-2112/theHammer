@@ -882,7 +882,11 @@ async function uploadBlobWithSignedUrl(blob, session, tabUrl, cloudRunUrl, token
     await xhrPut(signedUrlResponse.signedUrl, blob);
   } catch (err) {
     console.warn('[Hammer SW] XHR PUT failed, using proxy:', err.message);
-    return uploadViaProxy(blob, session, tabUrl, cloudRunUrl, token, sessionCtx, semanticData);
+    // /upload-url has already recorded this Capture. Hand the proxy the path
+    // it recorded, so the second write updates that document rather than
+    // adding a twin whose bytes were never PUT.
+    return uploadViaProxy(blob, session, tabUrl, cloudRunUrl, token, sessionCtx,
+                          semanticData, signedUrlResponse.path);
   }
 
   return { path: signedUrlResponse.path, readUrl: signedUrlResponse.readUrl };
@@ -893,7 +897,7 @@ async function uploadBlobWithSignedUrl(blob, session, tabUrl, cloudRunUrl, token
 // 6.1: sessionCtx fields added to FormData.
 // 5.15: userId removed.
 // ─────────────────────────────────────────────────────────────────
-async function uploadViaProxy(blob, session, tabUrl, cloudRunUrl, token, sessionCtx = {}, semanticData = null) {
+async function uploadViaProxy(blob, session, tabUrl, cloudRunUrl, token, sessionCtx = {}, semanticData = null, resumePath = null) {
   const controller = new AbortController();
   const timeoutId  = setTimeout(() => controller.abort(), 15_000);
 
@@ -909,6 +913,8 @@ async function uploadViaProxy(blob, session, tabUrl, cloudRunUrl, token, session
   formData.append('isFirstInSession',   String(sessionCtx.isFirstInSession ?? false));
   formData.append('sessionStart',       sessionCtx.sessionStart ?? '');
   formData.append('sessionId',          sessionCtx.sessionId    ?? '');
+  // Present only when /upload-url already recorded this Capture (see above).
+  if (resumePath) formData.append('resumePath', resumePath);
 
   try {
     const response = await authedFetch(`${cloudRunUrl}/capture`, {
