@@ -6,7 +6,12 @@
  * numbered oldest first, plus an index they can open in a spreadsheet and add
  * their notes to.
  *
- * Two decisions worth knowing:
+ * Query params:
+ *   ?tool=<toolName>  — export one Tool's Captures only (optional). Same name
+ *                       and same meaning as GET /projects/:id/activity, so the
+ *                       filter shown on screen is the filter that is exported.
+ *
+ * Three decisions worth knowing:
  *
  * The query runs DESCENDING and the rows are reversed in memory. The composite
  * index on (projectId, uploadedAt DESC) already exists and serves the Activity
@@ -16,6 +21,11 @@
  *
  * The archive is stored, not deflated. PNG is already compressed, so a second
  * pass spends CPU on a Cloud Run instance to save almost no bytes.
+ *
+ * The Tool filter is applied in the Firestore query rather than to the rows it
+ * returns, so the 50-Capture ceiling counts the section being exported. That is
+ * what lets a Project over the ceiling still be exported one section at a time
+ * (#76).
  *
  * Auth: requireAdmin, and the Project must belong to the caller's Workspace.
  */
@@ -61,9 +71,22 @@ function csvCell(value) {
   return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
+/**
+ * A Tool is free text typed in the extension popup, and it lands in a
+ * Content-Disposition header and a file name on someone's disk. Anything that
+ * is not plainly safe in both becomes an underscore.
+ */
+function fileNameSafe(value) {
+  return String(value).replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 60);
+}
+
 router.get('/projects/:id/export', requireAdmin, exportLimiter, async (req, res, next) => {
   try {
     const projectId = req.params.id;
+    // #75: the Activity view filters by Tool, and the export ignored it, so a
+    // filtered export handed back the whole Project. Same parameter name and
+    // same meaning as GET /projects/:id/activity.
+    const tool = (req.query.tool ?? '').trim();
 
     const projSnap = await db.collection(collections.PROJECTS).doc(projectId).get();
     if (!projSnap.exists) {
@@ -73,21 +96,32 @@ router.get('/projects/:id/export', requireAdmin, exportLimiter, async (req, res,
       return res.status(403).json({ error: 'Forbidden: Project belongs to another workspace' });
     }
 
+    // The filter belongs in the query, not in a filter() over the rows: the
+    // ceiling below counts what the query returned, so filtering afterwards
+    // would refuse a section of 3 inside a Project of 60. Served by the
+    // existing (projectId, tool, uploadedAt DESC) composite index, which the
+    // Activity view already uses.
+    let query = db.collection(collections.UPLOADS).where('projectId', '==', projectId);
+    if (tool) query = query.where('tool', '==', tool);
+
     // One over the ceiling, so "too many" is distinguishable from "exactly 50".
-    const snap = await db.collection(collections.UPLOADS)
-      .where('projectId', '==', projectId)
+    const snap = await query
       .orderBy('uploadedAt', 'desc')
       .limit(MAX_CAPTURES + 1)
       .get();
 
     if (snap.size > MAX_CAPTURES) {
       return res.status(400).json({
-        error: `Project has more than ${MAX_CAPTURES} Captures; narrow the Project or export in parts`,
+        error: tool
+          ? `Tool "${tool}" has more than ${MAX_CAPTURES} Captures in this Project; narrow the date range`
+          : `This Project has more than ${MAX_CAPTURES} Captures and an export holds at most ${MAX_CAPTURES}. Filter by Tool in the Activity view and export each section.`,
         max: MAX_CAPTURES
       });
     }
     if (snap.empty) {
-      return res.status(404).json({ error: 'No captures to export' });
+      return res.status(404).json({
+        error: tool ? `No captures to export for tool "${tool}"` : 'No captures to export'
+      });
     }
 
     const rows = snap.docs.map((d) => {
@@ -102,11 +136,14 @@ router.get('/projects/:id/export', requireAdmin, exportLimiter, async (req, res,
     }).reverse(); // oldest first — the order the Storyboard is built in
 
     const today = new Date().toISOString().slice(0, 10);
+    // Two sections of one Project must not both land as <projectId>-captures
+    // .zip, or the second becomes a "(1)" copy and the person assembling the
+    // Storyboard cannot tell which is which.
+    const stem = tool
+      ? `${projectId}-${fileNameSafe(tool)}-captures-${today}`
+      : `${projectId}-captures-${today}`;
     res.setHeader('Content-Type', 'application/zip');
-    res.setHeader(
-      'Content-Disposition',
-      `attachment; filename="${projectId}-captures-${today}.zip"`
-    );
+    res.setHeader('Content-Disposition', `attachment; filename="${stem}.zip"`);
 
     const archive = archiver('zip', { zlib: { level: 0 } });
     archive.on('warning', (err) => logger.error('[hammer-api] export archive warning:', err.message));
