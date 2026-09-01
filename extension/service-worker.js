@@ -322,34 +322,52 @@ async function withRetry(uploadFn) {
 }
 
 // ─────────────────────────────────────────────────────────────────
-// 4.3 — XHR PUT with upload progress
+// 4.3 — PUT the bytes straight to Cloud Storage
+//
+// #70: this was an XMLHttpRequest, for its upload progress events. A Manifest
+// V3 service worker has no XMLHttpRequest — the worker global scope offers
+// fetch and nothing else — so it threw ReferenceError on its first statement
+// on every Capture, and the catch at the call site turned that into a silent
+// proxy fallback. Every screenshot went through Cloud Run; not one signed-URL
+// PUT ever ran.
+//
+// The cost of fetch is real and accepted: it cannot report upload progress, so
+// the popup's bar is coarse here — 0 when the PUT starts, 100 when it lands.
+// Continuous progress on this path has never actually worked, so nothing is
+// lost that anyone has seen.
 // ─────────────────────────────────────────────────────────────────
-function xhrPut(url, blob) {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open('PUT', url);
-    xhr.setRequestHeader('Content-Type', 'image/png');
-    xhr.timeout = 30_000;
+function reportUploadProgress(percent) {
+  chrome.runtime.sendMessage({ type: 'UPLOAD_PROGRESS', percent }).catch(() => {});
+}
 
-    xhr.upload.onprogress = (evt) => {
-      if (!evt.lengthComputable) return;
-      const pct = Math.round((evt.loaded / evt.total) * 100);
-      chrome.runtime.sendMessage({ type: 'UPLOAD_PROGRESS', percent: pct }).catch(() => {});
-    };
+async function putBlob(url, blob) {
+  const controller = new AbortController();
+  const timeoutId  = setTimeout(() => controller.abort(), 30_000);
 
-    xhr.onload = () => {
-      if (xhr.status >= 200 && xhr.status < 300) {
-        chrome.runtime.sendMessage({ type: 'UPLOAD_PROGRESS', percent: 100 }).catch(() => {});
-        resolve(xhr.status);
-      } else {
-        reject(new Error(`GCS PUT HTTP ${xhr.status}: ${xhr.responseText.slice(0, 200)}`));
-      }
-    };
+  reportUploadProgress(0);
+  try {
+    const res = await fetch(url, {
+      method:  'PUT',
+      headers: { 'Content-Type': 'image/png' },
+      body:    blob,
+      signal:  controller.signal
+    });
 
-    xhr.onerror   = () => reject(new Error('XHR network error'));
-    xhr.ontimeout = () => reject(new Error('XHR PUT timed out after 30s'));
-    xhr.send(blob);
-  });
+    if (!res.ok) {
+      const text = await res.text().catch(() => String(res.status));
+      throw new Error(`GCS PUT HTTP ${res.status}: ${text.slice(0, 200)}`);
+    }
+
+    reportUploadProgress(100);
+    return res.status;
+  } catch (err) {
+    // An abort is this function's own 30s timeout, not a network fault. Say so,
+    // rather than reporting the browser's generic "aborted without reason".
+    if (err.name === 'AbortError') throw new Error('PUT timed out after 30s');
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -879,9 +897,9 @@ async function uploadBlobWithSignedUrl(blob, session, tabUrl, cloudRunUrl, token
   }
 
   try {
-    await xhrPut(signedUrlResponse.signedUrl, blob);
+    await putBlob(signedUrlResponse.signedUrl, blob);
   } catch (err) {
-    console.warn('[Hammer SW] XHR PUT failed, using proxy:', err.message);
+    console.warn('[Hammer SW] PUT failed, using proxy:', err.message);
     // /upload-url has already recorded this Capture. Hand the proxy the path
     // it recorded, so the second write updates that document rather than
     // adding a twin whose bytes were never PUT.

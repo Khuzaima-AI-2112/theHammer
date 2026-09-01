@@ -119,12 +119,21 @@ function loadServiceWorker(opts = {}) {
     if (!init || !init.body || typeof init.body !== 'string') return null;
     try { return JSON.parse(init.body); } catch { return null; }
   };
+  // The signed URL /upload-url hands back. The PUT to it goes to Cloud Storage,
+  // not to the backend, so it is answered here rather than by the API stubs.
+  const SIGNED_PUT = 'https://gcs.test/signed-put';
+
   const defaultFetch = async (url, init = {}) => {
     // capture() turns its data URL into a Blob by fetching it.
     if (String(url).startsWith('data:')) {
       return { ok: true, status: 200, blob: async () => new Blob(['png'], { type: 'image/png' }) };
     }
     requests.push({ url, init, body: jsonBody(init) });
+    if (String(url) === SIGNED_PUT) {
+      return opts.putFails
+        ? { ok: false, status: 403, text: async () => 'CORS: origin not allowed' }
+        : { ok: true, status: 200, text: async () => '' };
+    }
     return {
       ok: true,
       status: 200,
@@ -229,19 +238,18 @@ function loadServiceWorker(opts = {}) {
     }
   };
 
-  // A PUT that succeeds, so the signed-URL upload path completes without
-  // reaching the /capture proxy fallback.
+  // #70: this sandbox used to define `XMLHttpRequest: FakeXHR`, and that is
+  // exactly why the bug it hid survived. A Manifest V3 service worker has no
+  // XMLHttpRequest — the worker global scope offers fetch and nothing else —
+  // so a harness that supplies one is more capable than the runtime it stands
+  // for, and every test of the signed-URL PUT passed against code that could
+  // never run. The PUT is a fetch now, served by fetchImpl below, and this
+  // sandbox deliberately does NOT define XMLHttpRequest.
   //
-  // `opts.putFails` makes it fail instead. That is not a hypothetical: the
+  // `opts.putFails` still makes the PUT fail. That is not a hypothetical: the
   // PUT goes from the extension straight to Cloud Storage, so it is refused
   // whenever the bucket CORS policy does not name the extension origin, and
   // it is the one case that sends a single Capture down both upload paths.
-  class FakeXHR {
-    constructor() { this.upload = {}; this.status = opts.putFails ? 403 : 200; this.responseText = ''; }
-    open() {}
-    setRequestHeader() {}
-    send() { setTimeout(() => this.onload && this.onload(), 0); }
-  }
 
   const sandbox = {
     chrome,
@@ -262,7 +270,6 @@ function loadServiceWorker(opts = {}) {
     btoa,
     FormData: globalThis.FormData,
     AbortController,
-    XMLHttpRequest: FakeXHR,
     console: {
       log: (...a) => logs.log.push(a.join(' ')),
       warn: (...a) => logs.warn.push(a.join(' ')),
@@ -290,6 +297,8 @@ function loadServiceWorker(opts = {}) {
 
   return {
     ...sandbox.__hammer,
+    /** #70: lets a test assert the sandbox matches MV3, which has no XHR. */
+    hasXMLHttpRequest: 'XMLHttpRequest' in sandbox,
     chrome,
     local,
     session,
