@@ -909,7 +909,10 @@ function updateUserStats(list) {
  * The token is read at call time, not reused from sign-in (#39).
  */
 async function exportProjectCaptures() {
-  const projectId = document.getElementById('activityProjectSelect').value;
+  const projectId  = document.getElementById('activityProjectSelect').value;
+  // #75: read the same control loadActivity() reads. Without this the table
+  // filters and the archive does not, and only the ZIP's contents say so.
+  const toolFilter = document.getElementById('activityToolFilter').value;
   if (!projectId) {
     showToast('Select a project first', 'error');
     return;
@@ -924,7 +927,8 @@ async function exportProjectCaptures() {
     const user = firebase.auth().currentUser;
     if (user) idToken = await user.getIdToken();
 
-    const res = await fetch(`${API_BASE}/admin/projects/${encodeURIComponent(projectId)}/export`, {
+    const qs = toolFilter ? `?tool=${encodeURIComponent(toolFilter)}` : '';
+    const res = await fetch(`${API_BASE}/admin/projects/${encodeURIComponent(projectId)}/export${qs}`, {
       headers: idToken ? { Authorization: `Bearer ${idToken}` } : {}
     });
     if (!res.ok) {
@@ -935,7 +939,9 @@ async function exportProjectCaptures() {
     const url = URL.createObjectURL(await res.blob());
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${projectId}-captures.zip`;
+    a.download = toolFilter
+      ? `${projectId}-${toolFilter.replace(/[^A-Za-z0-9._-]/g, '_')}-captures.zip`
+      : `${projectId}-captures.zip`;
     document.body.appendChild(a);
     a.click();
     a.remove();

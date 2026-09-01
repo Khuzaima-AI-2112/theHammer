@@ -126,6 +126,111 @@ describe('GET /admin/projects/:id/export', () => {
     });
   });
 
+  // #75. The Activity view filters by Tool and the export ignored it, so a
+  // filtered export handed back the whole Project. These tests state the
+  // parity the two routes should have had from the start: the same filter
+  // word means the same thing to the feed and to the archive.
+  describe('?tool= — one section of a Project', () => {
+    beforeAll(async () => {
+      await seedUpload('mix-soft-1', { uploadedAt: '2026-08-31T10:00:00.000Z', tool: '01-Super_Admin_storyboard' });
+      await seedUpload('mix-soft-2', { uploadedAt: '2026-08-31T10:05:00.000Z', tool: '01-Super_Admin_storyboard' });
+      await seedUpload('mix-brand-1', { uploadedAt: '2026-08-31T14:00:00.000Z', tool: '02-BrandCaptures' });
+      await seedUpload('mix-brand-2', { uploadedAt: '2026-08-31T14:05:00.000Z', tool: '02-BrandCaptures' });
+      await seedUpload('mix-brand-3', { uploadedAt: '2026-08-31T14:10:00.000Z', tool: '02-BrandCaptures' });
+    });
+
+    afterAll(async () => {
+      for (const id of ['mix-soft-1', 'mix-soft-2', 'mix-brand-1', 'mix-brand-2', 'mix-brand-3']) {
+        await db.collection(collections.UPLOADS).doc(id).delete();
+      }
+    });
+
+    test('exports only the filtered Tool, not the whole Project', async () => {
+      const res = await binary(
+        request(app).get('/admin/projects/persona-buyer/export?tool=02-BrandCaptures').set(ADMIN)
+      );
+      expect(res.status).toBe(200);
+      const raw = res.body.toString('latin1');
+
+      expect(raw).toContain('PNGBYTES:persona-buyer/mix-brand-1.png');
+      expect(raw).toContain('PNGBYTES:persona-buyer/mix-brand-3.png');
+      // The whole point of the issue: the other section must not be here.
+      expect(raw).not.toContain('PNGBYTES:persona-buyer/mix-soft-1.png');
+      expect(raw).not.toContain('PNGBYTES:persona-buyer/mix-soft-2.png');
+    });
+
+    test('numbers the filtered set from 001, not from its place in the Project', async () => {
+      const res = await binary(
+        request(app).get('/admin/projects/persona-buyer/export?tool=02-BrandCaptures').set(ADMIN)
+      );
+      const raw = res.body.toString('latin1');
+
+      expect(raw).toContain('001_2026-08-31T14-00-00.png');
+      expect(raw).toContain('003_2026-08-31T14-10-00.png');
+      expect(raw).not.toContain('004_');
+    });
+
+    test('the index lists the filtered Captures only', async () => {
+      const res = await binary(
+        request(app).get('/admin/projects/persona-buyer/export?tool=02-BrandCaptures').set(ADMIN)
+      );
+      const raw = res.body.toString('latin1');
+
+      expect(raw).toContain('number,file,uploadedAt,tool,stage,tabUrl');
+      expect(raw).not.toContain('01-Super_Admin_storyboard');
+    });
+
+    test('names the file after the Tool, so two sections do not collide on disk', async () => {
+      const res = await request(app)
+        .get('/admin/projects/persona-buyer/export?tool=02-BrandCaptures')
+        .set(ADMIN);
+      expect(res.headers['content-disposition'])
+        .toMatch(/^attachment; filename="persona-buyer-02-BrandCaptures-captures-\d{4}-\d{2}-\d{2}\.zip"$/);
+    });
+
+    test('404 — a Tool with no Captures, rather than an empty ZIP', async () => {
+      const res = await request(app)
+        .get('/admin/projects/persona-buyer/export?tool=no-such-tool')
+        .set(ADMIN);
+      expect(res.status).toBe(404);
+      expect(res.body.error).toMatch(/no captures/i);
+    });
+  });
+
+  // #76's escape hatch, and the reason the filter must reach the query rather
+  // than being applied to the rows after they are read. A Project over the
+  // ceiling must still export one section at a time.
+  test('the 50-Capture ceiling applies to the filtered set, not the Project', async () => {
+    const ids = [];
+    for (let i = 0; i < 26; i++) {
+      for (const tool of ['sec-A', 'sec-B']) {
+        const id = `ceil-${tool}-${String(i).padStart(3, '0')}`;
+        ids.push(id);
+        await seedUpload(id, {
+          tool,
+          uploadedAt: `2026-08-31T${String(10 + (i % 12)).padStart(2, '0')}:${String(i % 60).padStart(2, '0')}:00.000Z`
+        });
+      }
+    }
+
+    // finally, not a trailing loop: a failure here would otherwise leave 52
+    // Captures behind and break every test after it with an unrelated 400.
+    try {
+      // 52 Captures in the Project: the unfiltered export is refused.
+      const whole = await request(app).get('/admin/projects/persona-buyer/export').set(ADMIN);
+      expect(whole.status).toBe(400);
+
+      // 26 in each section: filtering is the way out, and it must work.
+      const part = await binary(
+        request(app).get('/admin/projects/persona-buyer/export?tool=sec-A').set(ADMIN)
+      );
+      expect(part.status).toBe(200);
+      expect(part.body.toString('latin1')).not.toContain('PNGBYTES:persona-buyer/ceil-sec-B-000.png');
+    } finally {
+      for (const id of ids) await db.collection(collections.UPLOADS).doc(id).delete();
+    }
+  });
+
   test('400 — refuses more than 50 Captures', async () => {
     const ids = [];
     for (let i = 0; i < 51; i++) {

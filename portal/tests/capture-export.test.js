@@ -59,6 +59,32 @@ test('the export calls the Project export route', () => {
     'the project id belongs in the path, encoded');
 });
 
+// #75. loadActivity() sends ?tool= and the export did not, so the table and
+// the archive disagreed about what the filter meant. The screen said the
+// filter had worked; only the ZIP's contents said otherwise.
+test('the export carries the Tool filter, as the activity feed does', () => {
+  const body = functionBody(APP_JS, 'exportProjectCaptures');
+
+  assert.match(body, /activityToolFilter/,
+    'the export must read the same filter control the Activity table reads');
+  assert.match(body, /encodeURIComponent\(toolFilter\)/,
+    'a Tool is free text and can hold characters that are not URL-safe');
+  assert.match(body, /\?tool=/,
+    'the route takes the filter as a tool query parameter');
+});
+
+test('the export names the download after the filter', () => {
+  const body = functionBody(APP_JS, 'exportProjectCaptures');
+
+  // Two sections of one Project both downloading as <projectId>-captures.zip
+  // means the second silently becomes a (1) copy, and the operator building
+  // the Storyboard cannot tell them apart.
+  const download = body.match(/a\.download\s*=\s*([^;]+);/);
+  assert.ok(download, 'the export must set a download file name');
+  assert.match(download[1], /toolFilter/,
+    'the file name must distinguish one Tool section from another');
+});
+
 test('the export refuses to run with no Project selected', () => {
   const body = functionBody(APP_JS, 'exportProjectCaptures');
 
