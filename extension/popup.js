@@ -91,8 +91,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (settings?.maxSize)        maxSizeInput.value     = settings.maxSize;
 
   // ── 5.16: Restore stage + tool (safe before async project load) ──
+  // #73: assigned unconditionally. Restoring only a truthy tool meant an empty
+  // stored value left whatever was in the box, so a dropped Tool looked like
+  // text that had never been typed.
   if (session?.stage) stageSelect.value = session.stage;
-  if (session?.tool)  toolInput.value   = session.tool;
+  toolInput.value = session?.tool ?? '';
 
   if (token) {
     // ── 5.17: Fire GET /config and GET /me/projects in parallel ──
@@ -102,17 +105,62 @@ document.addEventListener('DOMContentLoaded', async () => {
     setProjectSelectPlaceholder('Sign in to view projects');
   }
 
-  // ── Save session ──
+  // ── Session ──
+  //
+  // #73: every Capture — from here, the context menu or the keyboard shortcut
+  // — reads the stored Session, and the form used to reach it only when Save
+  // was pressed. So a Tool typed and not Saved was silently dropped, and a
+  // Chrome popup discards unsaved typing the moment it loses focus. That is
+  // what recorded a whole run of Captures with `tool: ""`.
+  //
+  // The form now writes as it changes. Storage stays the single source every
+  // trigger reads; it simply can no longer disagree with what is on screen.
+  // Save remains, because it is the affordance that says the setting was kept.
+  const readSessionForm = () => ({
+    projectId: projectSelect.value,
+    stage:     stageSelect.value,
+    tool:      toolInput.value.trim()
+    // userId intentionally absent — resolved server-side (5.15)
+  });
+
+  /**
+   * Always writes the whole Session: a Capture reads all three fields.
+   *
+   * The Project dropdown is filled by an async fetch, so just after the popup
+   * opens its value is the empty placeholder. Writing that blindly would store
+   * projectId: '' and the next Capture would be refused — one silent data loss
+   * traded for another. So an empty Project or Stage keeps what is already
+   * stored; only the Tool is written as-is, because clearing the Tool box is a
+   * real instruction and has to be obeyed.
+   */
+  const writeSession = async () => {
+    const { session: stored } = await chrome.storage.local.get('session');
+    const form = readSessionForm();
+    await chrome.storage.local.set({
+      session: {
+        projectId: form.projectId || stored?.projectId || '',
+        stage:     form.stage     || stored?.stage     || '',
+        tool:      form.tool
+      }
+    });
+  };
+
+  // Written on every keystroke rather than debounced. A debounce would leave a
+  // window in which the popup closes before the write lands — which is exactly
+  // the failure being fixed here, only shorter. chrome.storage.local has no
+  // write-rate quota, and a Tool is a few dozen characters.
+  const autoSaveSession = () => {
+    writeSession().catch((err) => console.error('[Hammer popup] auto-save error:', err));
+  };
+
+  toolInput.addEventListener('input', autoSaveSession);
+  stageSelect.addEventListener('change', autoSaveSession);
+  projectSelect.addEventListener('change', autoSaveSession);
+
   saveBtn.addEventListener('click', async () => {
     saveBtn.disabled = true;
-    const s = {
-      projectId: projectSelect.value,
-      stage:     stageSelect.value,
-      tool:      toolInput.value.trim()
-      // userId intentionally absent — resolved server-side (5.15)
-    };
     try {
-      await chrome.storage.local.set({ session: s });
+      await writeSession();
       setStatus('Saved ✓');
     } catch (err) {
       console.error('[Hammer popup] save error:', err);
