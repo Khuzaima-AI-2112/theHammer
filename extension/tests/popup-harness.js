@@ -226,6 +226,15 @@ function loadPopup(opts = {}) {
     fireDOMContentLoaded: async () => {
       for (const fn of docListeners.DOMContentLoaded ?? []) await fn();
     },
+    /**
+     * Dispatch a DOM event at one element, the way a person typing does.
+     * #73: the popup's session now follows the form, so a test has to be able
+     * to change a field rather than only read one.
+     */
+    fire: async (id, type, event = {}) => {
+      const node = el(id);
+      for (const fn of node.listeners[type] ?? []) await fn({ target: node, ...event });
+    },
     settle: async (ticks = 20) => {
       for (let i = 0; i < ticks; i++) await new Promise((r) => setImmediate(r));
     }
