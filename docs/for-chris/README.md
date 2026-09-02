@@ -1,7 +1,7 @@
 # Documents for Chris
 
 Written for reading rather than for building — plain English, no build detail.
-Each is here as both Markdown (readable on GitHub) and `.docx`.
+Markdown, so GitHub renders them in the browser with nothing to download.
 
 | Read | What it covers |
 |---|---|
@@ -13,6 +13,3 @@ Each is here as both Markdown (readable on GitHub) and `.docx`.
 **Note on document 02:** the copy in this repository has the invitation code
 removed. Invitation codes are live credentials and are not kept in version
 control — yours was sent to you privately. Everything else is identical.
-
-The `.docx` files are generated from the Markdown. If a document changes, the
-Markdown is the source.
