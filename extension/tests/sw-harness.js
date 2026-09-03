@@ -30,7 +30,11 @@ const EXPORTS = [
   // importScripts shim below, so its declarations are in scope here too.
   'withRetry',
   'isAuthExpired',
-  'uploadFailureNotice'
+  'uploadFailureNotice',
+  // #92: the offline queue stored a full data URL under a field named
+  // blobBase64 and the drain loop called atob() on it directly — exported so
+  // a test can assert the value actually is what its name says.
+  'blobToBase64'
 ];
 
 // captureVisibleTab has to return something capture()'s own sanity check
