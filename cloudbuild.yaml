@@ -1,3 +1,9 @@
+substitutions:
+  # Extension ids allowed to reach the backend (CORS, backend/src/index.js) and
+  # to receive tokens from the portal's sign-in redirect (portal/auth-ext.html,
+  # #80). One value, two consumers — see #36.
+  _EXTENSION_IDS: 'effbpmnbheohelnnpgpjdknofinhnagc ndmbjlbmcdlmijglkfcelbiejmghiikm'
+
 steps:
   # ── 1. Run backend tests with Firestore emulator ────────────────────────────
   - name: 'node:22-alpine'
@@ -84,7 +90,7 @@ steps:
       - '--service-account'
       - 'thehammer-backend@$PROJECT_ID.iam.gserviceaccount.com'
       - '--set-env-vars'
-      - 'NODE_ENV=production,GCS_BUCKET=thehammer-storage-2026,EXTENSION_ID=effbpmnbheohelnnpgpjdknofinhnagc ndmbjlbmcdlmijglkfcelbiejmghiikm,ADMIN_ORIGIN=https://thehammer-portal-282689937365.northamerica-northeast1.run.app'
+      - 'NODE_ENV=production,GCS_BUCKET=thehammer-storage-2026,EXTENSION_ID=$_EXTENSION_IDS,ADMIN_ORIGIN=https://thehammer-portal-282689937365.northamerica-northeast1.run.app'
 
   # ── 5a. Inject backend URL into Portal ──────────────────────────────────────
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
@@ -101,10 +107,25 @@ steps:
         # No /api prefix: the backend mounts every route at the root (#26, #31).
         sed -i "s|__BACKEND_API_URL__|$$BACKEND_URL|g" portal/app.js
 
+  # ── 5b. Inject allowed extension ids into Portal ────────────────────────────
+  # auth-ext.html validates redirect_uri against this list before handing out
+  # Firebase tokens (#80). Same list the backend just deployed with — one
+  # source of truth, declared in `substitutions:` above.
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'inject-extension-ids'
+    waitFor: ['deploy-backend']
+    entrypoint: bash
+    args:
+      - '-c'
+      - |
+        set -euo pipefail
+        echo "Injecting extension ids: $_EXTENSION_IDS"
+        sed -i "s|__EXTENSION_IDS__|$_EXTENSION_IDS|g" portal/auth-ext.html
+
   # ── 6. Build portal image ───────────────────────────────────────────────────
   - name: 'gcr.io/cloud-builders/docker'
     id: 'build-portal'
-    waitFor: ['inject-backend-url']
+    waitFor: ['inject-backend-url', 'inject-extension-ids']
     args:
       - 'build'
       - '-t'
