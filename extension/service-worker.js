@@ -28,7 +28,11 @@
 
 // CAPTURE response contract (authoritative):
 // { ok: boolean, path?: string, reason?: string, error?: string }
-// reason values: 'blocked' | 'no_api_key' | 'no_project'
+// reason values, one per refusal capture() can return (#72 — these used to all
+// collapse onto a bare `null`, which every caller mapped to 'blocked' and
+// popup.js rendered as "set Project & save first" even when that was false):
+//   'no_project' | 'restricted_page' | 'invalid_screenshot' |
+//   'blob_conversion_failed' | 'cancelled' | 'queued' | 'no_api_key' | 'unauthorized'
 
 // #39: refreshFirebaseToken()/authedFetch() live in auth.js because the popup
 // needs them too and the extension has no bundler. importScripts is synchronous
@@ -608,9 +612,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   tabPromise
     .then((tab) => capture(tab))
     .then((result) => {
-      if (result === null)          sendResponse({ ok: false, reason: 'blocked' });
-      else if (result.reason)       sendResponse({ ok: false, reason: result.reason });
-      else                          sendResponse({ ok: true, path: result.path });
+      // #72: capture() always returns { reason } or { path } now, never a bare
+      // null — so there is exactly one value per refusal to map, not one for
+      // all of them.
+      if (result.reason)  sendResponse({ ok: false, reason: result.reason });
+      else                 sendResponse({ ok: true, path: result.path });
     })
     .catch((err) => sendResponse({ ok: false, error: err.message }));
 
@@ -623,7 +629,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 // flags the caller wants alongside it, such as { fellBack: true } for ACT-03.
 // ─────────────────────────────────────────────────────────────────
 function captureReply(result, extra = {}) {
-  if (result === null)    return { ok: false, reason: 'blocked', ...extra };
   if (result.reason)      return { ok: false, reason: result.reason, ...extra };
   return { ok: true, path: result.path, ...extra };
 }
@@ -640,7 +645,7 @@ async function capture(tab, rect = null, dpr = 1, preCapturedDataUrl = null) {
       tab.url.startsWith('edge://') ||
       tab.url.startsWith('about:')) {
     await showNotification('Cannot capture this page', 'Navigate to a normal web page first.');
-    return null;
+    return { reason: 'restricted_page' };
   }
 
   const { settings } = await chrome.storage.local.get('settings');
@@ -656,7 +661,7 @@ async function capture(tab, rect = null, dpr = 1, preCapturedDataUrl = null) {
   if (!session || !session.projectId) {
     await showNotification('Project not set',
       'Open the popup, select a Project and press Save before capturing.');
-    return null;
+    return { reason: 'no_project' };
   }
 
   // 10.1: Context Engine Auto-tagging
@@ -718,7 +723,7 @@ async function capture(tab, rect = null, dpr = 1, preCapturedDataUrl = null) {
 
   if (!dataUrl.startsWith('data:image/png;base64,') || dataUrl.length < 10000) {
     await showNotification('Capture failed', 'Screenshot data looks invalid. Try again.');
-    return null;
+    return { reason: 'invalid_screenshot' };
   }
 
   // 10.2: Crop to element if rect provided
@@ -750,7 +755,7 @@ async function capture(tab, rect = null, dpr = 1, preCapturedDataUrl = null) {
       });
       if (blurRes && blurRes.dataUrl === null) {
         console.log('[Hammer SW] Capture cancelled by user during blur');
-        return null;
+        return { reason: 'cancelled' };
       }
       if (blurRes && blurRes.dataUrl) {
         dataUrl = blurRes.dataUrl;
@@ -763,7 +768,7 @@ async function capture(tab, rect = null, dpr = 1, preCapturedDataUrl = null) {
   const blob = await fetch(dataUrl).then((r) => r.blob());
   if (!(blob instanceof Blob) || blob.type !== 'image/png' || blob.size === 0) {
     await showNotification('Capture failed', 'Could not convert screenshot to PNG blob.');
-    return null;
+    return { reason: 'blob_conversion_failed' };
   }
 
   console.log('[Hammer SW] captured PNG ✓ | size:', blob.size, '| project:', session.projectId);
@@ -789,7 +794,7 @@ async function capture(tab, rect = null, dpr = 1, preCapturedDataUrl = null) {
     await queueAdd(base64, session, tab.url, semanticData);
     const notice = uploadFailureNotice(uploadErr);
     await showNotification(notice.title, notice.message);
-    return null;
+    return { reason: 'queued' };
   }
 
   // Update session state with the real GCS path
