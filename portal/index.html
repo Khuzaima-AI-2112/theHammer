@@ -538,7 +538,13 @@
           <span id="storyboardNarrativeStatus" class="muted"></span>
         </div>
         <div id="storyboardNarrativeError" class="form-error" style="display:none"></div>
-        <div id="storyboardNarrativeText" class="storyboard-narrative-text" style="display:none"></div>
+        <div id="storyboardNarrativeTextWrap" class="storyboard-narrative-text-wrap" style="display:none">
+          <label class="form-label" for="storyboardNarrativeText">Narrative (edit freely — regenerating replaces this)</label>
+          <textarea class="form-input storyboard-narrative-textarea" id="storyboardNarrativeText" rows="12"></textarea>
+          <div class="storyboard-narrative-actions">
+            <button class="btn btn-ghost" id="storyboardNarrativeSaveEditBtn" type="button" onclick="saveStoryboardNarrativeEdit()">Save edit</button>
+          </div>
+        </div>
       </div>
     </section>
 

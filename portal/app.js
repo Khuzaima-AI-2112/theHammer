@@ -1140,6 +1140,7 @@ async function buildStoryboard() {
   try {
     if (activeStoryboardNarrativePoller) clearInterval(activeStoryboardNarrativePoller);
     document.getElementById('storyboardNarrativePrompt').value = '';
+    delete document.getElementById('storyboardNarrativeText').dataset.loadedText;
     storyboardDraft = await apiFetch(`/admin/projects/${encodeURIComponent(projectId)}/storyboards`, { method: 'POST' });
     showView('storyboard');
     renderStoryboardDraft();
@@ -1198,10 +1199,19 @@ function renderStoryboardDraft() {
  * Reflects storyboardDraft's narrativeStatus/narrativeText/narrativeError.
  * The prompt textarea is only pre-filled from the draft the first time it
  * renders empty — typing should never be clobbered by a background poll.
+ *
+ * The narrative textarea is the same: it's only overwritten from the server
+ * value when that value has actually changed since the last sync (tracked
+ * via dataset.loadedText). A background poll re-rendering with the *same*
+ * server text — the common case while an Analyst is mid-edit — leaves the
+ * textarea alone. A regeneration finishing with *new* text does overwrite
+ * it, which is the point (#87): regeneration explicitly replaces the
+ * narrative, including an edit that hadn't been saved.
  */
 function renderStoryboardNarrative() {
   const statusEl = document.getElementById('storyboardNarrativeStatus');
   const errorEl  = document.getElementById('storyboardNarrativeError');
+  const textWrap = document.getElementById('storyboardNarrativeTextWrap');
   const textEl   = document.getElementById('storyboardNarrativeText');
   const btn      = document.getElementById('storyboardGenerateBtn');
   const promptEl = document.getElementById('storyboardNarrativePrompt');
@@ -1226,22 +1236,33 @@ function renderStoryboardNarrative() {
     errorEl.style.display = 'none';
   }
 
-  if (narrativeStatus === 'done' && storyboardDraft.narrativeText) {
-    textEl.textContent = storyboardDraft.narrativeText;
-    textEl.style.display = '';
+  if (narrativeStatus === 'done' && storyboardDraft.narrativeText != null) {
+    if (textEl.dataset.loadedText !== storyboardDraft.narrativeText) {
+      textEl.value = storyboardDraft.narrativeText;
+      textEl.dataset.loadedText = storyboardDraft.narrativeText;
+    }
+    textWrap.style.display = '';
   } else {
-    textEl.style.display = 'none';
+    textWrap.style.display = 'none';
   }
 }
 
 /** POSTs the typed prompt, then polls GET /admin/storyboards/:id until the
- * generation settles — same "queue, then poll" shape as the Reports view. */
+ * generation settles — same "queue, then poll" shape as the Reports view.
+ * Regenerating over an existing narrative is confirmed first (#87) — it
+ * replaces the current text, including any unsaved edit, and that must
+ * never happen as a side effect the Analyst didn't ask for. */
 async function generateStoryboardNarrative() {
   if (!storyboardDraft) return;
   const prompt = document.getElementById('storyboardNarrativePrompt').value.trim();
   if (!prompt) {
     showToast('Type a prompt first', 'error');
     return;
+  }
+
+  if (storyboardDraft.narrativeText) {
+    const proceed = confirm('Regenerating replaces the current narrative, including any unsaved edits. Continue?');
+    if (!proceed) return;
   }
 
   try {
@@ -1253,6 +1274,32 @@ async function generateStoryboardNarrative() {
     startStoryboardNarrativePolling(storyboardDraft.id);
   } catch (err) {
     showToast(`Failed to start narrative generation: ${err.message}`, 'error');
+  }
+}
+
+/** PATCHes the hand-edited narrative text directly — #87's review/edit step.
+ * Only reachable once a narrative exists (the textarea is hidden until
+ * then), matching the backend's rejection of an edit with nothing to edit. */
+async function saveStoryboardNarrativeEdit() {
+  if (!storyboardDraft) return;
+  const textEl = document.getElementById('storyboardNarrativeText');
+  const btn = document.getElementById('storyboardNarrativeSaveEditBtn');
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Saving…';
+
+  try {
+    storyboardDraft = await apiFetch(`/admin/storyboards/${encodeURIComponent(storyboardDraft.id)}/narrative`, {
+      method: 'PATCH',
+      body: JSON.stringify({ narrativeText: textEl.value })
+    });
+    renderStoryboardNarrative();
+    showToast('Narrative saved', 'success');
+  } catch (err) {
+    showToast(`Failed to save narrative edit: ${err.message}`, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = label;
   }
 }
 

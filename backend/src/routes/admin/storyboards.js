@@ -23,8 +23,17 @@
  * eventual PDF/video finalization, which does become a `reports` doc; the
  * narrative that feeds it does not need to).
  *
- * Review/edit (#87), audio input (#88), and finalizing into a PDF (#89) are
- * separate tickets and do not live here.
+ * Narrative review/edit (#87)  —  PATCH /admin/storyboards/:id/narrative lets
+ * an Analyst correct the generated text by hand. It only accepts an edit once
+ * a narrative exists (narrativeText is non-null, i.e. status has reached
+ * `done` at least once) — there is nothing sensible to edit before that, so a
+ * PATCH on a draft with no narrative yet is rejected rather than silently
+ * writing into a field the rest of the flow doesn't expect populated yet. A
+ * hand edit only moves aside when the Analyst explicitly triggers
+ * regeneration (POST, above) — nothing else overwrites it.
+ *
+ * Audio input (#88) and finalizing into a PDF (#89) are separate tickets and
+ * do not live here.
  *
  * Auth: requireAnalyst, not requireAdmin like exports.js/activity.js — #85's
  * own acceptance criteria call for Analyst-and-above, matching the gate
@@ -51,6 +60,10 @@ const BUCKET = process.env.GCS_BUCKET || 'thehammer-storage-2026';
 // Prompts are typed by hand on one draft, not machine-generated — 4000
 // characters is generous headroom without inviting a pasted document.
 const MAX_PROMPT_LENGTH = 4000;
+
+// A hand-edited narrative is still hand-typed text, just longer — generous
+// headroom for a multi-slide narrative without inviting a pasted document.
+const MAX_NARRATIVE_LENGTH = 20000;
 
 // Same lifetime as the Activity view's thumbnails (activity.js) — the
 // curation screen is the same kind of "look at pictures for a while" UI.
@@ -368,6 +381,41 @@ router.post('/storyboards/:id/narrative', requireAnalyst, async (req, res, next)
 
     const queuedSnap = await ref.get();
     return res.status(202).json(await enrichWithSignedUrls(serializeDraft(queuedSnap)));
+  } catch (err) { next(err); }
+});
+
+router.patch('/storyboards/:id/narrative', requireAnalyst, async (req, res, next) => {
+  try {
+    const ref = db.collection(collections.STORYBOARD_DRAFTS).doc(req.params.id);
+    const snap = await ref.get();
+    if (!snap.exists) {
+      return res.status(404).json({ error: 'storyboard draft not found' });
+    }
+    const existing = snap.data();
+    if (existing.workspaceId !== req.hammerUser.workspaceId) {
+      return res.status(403).json({ error: 'Forbidden: draft belongs to another workspace' });
+    }
+
+    // Nothing to correct before a narrative has ever finished generating —
+    // an edit here would write into a field the rest of the flow doesn't
+    // expect populated yet, so it's refused explicitly rather than accepted.
+    if (existing.narrativeText == null) {
+      return res.status(400).json({ error: 'draft has no generated narrative to edit yet' });
+    }
+
+    const narrativeText = req.body?.narrativeText;
+    if (typeof narrativeText !== 'string') {
+      return res.status(400).json({ error: 'narrativeText must be a string' });
+    }
+    if (narrativeText.length > MAX_NARRATIVE_LENGTH) {
+      return res.status(400).json({ error: `narrativeText must be ${MAX_NARRATIVE_LENGTH} characters or fewer` });
+    }
+
+    await ref.update({ narrativeText, updatedAt: nowISO() });
+
+    const updatedSnap = await ref.get();
+    const draft = await enrichWithSignedUrls(serializeDraft(updatedSnap));
+    return res.json(draft);
   } catch (err) { next(err); }
 });
 

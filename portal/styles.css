@@ -746,10 +746,15 @@
     .storyboard-narrative-actions span.muted { color: var(--color-text-muted); font-size: var(--text-xs); }
     .storyboard-narrative textarea { width: 100%; margin: var(--space-3) 0; resize: vertical; }
     .storyboard-narrative-actions { display: flex; align-items: center; gap: var(--space-3); }
-    .storyboard-narrative-text {
+    .storyboard-narrative-text-wrap {
       margin-top: var(--space-4);
-      padding: var(--space-4);
+      padding-top: var(--space-4);
       border-top: 1px solid var(--color-border);
-      white-space: pre-wrap;
+    }
+    .storyboard-narrative-textarea {
+      width: 100%;
+      min-height: 220px;
+      resize: vertical;
       line-height: 1.6;
+      margin: var(--space-2) 0 var(--space-3);
     }

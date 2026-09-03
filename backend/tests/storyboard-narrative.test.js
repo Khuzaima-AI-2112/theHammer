@@ -226,4 +226,127 @@ describe('POST /admin/storyboards/:id/narrative', () => {
     expect(settled.narrativeError).toBe('Vertex AI is unavailable');
     expect(settled.narrativeText).toBeNull();
   });
+
+  test('regeneration replaces the narrative, including a hand edit made after the first run', async () => {
+    await request(app)
+      .post(`/admin/storyboards/${draft.id}/narrative`)
+      .set(HEADERS.analyst)
+      .send({ prompt: 'First pass.' });
+    const first = await pollUntilSettled(draft.id);
+    expect(first.narrativeText).toBe('Canned narrative: the Analyst opened the campaign, then saved it.');
+
+    await request(app)
+      .patch(`/admin/storyboards/${draft.id}/narrative`)
+      .set(HEADERS.analyst)
+      .send({ narrativeText: 'A hand-edited correction.' });
+
+    const client = getAIClient();
+    client.models.generateContent.mockResolvedValueOnce({ text: 'Second pass narrative.' });
+
+    await request(app)
+      .post(`/admin/storyboards/${draft.id}/narrative`)
+      .set(HEADERS.analyst)
+      .send({ prompt: 'Second pass.' });
+
+    const second = await pollUntilSettled(draft.id);
+    expect(second.narrativeText).toBe('Second pass narrative.');
+    expect(second.narrativeText).not.toBe('A hand-edited correction.');
+  });
+});
+
+describe('PATCH /admin/storyboards/:id/narrative', () => {
+  let draft;
+
+  beforeEach(async () => {
+    await seedUpload('edit-cap-a', 'narrative-proj', { uploadedAt: '2026-09-01T09:00:00.000Z' });
+    draft = await createDraft('narrative-proj');
+  });
+
+  afterEach(async () => {
+    await db.collection(collections.UPLOADS).doc('edit-cap-a').delete();
+    await db.collection(collections.STORYBOARD_DRAFTS).doc(draft.id).delete();
+  });
+
+  test('404 — no such draft', async () => {
+    const res = await request(app)
+      .patch('/admin/storyboards/no-such-draft/narrative')
+      .set(HEADERS.analyst)
+      .send({ narrativeText: 'Edited.' });
+    expect(res.status).toBe(404);
+  });
+
+  test('403 — draft belongs to another workspace', async () => {
+    const foreignRef = db.collection(collections.STORYBOARD_DRAFTS).doc();
+    await foreignRef.set({
+      projectId: 'narrative-proj-foreign',
+      workspaceId: 'other-workspace',
+      status: 'draft',
+      captures: [],
+      narrativeStatus: 'done',
+      narrativeText: 'Existing text.',
+      createdBy: 'someone-else',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      schemaVersion: 1,
+    });
+
+    const res = await request(app)
+      .patch(`/admin/storyboards/${foreignRef.id}/narrative`)
+      .set(HEADERS.analyst)
+      .send({ narrativeText: 'Edited.' });
+    expect(res.status).toBe(403);
+    await foreignRef.delete();
+  });
+
+  test('403 — a plain user cannot edit the narrative', async () => {
+    const res = await request(app)
+      .patch(`/admin/storyboards/${draft.id}/narrative`)
+      .set(HEADERS.user)
+      .send({ narrativeText: 'Edited.' });
+    expect(res.status).toBe(403);
+  });
+
+  test('400 — editing a draft with no narrative yet is rejected, not silently accepted', async () => {
+    const res = await request(app)
+      .patch(`/admin/storyboards/${draft.id}/narrative`)
+      .set(HEADERS.analyst)
+      .send({ narrativeText: 'There is nothing to edit yet.' });
+    expect(res.status).toBe(400);
+
+    const getRes = await request(app).get(`/admin/storyboards/${draft.id}`).set(HEADERS.analyst);
+    expect(getRes.body.narrativeText).toBeNull();
+  });
+
+  test('400 — narrativeText must be a string', async () => {
+    await request(app)
+      .post(`/admin/storyboards/${draft.id}/narrative`)
+      .set(HEADERS.analyst)
+      .send({ prompt: 'Generate first.' });
+    await pollUntilSettled(draft.id);
+
+    const res = await request(app)
+      .patch(`/admin/storyboards/${draft.id}/narrative`)
+      .set(HEADERS.analyst)
+      .send({ narrativeText: 12345 });
+    expect(res.status).toBe(400);
+  });
+
+  test('an edit persists and survives a re-fetch of the draft', async () => {
+    await request(app)
+      .post(`/admin/storyboards/${draft.id}/narrative`)
+      .set(HEADERS.analyst)
+      .send({ prompt: 'Generate first.' });
+    await pollUntilSettled(draft.id);
+
+    const patchRes = await request(app)
+      .patch(`/admin/storyboards/${draft.id}/narrative`)
+      .set(HEADERS.analyst)
+      .send({ narrativeText: 'The Analyst corrected the wrong claim by hand.' });
+    expect(patchRes.status).toBe(200);
+    expect(patchRes.body.narrativeText).toBe('The Analyst corrected the wrong claim by hand.');
+    expect(patchRes.body.narrativeStatus).toBe('done');
+
+    const getRes = await request(app).get(`/admin/storyboards/${draft.id}`).set(HEADERS.analyst);
+    expect(getRes.body.narrativeText).toBe('The Analyst corrected the wrong claim by hand.');
+  });
 });

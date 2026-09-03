@@ -112,10 +112,10 @@ test('startStoryboardNarrativePolling polls through apiFetch, not a raw fetch', 
   assert.match(body, /clearInterval/, 'polling must stop once the draft settles to done/error');
 });
 
-test('renderStoryboardNarrative writes generated text via textContent, not innerHTML', () => {
+test('renderStoryboardNarrative writes generated text via a textarea value, not innerHTML', () => {
   const body = functionBody(APP_JS, 'renderStoryboardNarrative');
 
-  assert.match(body, /textEl\.textContent\s*=\s*storyboardDraft\.narrativeText/,
+  assert.match(body, /textEl\.value\s*=\s*storyboardDraft\.narrativeText/,
     'AI-generated text is untrusted and must never be assigned through innerHTML');
   assert.doesNotMatch(body, /innerHTML/, 'renderStoryboardNarrative must not use innerHTML');
 });
@@ -124,4 +124,38 @@ test('the Storyboard view has a prompt input and a generate action wired to gene
   assert.match(INDEX_HTML, /id="storyboardNarrativePrompt"/, 'an Analyst must be able to type a prompt');
   assert.match(INDEX_HTML, /onclick="generateStoryboardNarrative\(\)"/,
     'the narrative section must offer a way to trigger generation');
+});
+
+// Narrative review and edit (#87)
+
+test('generateStoryboardNarrative confirms before regenerating over an existing narrative', () => {
+  const body = functionBody(APP_JS, 'generateStoryboardNarrative');
+
+  assert.match(body, /storyboardDraft\.narrativeText/,
+    'generation must check for an existing narrative before regenerating');
+  assert.match(body, /confirm\(/,
+    'regenerating replaces the current narrative (including unsaved edits) and must be confirmed, not silent');
+});
+
+test('saveStoryboardNarrativeEdit calls apiFetch, not a raw fetch', () => {
+  const body = functionBody(APP_JS, 'saveStoryboardNarrativeEdit');
+
+  assert.match(body, /apiFetch\(/, 'saveStoryboardNarrativeEdit must go through apiFetch to get a fresh token');
+  assert.doesNotMatch(body, /\bfetch\(/, 'saveStoryboardNarrativeEdit must not call fetch() directly');
+});
+
+test('saveStoryboardNarrativeEdit PATCHes the edited text to the draft-scoped narrative route', () => {
+  const body = functionBody(APP_JS, 'saveStoryboardNarrativeEdit');
+
+  assert.match(body, /\/admin\/storyboards\/\$\{encodeURIComponent\(storyboardDraft\.id\)\}\/narrative/,
+    'the draft id belongs in the path, encoded');
+  assert.match(body, /method:\s*'PATCH'/, 'editing an existing narrative is a PATCH, not a POST');
+  assert.match(body, /narrativeText:\s*textEl\.value/, 'the edited text must be sent in the body');
+});
+
+test('the Storyboard view has an editable narrative textarea and a save-edit action', () => {
+  assert.match(INDEX_HTML, /id="storyboardNarrativeText"[^>]*>[\s\S]{0,20}<\/textarea>/,
+    'the generated narrative must be shown in an editable <textarea>, not read-only text');
+  assert.match(INDEX_HTML, /onclick="saveStoryboardNarrativeEdit\(\)"/,
+    'the narrative section must offer a way to save a hand edit');
 });
