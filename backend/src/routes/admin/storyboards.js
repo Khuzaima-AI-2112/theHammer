@@ -66,6 +66,26 @@
  * generateNarrative() calls Vertex AI in-process, keeps this route testable
  * the same way.
  *
+ * Generate a narrated video (#90)  —  POST /admin/storyboards/:id/video is a
+ * separate, explicit action from finalizing — never triggered alongside the
+ * PDF, since Shotstack bills per render. It requires a *finalized* PDF to
+ * already exist (a `reports` doc with reportType 'storyboard' and
+ * status 'done' for this draft), not just a completed narrative — checked by
+ * querying `reports` on storyboardDraftId alone (a single-field filter,
+ * always indexed) and filtering reportType/status in memory, the same
+ * "avoid a composite index this repo hasn't deployed" caution
+ * GET /admin/projects/:id/export already documents.
+ *
+ * The audio track is always synthesized from narrativeText via Vertex AI
+ * text-to-speech — never the operator's raw recording from #88, even when
+ * one exists; #88's recording was only ever a route to a typed prompt, and
+ * playing it back would defeat the point of a narrative someone read over. A
+ * Shotstack timeline (ordered image assets, the synthesized audio,
+ * transitions) is posted to Shotstack's /render, which theHammer has no
+ * queue/worker to be notified from — see lib/shotstack.js's header for how
+ * status instead gets refreshed by polling, lazily, from the Reports view
+ * that already polls for the PDF.
+ *
  * Auth: requireAnalyst, not requireAdmin like exports.js/activity.js — #85's
  * own acceptance criteria call for Analyst-and-above, matching the gate
  * reports.js already uses. It admits Admin too, since `admin` (4) outranks
@@ -83,6 +103,7 @@ const logger = require('../../lib/logger');
 const { db } = require('../../lib/firestore');
 const { requireAnalyst } = require('../../middleware/requireAuth');
 const { getAIClient } = require('../../lib/vertex');
+const { submitRender } = require('../../lib/shotstack');
 const collections = require('../../lib/collections');
 
 const router = express.Router();
@@ -188,19 +209,35 @@ const MAX_NARRATIVE_LENGTH = 20000;
 // curation screen is the same kind of "look at pictures for a while" UI.
 const SIGNED_URL_TTL_MS = 15 * 60 * 1000;
 
+// Shotstack fetches every asset once, promptly after /render is called, but
+// a render queue can back up — an hour is generous headroom against the
+// thumbnail TTL above, which is sized for a person looking at a screen.
+const VIDEO_ASSET_SIGNED_URL_TTL_MS = 60 * 60 * 1000;
+
+// gemini-2.5-flash-preview-tts is Vertex AI's text-to-speech model — chosen
+// so speech synthesis stays on the same getAIClient() (lib/vertex.js) every
+// other AI call in this file already uses, rather than introducing a
+// dedicated TTS vendor. The AC leaves the provider unspecified.
+const TTS_MODEL = 'gemini-2.5-flash-preview-tts';
+const TTS_VOICE = 'Kore';
+
+// One slide holds the screen this many seconds before the next transition —
+// long enough to read a note aloud without the video dragging.
+const VIDEO_SLIDE_SECONDS = 4;
+
 function nowISO() { return new Date().toISOString(); }
 
 function isoOf(value) {
   return value instanceof Timestamp ? value.toDate().toISOString() : value;
 }
 
-async function makeSignedUrl(gcsPath) {
+async function makeSignedUrl(gcsPath, ttlMs = SIGNED_URL_TTL_MS) {
   if (!gcsPath) return null;
   try {
     const [url] = await storage.bucket(BUCKET).file(gcsPath).getSignedUrl({
       version: 'v4',
       action: 'read',
-      expires: Date.now() + SIGNED_URL_TTL_MS,
+      expires: Date.now() + ttlMs,
     });
     return url;
   } catch (_) {
@@ -749,9 +786,173 @@ router.post('/storyboards/:id/finalize', requireAnalyst, async (req, res, next) 
   } catch (err) { next(err); }
 });
 
+/**
+ * Wraps raw PCM samples in a minimal 44-byte WAV header. Vertex AI's TTS
+ * models hand back headerless PCM (their `inlineData.mimeType` names the
+ * sample rate, e.g. `audio/L16;rate=24000`) — a WAV container is what makes
+ * that playable by anything downstream, Shotstack included.
+ */
+function pcmToWav(pcmBuffer, sampleRate, channels = 1, bitsPerSample = 16) {
+  const byteRate = (sampleRate * channels * bitsPerSample) / 8;
+  const blockAlign = (channels * bitsPerSample) / 8;
+  const header = Buffer.alloc(44);
+  header.write('RIFF', 0, 'ascii');
+  header.writeUInt32LE(36 + pcmBuffer.length, 4);
+  header.write('WAVE', 8, 'ascii');
+  header.write('fmt ', 12, 'ascii');
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20); // PCM
+  header.writeUInt16LE(channels, 22);
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(byteRate, 28);
+  header.writeUInt16LE(blockAlign, 32);
+  header.writeUInt16LE(bitsPerSample, 34);
+  header.write('data', 36, 'ascii');
+  header.writeUInt32LE(pcmBuffer.length, 40);
+  return Buffer.concat([header, pcmBuffer]);
+}
+
+/**
+ * Synthesizes narrationText into a WAV buffer via Vertex AI text-to-speech —
+ * always the finalized narrative, never #88's raw recording (playing back
+ * an operator's own voice would defeat the point of a narrative someone
+ * wrote/edited to be read aloud).
+ *
+ * Exported for direct testing, same reasoning as buildNarrativeRequest.
+ */
+async function synthesizeNarration(narrationText) {
+  const client = getAIClient();
+  const resp = await client.models.generateContent({
+    model: TTS_MODEL,
+    contents: [{ role: 'user', parts: [{ text: narrationText }] }],
+    config: {
+      responseModalities: ['AUDIO'],
+      speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: TTS_VOICE } } },
+    },
+  });
+
+  const part = resp?.candidates?.[0]?.content?.parts?.[0];
+  const base64Audio = part?.inlineData?.data;
+  if (!base64Audio) {
+    throw new Error('text-to-speech returned no audio');
+  }
+
+  const mimeType = part.inlineData.mimeType || '';
+  const sampleRate = Number(/rate=(\d+)/.exec(mimeType)?.[1]) || 24000;
+  return pcmToWav(Buffer.from(base64Audio, 'base64'), sampleRate);
+}
+
+/**
+ * Builds the Shotstack timeline: one image clip per curated Capture URL, in
+ * the order given, laid end to end with a fade transition, plus the
+ * narration as the timeline's soundtrack. Takes already-resolved asset URLs
+ * rather than Captures themselves, so the curated-order guarantee can be
+ * tested directly without a GCS or Shotstack double.
+ *
+ * Exported for direct testing, same reasoning as buildNarrativeRequest.
+ */
+function buildShotstackTimeline(imageUrls, audioUrl) {
+  let start = 0;
+  const clips = imageUrls.map((src) => {
+    const clip = {
+      asset: { type: 'image', src },
+      start,
+      length: VIDEO_SLIDE_SECONDS,
+      fit: 'contain',
+      transition: { in: 'fade', out: 'fade' },
+    };
+    start += VIDEO_SLIDE_SECONDS;
+    return clip;
+  });
+
+  return {
+    timeline: {
+      soundtrack: { src: audioUrl, effect: 'fadeOut' },
+      tracks: [{ clips }],
+    },
+    output: { format: 'mp4', resolution: 'sd' },
+  };
+}
+
+router.post('/storyboards/:id/video', requireAnalyst, async (req, res, next) => {
+  try {
+    const loaded = await loadOwnedDraft(req, res);
+    if (!loaded) return;
+    const { existing, snap } = loaded;
+
+    if (existing.narrativeStatus !== 'done') {
+      return res.status(400).json({ error: 'draft has no completed narrative' });
+    }
+
+    // "From a finalized Storyboard" (#90) means a finalized PDF (#89) must
+    // already exist — a completed narrative alone isn't enough. Filtered by
+    // storyboardDraftId, a single-field (always-indexed) query, with
+    // reportType/status checked in memory rather than adding a composite
+    // index this repo hasn't deployed.
+    const reportsSnap = await db.collection(collections.REPORTS)
+      .where('storyboardDraftId', '==', req.params.id)
+      .get();
+    const finalizedPdf = reportsSnap.docs
+      .map((d) => d.data())
+      .find((r) => r.reportType === 'storyboard' && r.status === 'done');
+    if (!finalizedPdf) {
+      return res.status(400).json({ error: 'Storyboard has not been finalized into a PDF yet' });
+    }
+
+    const draft = serializeDraft(snap);
+    const included = [...draft.captures].filter((c) => c.included).sort((a, b) => a.order - b.order);
+
+    const reportRef = await db.collection(collections.REPORTS).add({
+      projectId: draft.projectId,
+      reportType: 'storyboard-video',
+      dateRange: null,
+      status: 'queued',
+      gcsPath: null,
+      storyboardDraftId: draft.id,
+      shotstackRenderId: null,
+      requestedBy: req.hammerUser.id,
+      createdAt: nowISO(),
+      updatedAt: nowISO(),
+      schemaVersion: 1,
+    });
+
+    try {
+      const narrationBuffer = await synthesizeNarration(draft.narrativeText);
+      const audioPath = `${draft.projectId}/reports/${reportRef.id}/narration.wav`;
+      await storage.bucket(BUCKET).file(audioPath).save(narrationBuffer, {
+        metadata: { contentType: 'audio/wav' },
+      });
+      const audioUrl = await makeSignedUrl(audioPath, VIDEO_ASSET_SIGNED_URL_TTL_MS);
+
+      const uploadRefs = included.map((c) => db.collection(collections.UPLOADS).doc(c.captureId));
+      const uploadSnaps = uploadRefs.length > 0 ? await db.getAll(...uploadRefs) : [];
+      const uploadById = {};
+      uploadSnaps.forEach((s) => { if (s.exists) uploadById[s.id] = s.data(); });
+      const imageUrls = await Promise.all(included.map((c) => {
+        const upload = uploadById[c.captureId];
+        return makeSignedUrl(upload?.gcsPath ?? upload?.path ?? null, VIDEO_ASSET_SIGNED_URL_TTL_MS);
+      }));
+
+      const timeline = buildShotstackTimeline(imageUrls, audioUrl);
+      const renderId = await submitRender(timeline);
+
+      await reportRef.update({ status: 'processing', shotstackRenderId: renderId, updatedAt: nowISO() });
+    } catch (err) {
+      logger.error(`[Storyboard Video] generation failed for draft ${req.params.id}:`, err);
+      await reportRef.update({ status: 'error', error: err.message, updatedAt: nowISO() });
+      return res.status(500).json({ error: 'Failed to start video generation' });
+    }
+
+    const reportSnap = await reportRef.get();
+    return res.status(201).json({ id: reportSnap.id, ...reportSnap.data() });
+  } catch (err) { next(err); }
+});
+
 router.buildNarrativeRequest = buildNarrativeRequest;
 router.buildTranscriptionRequest = buildTranscriptionRequest;
 router.buildStoryboardPdf = buildStoryboardPdf;
+router.synthesizeNarration = synthesizeNarration;
+router.buildShotstackTimeline = buildShotstackTimeline;
 router.generateNarrative = generateNarrative;
 
 module.exports = router;

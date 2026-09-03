@@ -6,6 +6,7 @@ const logger = require('../../lib/logger');
 const express = require('express');
 const { db } = require('../../lib/firestore');
 const { requireAnalyst } = require('../../middleware/requireAuth');
+const { refreshVideoReportStatus } = require('../../lib/shotstack');
 const collections = require('../../lib/collections');
 // Use the Cloud Tasks library if configured, else invoke worker directly (MVP)
 // const { CloudTasksClient } = require('@google-cloud/tasks');
@@ -71,10 +72,16 @@ router.post('/reports/generate', requireAnalyst, analystReportLimiter, async (re
 // GET /reports/:id/status
 router.get('/reports/:id/status', requireAnalyst, async (req, res, next) => {
   try {
-    const snap = await db.collection(collections.REPORTS).doc(req.params.id).get();
+    const ref = db.collection(collections.REPORTS).doc(req.params.id);
+    const snap = await ref.get();
     if (!snap.exists) return res.status(404).json({ error: 'report not found' });
-    
-    const data = snap.data();
+
+    // A `storyboard-video` report's status lives on Shotstack, not in
+    // Firestore, until this checks and (if the render has finished since
+    // the last poll) persists it — see lib/shotstack.js. Every other
+    // reportType passes through unchanged.
+    const data = await refreshVideoReportStatus(ref, snap.data());
+
     return res.json({
       status: data.status,
       gcsPath: data.gcsPath || null,
@@ -97,8 +104,16 @@ router.get('/reports', requireAnalyst, async (req, res, next) => {
       .where('projectId', '==', projectId)
       .orderBy('createdAt', 'desc')
       .get();
-      
-    const reports = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+    // A visit to the list is also a chance to catch up any `storyboard-video`
+    // row still `processing` — otherwise a video that finished while the
+    // Analyst was away shows stale until something else happens to poll its
+    // individual status. refreshVideoReportStatus() is a no-op for every row
+    // that isn't exactly that case.
+    const reports = await Promise.all(snap.docs.map(async (d) => {
+      const data = await refreshVideoReportStatus(d.ref, d.data());
+      return { id: d.id, ...data };
+    }));
     return res.json({ reports, total: reports.length });
   } catch (err) {
     next(err);

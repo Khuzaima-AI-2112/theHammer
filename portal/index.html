@@ -548,6 +548,12 @@
             <button class="btn btn-primary" id="storyboardFinalizeBtn" type="button" onclick="finalizeStoryboardDraft()">Finalize into PDF</button>
           </div>
           <p class="muted">Creates a report in the Reports tab — the same place any other generated report shows up.</p>
+          <div id="storyboardVideoSection" style="display:none">
+            <div class="storyboard-narrative-actions">
+              <button class="btn btn-primary" id="storyboardVideoBtn" type="button" onclick="generateStoryboardVideo()">Generate video</button>
+            </div>
+            <p class="muted">Renders a narrated MP4 via Shotstack — a separate, billed action, never triggered by finalizing alone.</p>
+          </div>
         </div>
       </div>
     </section>

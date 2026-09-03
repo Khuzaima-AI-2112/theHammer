@@ -239,3 +239,59 @@ test('the Storyboard view has a finalize action wired to finalizeStoryboardDraft
   assert.ok(wrapStart !== -1 && finalizeBtnIdx > wrapStart && finalizeBtnIdx < wrapEnd,
     'the finalize button must be inside the completed-narrative wrap, not always visible');
 });
+
+// Generate a narrated video from a finalized Storyboard (#90)
+
+test('finalizeStoryboardDraft reveals the video section only after a successful finalize', () => {
+  const body = functionBody(APP_JS, 'finalizeStoryboardDraft');
+
+  assert.match(body, /storyboardVideoSection['"]\)\.style\.display\s*=\s*''/,
+    'generating a video requires a finalized PDF to already exist — the action must not be offered before one does');
+});
+
+test('revealVideoSectionIfAlreadyFinalized calls apiFetch, not a raw fetch', () => {
+  const body = functionBody(APP_JS, 'revealVideoSectionIfAlreadyFinalized');
+
+  assert.match(body, /apiFetch\(/, 'revealVideoSectionIfAlreadyFinalized must go through apiFetch to get a fresh token');
+  assert.doesNotMatch(body, /\bfetch\(/, 'revealVideoSectionIfAlreadyFinalized must not call fetch() directly');
+});
+
+test('revealVideoSectionIfAlreadyFinalized checks for a done "storyboard" report tied to this draft', () => {
+  const body = functionBody(APP_JS, 'revealVideoSectionIfAlreadyFinalized');
+
+  assert.match(body, /r\.storyboardDraftId\s*===\s*draftId/, 'must match the report to this specific draft');
+  assert.match(body, /r\.reportType\s*===\s*'storyboard'/, 'must be the finalized PDF, not e.g. a storyboard-video report');
+  assert.match(body, /r\.status\s*===\s*'done'/, 'a queued/processing/error PDF report does not count as finalized');
+});
+
+test('buildStoryboard checks whether a reopened draft was already finalized, so the video action isn\'t only reachable within the finalizing session', () => {
+  const body = functionBody(APP_JS, 'buildStoryboard');
+
+  assert.match(body, /revealVideoSectionIfAlreadyFinalized\(/,
+    'reopening an already-finalized draft must still offer "Generate video", not just a draft finalized this session');
+});
+
+test('generateStoryboardVideo calls apiFetch, not a raw fetch', () => {
+  const body = functionBody(APP_JS, 'generateStoryboardVideo');
+
+  assert.match(body, /apiFetch\(/, 'generateStoryboardVideo must go through apiFetch to get a fresh token');
+  assert.doesNotMatch(body, /\bfetch\(/, 'generateStoryboardVideo must not call fetch() directly');
+});
+
+test('generateStoryboardVideo posts to the draft-scoped video route', () => {
+  const body = functionBody(APP_JS, 'generateStoryboardVideo');
+
+  assert.match(body, /\/admin\/storyboards\/\$\{encodeURIComponent\(storyboardDraft\.id\)\}\/video/,
+    'the draft id belongs in the path, encoded');
+  assert.match(body, /method:\s*'POST'/, 'starting a Shotstack render is a one-shot action, not an idempotent GET');
+});
+
+test('the Storyboard view has a generate-video action wired to generateStoryboardVideo(), hidden until finalizing', () => {
+  assert.match(INDEX_HTML, /id="storyboardVideoBtn"/, 'an Analyst must be able to trigger video generation');
+  assert.match(INDEX_HTML, /onclick="generateStoryboardVideo\(\)"/,
+    'the narrative section must offer a way to generate a video');
+
+  const sectionMatch = INDEX_HTML.match(/<div id="storyboardVideoSection"[^>]*style="display:none"/);
+  assert.ok(sectionMatch,
+    'video generation must not be offered until a finalized PDF exists — the section starts hidden, not the button disabled');
+});
