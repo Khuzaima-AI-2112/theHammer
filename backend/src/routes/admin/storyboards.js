@@ -14,8 +14,17 @@
  * Capture can be added to a Storyboard through this route that wasn't part
  * of the Project when the draft was created (#85's scope — see spec).
  *
- * AI narrative generation (#86), review/edit (#87), audio input (#88), and
- * finalizing into a PDF (#89) are separate tickets and do not live here.
+ * AI narrative generation (#86)  —  POST /admin/storyboards/:id/narrative
+ * takes an Analyst-typed prompt, sends the draft's included/ordered Captures
+ * (as multimodal gs:// image references) plus their notes plus the prompt to
+ * Vertex AI Gemini via the shared getAIClient() (lib/vertex.js), and writes
+ * the result back onto the draft — not into the `reports` collection, since
+ * this draft has not been finalized into a report yet (ADR 0013 covers the
+ * eventual PDF/video finalization, which does become a `reports` doc; the
+ * narrative that feeds it does not need to).
+ *
+ * Review/edit (#87), audio input (#88), and finalizing into a PDF (#89) are
+ * separate tickets and do not live here.
  *
  * Auth: requireAnalyst, not requireAdmin like exports.js/activity.js — #85's
  * own acceptance criteria call for Analyst-and-above, matching the gate
@@ -28,14 +37,20 @@
 const express = require('express');
 const { Timestamp } = require('firebase-admin/firestore');
 const { Storage } = require('@google-cloud/storage');
+const logger = require('../../lib/logger');
 const { db } = require('../../lib/firestore');
 const { requireAnalyst } = require('../../middleware/requireAuth');
+const { getAIClient } = require('../../lib/vertex');
 const collections = require('../../lib/collections');
 
 const router = express.Router();
 
 const storage = new Storage();
 const BUCKET = process.env.GCS_BUCKET || 'thehammer-storage-2026';
+
+// Prompts are typed by hand on one draft, not machine-generated — 4000
+// characters is generous headroom without inviting a pasted document.
+const MAX_PROMPT_LENGTH = 4000;
 
 // Same lifetime as the Activity view's thumbnails (activity.js) — the
 // curation screen is the same kind of "look at pictures for a while" UI.
@@ -69,6 +84,10 @@ function serializeDraft(snap) {
     projectId: d.projectId,
     status: d.status,
     captures: [...(d.captures ?? [])].sort((a, b) => a.order - b.order),
+    narrativeStatus: d.narrativeStatus ?? null,
+    narrativePrompt: d.narrativePrompt ?? null,
+    narrativeText: d.narrativeText ?? null,
+    narrativeError: d.narrativeError ?? null,
     createdAt: isoOf(d.createdAt),
     updatedAt: isoOf(d.updatedAt),
     schemaVersion: d.schemaVersion ?? 1,
@@ -233,5 +252,126 @@ router.patch('/storyboards/:id', requireAnalyst, async (req, res, next) => {
     return res.json(draft);
   } catch (err) { next(err); }
 });
+
+/**
+ * Builds the multimodal Gemini request from a draft: the prompt, then each
+ * *included* Capture in slide order as a gs:// image reference, with its note
+ * (if any) as the text part immediately after it. Excluded Captures are not
+ * sent — the AI only sees what the Analyst curated.
+ *
+ * No per-Capture tagging step exists anywhere in this — the AI receives the
+ * ordered images and notes and infers its own structure.
+ *
+ * Exported so tests can assert on the request shape directly, without a
+ * mocked AI client or the timing of an async generation run.
+ */
+async function buildNarrativeRequest(draft, prompt) {
+  const included = [...draft.captures]
+    .filter((c) => c.included)
+    .sort((a, b) => a.order - b.order);
+
+  const parts = [{ text: prompt }];
+
+  if (included.length > 0) {
+    const refs = included.map((c) => db.collection(collections.UPLOADS).doc(c.captureId));
+    const snaps = await db.getAll(...refs);
+    const uploadById = {};
+    snaps.forEach((s) => { if (s.exists) uploadById[s.id] = s.data(); });
+
+    for (const c of included) {
+      const upload = uploadById[c.captureId];
+      const gcsPath = upload?.gcsPath ?? upload?.path ?? null;
+      if (gcsPath) {
+        parts.push({ fileData: { mimeType: 'image/png', fileUri: `gs://${BUCKET}/${gcsPath}` } });
+      }
+      if (c.note) {
+        parts.push({ text: `Slide ${c.order} note: ${c.note}` });
+      }
+    }
+  }
+
+  return { contents: [{ role: 'user', parts }] };
+}
+
+/**
+ * Runs the generation and writes the outcome back onto the draft. Not
+ * awaited by the route — the portal polls GET /admin/storyboards/:id for the
+ * narrativeStatus this writes, the same "queue, then poll" shape the Reports
+ * pipeline uses (ADR 0013), without routing through the `reports` collection
+ * or worker itself.
+ */
+async function generateNarrative(draftId, prompt) {
+  const ref = db.collection(collections.STORYBOARD_DRAFTS).doc(draftId);
+  try {
+    await ref.update({ narrativeStatus: 'generating', updatedAt: nowISO() });
+
+    const snap = await ref.get();
+    const draft = serializeDraft(snap);
+
+    const projSnap = await db.collection(collections.PROJECTS).doc(draft.projectId).get();
+    const modelId = projSnap.data()?.llmModel || 'gemini-1.5-flash';
+
+    const request = await buildNarrativeRequest(draft, prompt);
+    const client = getAIClient();
+    const resp = await client.models.generateContent({ model: modelId, ...request });
+
+    await ref.update({
+      narrativeStatus: 'done',
+      narrativeText: resp.text,
+      narrativeError: null,
+      updatedAt: nowISO(),
+    });
+  } catch (err) {
+    // Surfaced as a status on the draft, not a silently-swallowed rejection
+    // and not a "done" status with garbage text.
+    logger.error(`[Storyboard Narrative] generation failed for draft ${draftId}:`, err);
+    await ref.update({
+      narrativeStatus: 'error',
+      narrativeError: err.message,
+      updatedAt: nowISO(),
+    }).catch((updateErr) => {
+      logger.error(`[Storyboard Narrative] failed to record error status for draft ${draftId}:`, updateErr);
+    });
+  }
+}
+
+router.post('/storyboards/:id/narrative', requireAnalyst, async (req, res, next) => {
+  try {
+    const ref = db.collection(collections.STORYBOARD_DRAFTS).doc(req.params.id);
+    const snap = await ref.get();
+    if (!snap.exists) {
+      return res.status(404).json({ error: 'storyboard draft not found' });
+    }
+    if (snap.data().workspaceId !== req.hammerUser.workspaceId) {
+      return res.status(403).json({ error: 'Forbidden: draft belongs to another workspace' });
+    }
+
+    const prompt = typeof req.body?.prompt === 'string' ? req.body.prompt.trim() : '';
+    if (!prompt) {
+      return res.status(400).json({ error: 'prompt is required' });
+    }
+    if (prompt.length > MAX_PROMPT_LENGTH) {
+      return res.status(400).json({ error: `prompt must be ${MAX_PROMPT_LENGTH} characters or fewer` });
+    }
+
+    await ref.update({
+      narrativeStatus: 'queued',
+      narrativePrompt: prompt,
+      narrativeText: null,
+      narrativeError: null,
+      updatedAt: nowISO(),
+    });
+
+    generateNarrative(req.params.id, prompt).catch((err) => {
+      logger.error(`[Storyboard Narrative] unhandled error for draft ${req.params.id}:`, err);
+    });
+
+    const queuedSnap = await ref.get();
+    return res.status(202).json(await enrichWithSignedUrls(serializeDraft(queuedSnap)));
+  } catch (err) { next(err); }
+});
+
+router.buildNarrativeRequest = buildNarrativeRequest;
+router.generateNarrative = generateNarrative;
 
 module.exports = router;

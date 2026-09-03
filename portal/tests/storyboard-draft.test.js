@@ -85,3 +85,43 @@ test('the Storyboard view exists as its own section, not a modal', () => {
   assert.match(INDEX_HTML, /id="view-storyboard"/,
     'a curation screen with thumbnails, checkboxes, reorder and notes needs a full view, not a modal');
 });
+
+// AI narrative generation (#86)
+
+test('generateStoryboardNarrative calls apiFetch, not a raw fetch', () => {
+  const body = functionBody(APP_JS, 'generateStoryboardNarrative');
+
+  assert.match(body, /apiFetch\(/, 'generateStoryboardNarrative must go through apiFetch to get a fresh token');
+  assert.doesNotMatch(body, /\bfetch\(/, 'generateStoryboardNarrative must not call fetch() directly');
+});
+
+test('generateStoryboardNarrative posts the typed prompt to the draft-scoped narrative route', () => {
+  const body = functionBody(APP_JS, 'generateStoryboardNarrative');
+
+  assert.match(body, /\/admin\/storyboards\/\$\{encodeURIComponent\(storyboardDraft\.id\)\}\/narrative/,
+    'the draft id belongs in the path, encoded');
+  assert.match(body, /method:\s*'POST'/, 'triggering generation is a POST');
+  assert.match(body, /body:\s*JSON\.stringify\(\{\s*prompt\s*\}\)/, 'the typed prompt must be sent in the body');
+});
+
+test('startStoryboardNarrativePolling polls through apiFetch, not a raw fetch', () => {
+  const body = functionBody(APP_JS, 'startStoryboardNarrativePolling');
+
+  assert.match(body, /apiFetch\(/, 'polling must go through apiFetch to get a fresh token');
+  assert.doesNotMatch(body, /\bfetch\(/, 'polling must not call fetch() directly');
+  assert.match(body, /clearInterval/, 'polling must stop once the draft settles to done/error');
+});
+
+test('renderStoryboardNarrative writes generated text via textContent, not innerHTML', () => {
+  const body = functionBody(APP_JS, 'renderStoryboardNarrative');
+
+  assert.match(body, /textEl\.textContent\s*=\s*storyboardDraft\.narrativeText/,
+    'AI-generated text is untrusted and must never be assigned through innerHTML');
+  assert.doesNotMatch(body, /innerHTML/, 'renderStoryboardNarrative must not use innerHTML');
+});
+
+test('the Storyboard view has a prompt input and a generate action wired to generateStoryboardNarrative()', () => {
+  assert.match(INDEX_HTML, /id="storyboardNarrativePrompt"/, 'an Analyst must be able to type a prompt');
+  assert.match(INDEX_HTML, /onclick="generateStoryboardNarrative\(\)"/,
+    'the narrative section must offer a way to trigger generation');
+});

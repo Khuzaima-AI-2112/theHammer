@@ -1117,6 +1117,7 @@ function toggleAutoRefresh(enabled) {
 // ═══════════════════════════════════════════════════════════════
 
 let storyboardDraft = null;
+let activeStoryboardNarrativePoller = null;
 
 /**
  * Opens a Storyboard draft for the Project selected in the Activity view.
@@ -1137,9 +1138,14 @@ async function buildStoryboard() {
   btn.textContent = 'Opening…';
 
   try {
+    if (activeStoryboardNarrativePoller) clearInterval(activeStoryboardNarrativePoller);
+    document.getElementById('storyboardNarrativePrompt').value = '';
     storyboardDraft = await apiFetch(`/admin/projects/${encodeURIComponent(projectId)}/storyboards`, { method: 'POST' });
     showView('storyboard');
     renderStoryboardDraft();
+    if (storyboardDraft.narrativeStatus === 'queued' || storyboardDraft.narrativeStatus === 'generating') {
+      startStoryboardNarrativePolling(storyboardDraft.id);
+    }
   } catch (err) {
     showToast(`Failed to open Storyboard: ${err.message}`, 'error');
   } finally {
@@ -1184,6 +1190,88 @@ function renderStoryboardDraft() {
       <textarea class="form-input storyboard-note" placeholder="Note for this slide…"
                 onchange="updateStoryboardNote('${esc(c.captureId)}', this.value)">${esc(c.note)}</textarea>
     </div>`).join('');
+
+  renderStoryboardNarrative();
+}
+
+/**
+ * Reflects storyboardDraft's narrativeStatus/narrativeText/narrativeError.
+ * The prompt textarea is only pre-filled from the draft the first time it
+ * renders empty — typing should never be clobbered by a background poll.
+ */
+function renderStoryboardNarrative() {
+  const statusEl = document.getElementById('storyboardNarrativeStatus');
+  const errorEl  = document.getElementById('storyboardNarrativeError');
+  const textEl   = document.getElementById('storyboardNarrativeText');
+  const btn      = document.getElementById('storyboardGenerateBtn');
+  const promptEl = document.getElementById('storyboardNarrativePrompt');
+
+  const narrativeStatus = storyboardDraft?.narrativeStatus ?? null;
+
+  if (!promptEl.value && storyboardDraft?.narrativePrompt) {
+    promptEl.value = storyboardDraft.narrativePrompt;
+  }
+
+  const busy = narrativeStatus === 'queued' || narrativeStatus === 'generating';
+  btn.disabled = busy;
+  btn.textContent = busy ? 'Generating…' : 'Generate narrative';
+
+  const statusLabels = { queued: 'Queued…', generating: 'Generating…', done: 'Done', error: 'Failed' };
+  statusEl.textContent = narrativeStatus ? statusLabels[narrativeStatus] || '' : '';
+
+  if (narrativeStatus === 'error' && storyboardDraft.narrativeError) {
+    errorEl.textContent = storyboardDraft.narrativeError;
+    errorEl.style.display = '';
+  } else {
+    errorEl.style.display = 'none';
+  }
+
+  if (narrativeStatus === 'done' && storyboardDraft.narrativeText) {
+    textEl.textContent = storyboardDraft.narrativeText;
+    textEl.style.display = '';
+  } else {
+    textEl.style.display = 'none';
+  }
+}
+
+/** POSTs the typed prompt, then polls GET /admin/storyboards/:id until the
+ * generation settles — same "queue, then poll" shape as the Reports view. */
+async function generateStoryboardNarrative() {
+  if (!storyboardDraft) return;
+  const prompt = document.getElementById('storyboardNarrativePrompt').value.trim();
+  if (!prompt) {
+    showToast('Type a prompt first', 'error');
+    return;
+  }
+
+  try {
+    storyboardDraft = await apiFetch(`/admin/storyboards/${encodeURIComponent(storyboardDraft.id)}/narrative`, {
+      method: 'POST',
+      body: JSON.stringify({ prompt })
+    });
+    renderStoryboardNarrative();
+    startStoryboardNarrativePolling(storyboardDraft.id);
+  } catch (err) {
+    showToast(`Failed to start narrative generation: ${err.message}`, 'error');
+  }
+}
+
+function startStoryboardNarrativePolling(draftId) {
+  if (activeStoryboardNarrativePoller) clearInterval(activeStoryboardNarrativePoller);
+  activeStoryboardNarrativePoller = setInterval(async () => {
+    try {
+      const draft = await apiFetch(`/admin/storyboards/${encodeURIComponent(draftId)}`);
+      if (!storyboardDraft || storyboardDraft.id !== draftId) return; // left the draft — drop the update
+      storyboardDraft = draft;
+      renderStoryboardNarrative();
+      if (draft.narrativeStatus === 'done' || draft.narrativeStatus === 'error') {
+        clearInterval(activeStoryboardNarrativePoller);
+      }
+    } catch (err) {
+      clearInterval(activeStoryboardNarrativePoller);
+      showToast(`Failed to check narrative status: ${err.message}`, 'error');
+    }
+  }, 3000);
 }
 
 function findStoryboardCapture(captureId) {

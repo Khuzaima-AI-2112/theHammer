@@ -527,6 +527,19 @@
       </div>
 
       <div class="storyboard-grid" id="storyboardGrid"></div>
+
+      <div class="storyboard-narrative" id="storyboardNarrativeSection">
+        <h2>AI narrative</h2>
+        <p class="muted">Type what you want the narrative to focus on. The AI reads the included slides in order, plus their notes, and infers its own structure.</p>
+        <textarea class="form-input" id="storyboardNarrativePrompt" rows="3"
+                  placeholder="e.g. Tell the story of this campaign from setup through launch."></textarea>
+        <div class="storyboard-narrative-actions">
+          <button class="btn btn-primary" id="storyboardGenerateBtn" type="button" onclick="generateStoryboardNarrative()">Generate narrative</button>
+          <span id="storyboardNarrativeStatus" class="muted"></span>
+        </div>
+        <div id="storyboardNarrativeError" class="form-error" style="display:none"></div>
+        <div id="storyboardNarrativeText" class="storyboard-narrative-text" style="display:none"></div>
+      </div>
     </section>
 
     <!-- ═══════════════════════════════════════════════════════════
