@@ -55,7 +55,7 @@ needs changing before a deploy into a different project:
 |---|---|---|
 | `cloudbuild.yaml`, `deploy-backend` | `GCS_BUCKET=thehammer-storage-2026` | your bucket |
 | `cloudbuild.yaml`, `deploy-backend` | `ADMIN_ORIGIN=https://thehammer-portal-282689937365…` | your portal's URL |
-| `cloudbuild.yaml`, `deploy-backend` | `EXTENSION_ID=effbpm… ndmbjl…` | see section 5 |
+| `cloudbuild.yaml`, `substitutions` | `_EXTENSION_IDS: effbpm… ndmbjl…` | see section 5 |
 | `portal/auth-ext.html` | a `firebaseConfig` block | your Firebase project's config |
 
 The region is **`northamerica-northeast1`** in several places. Changing it means

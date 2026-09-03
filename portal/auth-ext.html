@@ -26,16 +26,47 @@
     };
     firebase.initializeApp(firebaseConfig);
 
+    // Extensions this page is allowed to hand tokens to. Injected at build time
+    // from the same allowlist the backend's CORS check reads as EXTENSION_ID
+    // (backend/src/index.js, cloudbuild.yaml) — one source of truth, see #80
+    // and #36.
+    const ALLOWED_EXTENSION_IDS = '__EXTENSION_IDS__'.split(/[\s,]+/).filter(Boolean);
+
+// The only legitimate redirect_uri is a chrome.identity.launchWebAuthFlow
+// callback: https://<32-char extension id>.chromiumapp.org/. Anything else — a
+// different scheme, a lookalike host, an id we were never told about — is not
+// one of ours, and this page would otherwise hand it a Firebase ID token,
+// refresh token and API key (#80).
+function isAllowedRedirectUri(uriString, allowedIds) {
+  let url;
+  try {
+    url = new URL(uriString);
+  } catch {
+    return false;
+  }
+  if (url.protocol !== 'https:') return false;
+  const match = url.hostname.match(/^([a-p]{32})\.chromiumapp\.org$/);
+  return !!match && allowedIds.includes(match[1]);
+}
+
     const urlParams = new URLSearchParams(window.location.search);
     const redirectUri = urlParams.get('redirect_uri');
+    const redirectUriIsValid = !!redirectUri && isAllowedRedirectUri(redirectUri, ALLOWED_EXTENSION_IDS);
 
     firebase.auth().onAuthStateChanged(async (user) => {
       if (user) {
-        document.getElementById('msg').innerText = 'Redirecting back to extension...';
-        const idToken = await user.getIdToken();
-        const refreshToken = user.refreshToken;
-        
-        if (redirectUri) {
+        if (redirectUri && !redirectUriIsValid) {
+          // Fail closed: an unrecognised redirect_uri gets no tokens and no
+          // "success" message either, so a real attacker's page can't rely on
+          // this page reassuring the person signing in.
+          document.getElementById('msg').innerText = 'This sign-in link is not valid.';
+          return;
+        }
+
+        if (redirectUriIsValid) {
+          document.getElementById('msg').innerText = 'Redirecting back to extension...';
+          const idToken = await user.getIdToken();
+          const refreshToken = user.refreshToken;
           window.location.href = `${redirectUri}?token=${encodeURIComponent(idToken)}&refreshToken=${encodeURIComponent(refreshToken)}&apiKey=${encodeURIComponent(firebaseConfig.apiKey)}`;
         } else {
           document.getElementById('msg').innerText = 'Successfully signed in! You can close this window.';
