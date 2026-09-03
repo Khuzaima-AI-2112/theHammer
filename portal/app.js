@@ -1403,6 +1403,33 @@ async function uploadStoryboardAudio(blob, mimeType) {
   }
 }
 
+/**
+ * Finalizes the draft into a PDF (#89) — only reachable once narrativeStatus
+ * is 'done' (the button lives inside storyboardNarrativeTextWrap, hidden
+ * otherwise), edited via #87 or not. The result lands in the `reports`
+ * collection, so there is nothing storyboard-specific to render here: the
+ * existing Reports tab already lists and views it like any other report.
+ */
+async function finalizeStoryboardDraft() {
+  if (!storyboardDraft) return;
+  const btn = document.getElementById('storyboardFinalizeBtn');
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Finalizing…';
+
+  try {
+    await apiFetch(`/admin/storyboards/${encodeURIComponent(storyboardDraft.id)}/finalize`, {
+      method: 'POST'
+    });
+    showToast('Storyboard finalized — find it in the Reports tab.', 'success');
+  } catch (err) {
+    showToast(`Failed to finalize Storyboard: ${err.message}`, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = label;
+  }
+}
+
 function findStoryboardCapture(captureId) {
   return storyboardDraft?.captures.find(c => c.captureId === captureId) ?? null;
 }

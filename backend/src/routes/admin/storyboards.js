@@ -49,7 +49,22 @@
  * one) goes through loadOwnedDraft() for its exists/workspace-ownership
  * check, rather than repeating it inline.
  *
- * Finalizing into a PDF (#89) is a separate ticket and does not live here.
+ * Finalizing into a PDF (#89)  —  POST /admin/storyboards/:id/finalize
+ * requires narrativeStatus === 'done' (edited via #87 or not — both are
+ * valid; an edit never changes the status) and is refused otherwise. It
+ * assembles a PDF — a narrative page, then one page per *included* Capture
+ * in curated order with its note — writes it to GCS, and creates a `reports`
+ * Firestore doc with `reportType: 'storyboard'`. ADR 0013 put Storyboard
+ * generation's *eventual* artifact in the `reports` collection precisely so
+ * it shows up in the existing Reports list (view/download) the same way any
+ * other report does — this route is that landing point, so it writes
+ * directly to `reports` rather than going through POST /admin/reports/
+ * generate's fire-and-forget self-HTTP worker dispatch. That dispatch has no
+ * listening server in this test suite (nothing here proves it runs), which
+ * is exactly the kind of untested MVP plumbing #86 already declined to
+ * build on for narrative generation; assembling the PDF in-process, the way
+ * generateNarrative() calls Vertex AI in-process, keeps this route testable
+ * the same way.
  *
  * Auth: requireAnalyst, not requireAdmin like exports.js/activity.js — #85's
  * own acceptance criteria call for Analyst-and-above, matching the gate
@@ -61,6 +76,7 @@
 
 const express = require('express');
 const multer = require('multer');
+const PDFDocument = require('pdfkit');
 const { Timestamp } = require('firebase-admin/firestore');
 const { Storage } = require('@google-cloud/storage');
 const logger = require('../../lib/logger');
@@ -626,8 +642,116 @@ router.post(
   }
 );
 
+/**
+ * Assembles the Storyboard PDF: a narrative page, then one page per
+ * *included* Capture in curated (slide-number) order, each with its note.
+ * Excluded Captures are not in the PDF — the same curation the narrative
+ * itself was built from (#86).
+ *
+ * `compress: false` keeps every page's content stream a plain, greppable
+ * FlateDecode-free stream — deliberate, not an oversight: it is what lets a
+ * test recover the text pdfkit wrote (order, slide labels, notes) without a
+ * PDF-parsing dependency, the same way this file already avoids depending on
+ * `reportsWorker.js`'s untested plumbing.
+ *
+ * Exported for direct testing, same reasoning as buildNarrativeRequest.
+ */
+async function buildStoryboardPdf(draft) {
+  const included = [...draft.captures]
+    .filter((c) => c.included)
+    .sort((a, b) => a.order - b.order);
+
+  const uploadById = {};
+  if (included.length > 0) {
+    const refs = included.map((c) => db.collection(collections.UPLOADS).doc(c.captureId));
+    const snaps = await db.getAll(...refs);
+    snaps.forEach((s) => { if (s.exists) uploadById[s.id] = s.data(); });
+  }
+
+  const doc = new PDFDocument({ autoFirstPage: false, margin: 50, compress: false });
+  const chunks = [];
+  doc.on('data', (chunk) => chunks.push(chunk));
+  const finished = new Promise((resolve, reject) => {
+    doc.on('end', () => resolve(Buffer.concat(chunks)));
+    doc.on('error', reject);
+  });
+
+  doc.addPage();
+  doc.fontSize(20).text('Storyboard Narrative');
+  doc.moveDown();
+  doc.fontSize(12).text(draft.narrativeText || '');
+
+  for (const c of included) {
+    doc.addPage();
+    doc.fontSize(16).text(`Slide ${c.order}`);
+    doc.moveDown(0.5);
+
+    const upload = uploadById[c.captureId];
+    const gcsPath = upload?.gcsPath ?? upload?.path ?? null;
+    if (gcsPath) {
+      const [bytes] = await storage.bucket(BUCKET).file(gcsPath).download();
+      doc.image(bytes, { fit: [480, 480] });
+      doc.moveDown(0.5);
+    }
+    if (c.note) {
+      doc.fontSize(11).text(c.note);
+    }
+  }
+
+  doc.end();
+  return finished;
+}
+
+router.post('/storyboards/:id/finalize', requireAnalyst, async (req, res, next) => {
+  try {
+    const loaded = await loadOwnedDraft(req, res);
+    if (!loaded) return;
+    const { existing, snap } = loaded;
+
+    // #87's edit only ever changes narrativeText, never narrativeStatus, so
+    // this admits both an edited and an unedited narrative — and refuses a
+    // draft that never finished generating one at all.
+    if (existing.narrativeStatus !== 'done') {
+      return res.status(400).json({ error: 'draft has no completed narrative to finalize' });
+    }
+
+    const draft = serializeDraft(snap);
+
+    const reportRef = await db.collection(collections.REPORTS).add({
+      projectId: draft.projectId,
+      reportType: 'storyboard',
+      dateRange: null,
+      status: 'processing',
+      gcsPath: null,
+      storyboardDraftId: draft.id,
+      requestedBy: req.hammerUser.id,
+      createdAt: nowISO(),
+      updatedAt: nowISO(),
+      schemaVersion: 1,
+    });
+
+    try {
+      const pdfBuffer = await buildStoryboardPdf(draft);
+      const gcsPath = `${draft.projectId}/reports/${reportRef.id}.pdf`;
+      await storage.bucket(BUCKET).file(gcsPath).save(pdfBuffer, {
+        metadata: { contentType: 'application/pdf' },
+      });
+
+      await reportRef.update({ status: 'done', gcsPath, updatedAt: nowISO() });
+    } catch (err) {
+      logger.error(`[Storyboard Finalize] PDF assembly failed for draft ${req.params.id}:`, err);
+      await reportRef.update({ status: 'error', updatedAt: nowISO() });
+      return res.status(500).json({ error: 'Failed to assemble Storyboard PDF' });
+    }
+
+    const reportSnap = await reportRef.get();
+    return res.status(201).json({ id: reportSnap.id, ...reportSnap.data() });
+  } catch (err) { next(err); }
+});
+
 router.buildNarrativeRequest = buildNarrativeRequest;
 router.buildTranscriptionRequest = buildTranscriptionRequest;
+router.buildStoryboardPdf = buildStoryboardPdf;
 router.generateNarrative = generateNarrative;
 
 module.exports = router;

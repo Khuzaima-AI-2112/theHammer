@@ -206,3 +206,36 @@ test('the Storyboard view has a record-audio action wired to toggleStoryboardAud
   assert.match(INDEX_HTML, /onclick="toggleStoryboardAudioRecording\(\)"/,
     'the narrative section must offer a way to record instead of typing');
 });
+
+// Finalize a Storyboard draft into a PDF (#89)
+
+test('finalizeStoryboardDraft calls apiFetch, not a raw fetch', () => {
+  const body = functionBody(APP_JS, 'finalizeStoryboardDraft');
+
+  assert.match(body, /apiFetch\(/, 'finalizeStoryboardDraft must go through apiFetch to get a fresh token');
+  assert.doesNotMatch(body, /\bfetch\(/, 'finalizeStoryboardDraft must not call fetch() directly');
+});
+
+test('finalizeStoryboardDraft posts to the draft-scoped finalize route', () => {
+  const body = functionBody(APP_JS, 'finalizeStoryboardDraft');
+
+  assert.match(body, /\/admin\/storyboards\/\$\{encodeURIComponent\(storyboardDraft\.id\)\}\/finalize/,
+    'the draft id belongs in the path, encoded');
+  assert.match(body, /method:\s*'POST'/, 'finalizing is a one-shot action, not an idempotent GET');
+});
+
+test('the Storyboard view has a finalize action wired to finalizeStoryboardDraft(), inside the completed-narrative section', () => {
+  assert.match(INDEX_HTML, /id="storyboardFinalizeBtn"/, 'an Analyst must be able to finalize the draft');
+  assert.match(INDEX_HTML, /onclick="finalizeStoryboardDraft\(\)"/,
+    'the narrative section must offer a way to finalize into a PDF');
+
+  // The button must live inside storyboardNarrativeTextWrap, the section
+  // renderStoryboardNarrative only shows once narrativeStatus is 'done' —
+  // finalizing before generation has completed isn't offered, not just
+  // refused server-side.
+  const wrapStart = INDEX_HTML.indexOf('id="storyboardNarrativeTextWrap"');
+  const wrapEnd = INDEX_HTML.indexOf('</div>', INDEX_HTML.indexOf('</div>', wrapStart) + 1);
+  const finalizeBtnIdx = INDEX_HTML.indexOf('id="storyboardFinalizeBtn"');
+  assert.ok(wrapStart !== -1 && finalizeBtnIdx > wrapStart && finalizeBtnIdx < wrapEnd,
+    'the finalize button must be inside the completed-narrative wrap, not always visible');
+});
