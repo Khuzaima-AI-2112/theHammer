@@ -44,3 +44,29 @@ does the job, purely to avoid sharing a nav tab with a feature the Customer
 was told is currently full of placeholders — that reputational concern is
 better solved by making the `storyboard` report type real, not by hiding it
 somewhere else.
+
+## Amendment (2026-09-03, during #89's implementation): the dispatch hop is not reused
+
+`POST /admin/storyboards/:id/finalize` (#89) creates the `reports` doc and
+writes the finalized PDF directly to GCS, in-process, rather than going
+through `POST /admin/reports/generate` → the fire-and-forget self-HTTP call
+to `/worker/reports` this ADR's Decision names. That dispatch mechanism has
+no listening server in the test suite (`request(app)` never calls
+`.listen()`), so nothing exercises it; it is the same untested MVP plumbing
+this ADR's own "What this means concretely" section already declines to
+reuse for `reportsWorker.js`'s *logic* — this amendment extends that same
+judgement to the *dispatch hop*, not just the worker body.
+
+What is unchanged from the Decision above, and is the part that was actually
+load-bearing for the "Why": the artifact lands in the `reports` collection
+as `reportType: 'storyboard'`, with a `gcsPath`, and shows up in the
+existing Reports tab exactly like any other report. Assembling the PDF
+in-process (no queue, no separate worker hop) is possible here because PDF
+assembly is bounded and fast, unlike Vertex AI generation — narrative
+generation (#86) faced the same choice and made it the same way, calling
+Vertex AI in-process rather than through `reportsWorker.js`.
+
+If the dispatch hop is ever made real (a genuine Cloud Tasks queue, an
+authenticated internal call), finalize should move onto it then — this
+amendment is a statement of current fact, not a case against ever building
+that hop.

@@ -1146,6 +1146,7 @@ async function buildStoryboard() {
     if (storyboardMediaRecorder && storyboardMediaRecorder.state === 'recording') storyboardMediaRecorder.stop();
     document.getElementById('storyboardNarrativePrompt').value = '';
     document.getElementById('storyboardRecordBtn').textContent = 'Record audio walkthrough';
+    document.getElementById('storyboardVideoSection').style.display = 'none';
     delete document.getElementById('storyboardNarrativeText').dataset.loadedText;
     storyboardDraft = await apiFetch(`/admin/projects/${encodeURIComponent(projectId)}/storyboards`, { method: 'POST' });
     showView('storyboard');
@@ -1153,6 +1154,7 @@ async function buildStoryboard() {
     if (storyboardDraft.narrativeStatus === 'queued' || storyboardDraft.narrativeStatus === 'generating') {
       startStoryboardNarrativePolling(storyboardDraft.id);
     }
+    revealVideoSectionIfAlreadyFinalized(storyboardDraft.id, projectId);
   } catch (err) {
     showToast(`Failed to open Storyboard: ${err.message}`, 'error');
   } finally {
@@ -1397,6 +1399,90 @@ async function uploadStoryboardAudio(blob, mimeType) {
     startStoryboardNarrativePolling(storyboardDraft.id);
   } catch (err) {
     showToast(`Failed to transcribe recording: ${err.message}`, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = label;
+  }
+}
+
+/**
+ * Finalizes the draft into a PDF (#89) — only reachable once narrativeStatus
+ * is 'done' (the button lives inside storyboardNarrativeTextWrap, hidden
+ * otherwise), edited via #87 or not. The result lands in the `reports`
+ * collection, so there is nothing storyboard-specific to render here: the
+ * existing Reports tab already lists and views it like any other report.
+ */
+async function finalizeStoryboardDraft() {
+  if (!storyboardDraft) return;
+  const btn = document.getElementById('storyboardFinalizeBtn');
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Finalizing…';
+
+  try {
+    await apiFetch(`/admin/storyboards/${encodeURIComponent(storyboardDraft.id)}/finalize`, {
+      method: 'POST'
+    });
+    showToast('Storyboard finalized — find it in the Reports tab.', 'success');
+    // "Generate video" (#90) requires a finalized PDF to already exist —
+    // this session just created one, so the action is now offered.
+    document.getElementById('storyboardVideoSection').style.display = '';
+  } catch (err) {
+    showToast(`Failed to finalize Storyboard: ${err.message}`, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = label;
+  }
+}
+
+/**
+ * "Generate video" (#90) requires a finalized PDF to already exist. There's
+ * no flag on the draft itself for that (#89 finalizes into a separate
+ * `reports` doc, not a field on the draft) — so reopening a draft finalized
+ * in an earlier session checks for one the same way the backend's own
+ * refusal check does: a `reports` row for this Project with this draft's id
+ * and reportType 'storyboard' at status 'done'. Failing silently (leaving
+ * the section hidden) is the right degradation here — worst case the
+ * Analyst re-finalizes, which finalizeStoryboardDraft() already reveals the
+ * section for.
+ */
+async function revealVideoSectionIfAlreadyFinalized(draftId, projectId) {
+  try {
+    const data = await apiFetch(`/admin/reports?projectId=${encodeURIComponent(projectId)}`);
+    const alreadyFinalized = (data.reports || []).some((r) =>
+      r.storyboardDraftId === draftId && r.reportType === 'storyboard' && r.status === 'done'
+    );
+    if (alreadyFinalized) {
+      document.getElementById('storyboardVideoSection').style.display = '';
+    }
+  } catch (_) {
+    // Non-fatal: the button just stays hidden until the Analyst finalizes
+    // again, or reloads once the Reports lookup succeeds.
+  }
+}
+
+/**
+ * Triggers video generation (#90) — a separate, explicit action from
+ * finalizing, since Shotstack bills per render; nothing calls this except
+ * this button. The result lands in the `reports` collection like the PDF,
+ * so — same as finalizeStoryboardDraft() — there is nothing storyboard-
+ * specific to render here: the existing Reports tab already polls and
+ * displays it.
+ */
+async function generateStoryboardVideo() {
+  if (!storyboardDraft) return;
+  const btn = document.getElementById('storyboardVideoBtn');
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Starting render…';
+
+  try {
+    await apiFetch(`/admin/storyboards/${encodeURIComponent(storyboardDraft.id)}/video`, {
+      method: 'POST'
+    });
+    showToast('Video render started — find it in the Reports tab.', 'success');
+  } catch (err) {
+    showToast(`Failed to start video generation: ${err.message}`, 'error');
   } finally {
     btn.disabled = false;
     btn.textContent = label;

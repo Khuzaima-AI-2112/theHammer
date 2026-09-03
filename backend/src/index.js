@@ -19,6 +19,8 @@
 //   POST  /admin/storyboards/:id/narrative       ← trigger AI narrative generation (#86)
 //   PATCH /admin/storyboards/:id/narrative       ← hand-edit the generated narrative (#87)
 //   POST  /admin/storyboards/:id/narrative/audio ← transcribe a recording into the prompt (#88)
+//   POST  /admin/storyboards/:id/finalize        ← assemble the PDF, create a `reports` doc (#89)
+//   POST  /admin/storyboards/:id/video           ← synthesize narration, render via Shotstack (#90)
 //   GET  /admin/users                          ← Sprint 5 task 5.10
 //   GET  /admin/users/:id                      ← Sprint 5 task 5.10
 //   GET  /admin/me                             ← Sprint 5 task 5.13
