@@ -19,10 +19,44 @@ const logger = require('../lib/logger');
 
 
 const { getAuth } = require('firebase-admin/auth');
+const { Timestamp } = require('firebase-admin/firestore');
 const { db } = require('../lib/firestore');
 const { ROLE_HIERARCHY } = require('../lib/roles');
 const { USER_PREFERENCES } = require('../lib/defaults');
 const collections = require('../lib/collections');
+
+// #81 — lastActiveAt was written once at account creation (users.js,
+// workspaces.js) and never again, so the Users table's "Last active" column
+// showed the join date forever and the Dashboard's "Active Users Today" tile
+// counted accounts *created* today rather than anyone who had actually used
+// the product. Stamped here, on every authenticated request, throttled so a
+// Firestore write doesn't land on every single API call — option 3 of #81,
+// not option 1.
+const ACTIVITY_STAMP_THROTTLE_MS = 15 * 60 * 1000;
+
+function nowISO() { return new Date().toISOString(); }
+
+/** True once `lastActiveAt` is missing or older than the throttle window. */
+function isActivityStampStale(lastActiveAt) {
+  if (!lastActiveAt) return true;
+  const lastMs = lastActiveAt instanceof Timestamp
+    ? lastActiveAt.toMillis()
+    : Date.parse(lastActiveAt);
+  return Number.isNaN(lastMs) || (Date.now() - lastMs) >= ACTIVITY_STAMP_THROTTLE_MS;
+}
+
+/**
+ * Fire-and-forget: refresh lastActiveAt if it's stale, without making the
+ * request wait on the write or fail because of it. A user who is active
+ * enough to be here again in fifteen minutes is not left looking inactive by
+ * a dropped write.
+ */
+function stampLastActive(userDoc) {
+  if (!isActivityStampStale(userDoc.data().lastActiveAt)) return;
+  userDoc.ref.update({ lastActiveAt: nowISO() }).catch((err) => {
+    logger.error('[Auth] failed to stamp lastActiveAt:', err.message);
+  });
+}
 
 function requireAuth(minRole) {
   return async (req, res, next) => {
@@ -54,6 +88,7 @@ function requireAuth(minRole) {
               allowPreUploadBlur: d.allowPreUploadBlur ?? USER_PREFERENCES.allowPreUploadBlur,
               instantClipboardLinks: d.instantClipboardLinks ?? USER_PREFERENCES.instantClipboardLinks,
             };
+            stampLastActive(doc);
             return next();
           }
         } catch (e) {
@@ -110,6 +145,7 @@ function requireAuth(minRole) {
         instantClipboardLinks: d.instantClipboardLinks ?? USER_PREFERENCES.instantClipboardLinks,
       };
 
+      stampLastActive(userDoc);
       next();
     } catch (err) {
       logger.error('[Auth] Token verification failed:', err.message);
