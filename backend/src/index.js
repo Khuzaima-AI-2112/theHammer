@@ -13,6 +13,9 @@
 //   POST /admin/projects/:id/members
 //   DELETE /admin/projects/:id/members/:userId
 //   GET  /admin/projects/:id/activity
+//   POST /admin/projects/:id/storyboards       ← find-or-create a Storyboard draft
+//   GET  /admin/storyboards/:id
+//   PATCH /admin/storyboards/:id
 //   GET  /admin/users                          ← Sprint 5 task 5.10
 //   GET  /admin/users/:id                      ← Sprint 5 task 5.10
 //   GET  /admin/me                             ← Sprint 5 task 5.13
@@ -676,6 +679,7 @@ app.use('/admin',  require('./routes/admin/activity'));
 app.use('/admin',  require('./routes/admin/reports'));
 app.use('/admin',  require('./routes/admin/dashboard'));
 app.use('/admin',  require('./routes/admin/exports'));
+app.use('/admin',  require('./routes/admin/storyboards'));
 app.use('/admin',  require('./routes/admin/workspaces'));
 
 // ─────────────────────────────────────────────────────────────────

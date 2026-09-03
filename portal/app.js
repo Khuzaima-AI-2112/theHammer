@@ -1112,6 +1112,133 @@ function toggleAutoRefresh(enabled) {
   }
 }
 
+// ═══════════════════════════════════════════════════════════════
+// STORYBOARD DRAFT VIEW (#85)
+// ═══════════════════════════════════════════════════════════════
+
+let storyboardDraft = null;
+
+/**
+ * Opens a Storyboard draft for the Project selected in the Activity view.
+ * The backend route is a find-or-create, so a second click on a Project
+ * that already has an open draft resumes it rather than starting over —
+ * that's what makes reopening after leaving mid-curation work.
+ */
+async function buildStoryboard() {
+  const projectId = document.getElementById('activityProjectSelect').value;
+  if (!projectId) {
+    showToast('Select a project first', 'error');
+    return;
+  }
+
+  const btn = document.getElementById('activityBuildStoryboardBtn');
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Opening…';
+
+  try {
+    storyboardDraft = await apiFetch(`/admin/projects/${encodeURIComponent(projectId)}/storyboards`, { method: 'POST' });
+    showView('storyboard');
+    renderStoryboardDraft();
+  } catch (err) {
+    showToast(`Failed to open Storyboard: ${err.message}`, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = label;
+  }
+}
+
+function renderStoryboardDraft() {
+  const grid  = document.getElementById('storyboardGrid');
+  const empty = document.getElementById('storyboardEmptyState');
+
+  if (!storyboardDraft || storyboardDraft.captures.length === 0) {
+    grid.innerHTML = '';
+    grid.style.display = 'none';
+    empty.style.display = 'flex';
+    return;
+  }
+  grid.style.display = '';
+  empty.style.display = 'none';
+
+  const sorted = [...storyboardDraft.captures].sort((a, b) => a.order - b.order);
+
+  grid.innerHTML = sorted.map(c => `
+    <div class="storyboard-card${c.included ? '' : ' excluded'}" data-capture-id="${esc(c.captureId)}">
+      <div class="storyboard-thumb-wrap">
+        <img class="storyboard-thumb" src="${esc(c.signedUrl || '')}" alt="Slide ${c.order}"
+             onclick="this.classList.toggle('zoomed')">
+      </div>
+      <div class="storyboard-card-controls">
+        <label class="storyboard-checkbox">
+          <input type="checkbox" ${c.included ? 'checked' : ''}
+                 onchange="toggleStoryboardCapture('${esc(c.captureId)}', this.checked)">
+          Include
+        </label>
+        <label class="storyboard-order-label">
+          Slide #
+          <input class="form-input storyboard-order-input" type="number" min="1" value="${c.order}"
+                 onchange="updateStoryboardOrder('${esc(c.captureId)}', this.value)">
+        </label>
+      </div>
+      <textarea class="form-input storyboard-note" placeholder="Note for this slide…"
+                onchange="updateStoryboardNote('${esc(c.captureId)}', this.value)">${esc(c.note)}</textarea>
+    </div>`).join('');
+}
+
+function findStoryboardCapture(captureId) {
+  return storyboardDraft?.captures.find(c => c.captureId === captureId) ?? null;
+}
+
+function toggleStoryboardCapture(captureId, included) {
+  const c = findStoryboardCapture(captureId);
+  if (c) c.included = included;
+}
+
+function updateStoryboardOrder(captureId, order) {
+  const c = findStoryboardCapture(captureId);
+  const n = parseInt(order, 10);
+  if (c && Number.isInteger(n) && n >= 1) c.order = n;
+}
+
+function updateStoryboardNote(captureId, note) {
+  const c = findStoryboardCapture(captureId);
+  if (c) c.note = note;
+}
+
+/**
+ * PATCH /admin/storyboards/:id requires every Capture the draft was
+ * created with in the payload, so the whole local set is sent back each
+ * time — not just the row that changed.
+ */
+async function saveStoryboardDraft() {
+  if (!storyboardDraft) return;
+  const btn = document.getElementById('storyboardSaveBtn');
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Saving…';
+
+  try {
+    const captures = storyboardDraft.captures.map(c => ({
+      captureId: c.captureId,
+      order:     c.order,
+      included:  c.included,
+      note:      c.note
+    }));
+    storyboardDraft = await apiFetch(`/admin/storyboards/${encodeURIComponent(storyboardDraft.id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ captures })
+    });
+    renderStoryboardDraft();
+    showToast('Storyboard saved', 'success');
+  } catch (err) {
+    showToast(`Failed to save Storyboard: ${err.message}`, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = label;
+  }
+}
+
 // ── Modal helpers ──────────────────────────────────────────────
 function openModal(id)  { document.getElementById(id).classList.add('open'); }
 function closeModal(id) { document.getElementById(id).classList.remove('open'); }
