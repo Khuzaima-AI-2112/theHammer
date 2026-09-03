@@ -159,3 +159,50 @@ test('the Storyboard view has an editable narrative textarea and a save-edit act
   assert.match(INDEX_HTML, /onclick="saveStoryboardNarrativeEdit\(\)"/,
     'the narrative section must offer a way to save a hand edit');
 });
+
+// Recorded audio as an alternate prompt input (#88)
+
+test('apiFetch does not force a JSON Content-Type onto a FormData body', () => {
+  const body = functionBody(APP_JS, 'apiFetch');
+
+  assert.match(body, /instanceof FormData/,
+    'an audio recording is sent as FormData — apiFetch must not overwrite its multipart Content-Type');
+});
+
+test('uploadStoryboardAudio calls apiFetch, not a raw fetch', () => {
+  const body = functionBody(APP_JS, 'uploadStoryboardAudio');
+
+  assert.match(body, /apiFetch\(/, 'uploadStoryboardAudio must go through apiFetch to get a fresh token');
+  assert.doesNotMatch(body, /\bfetch\(/, 'uploadStoryboardAudio must not call fetch() directly');
+});
+
+test('uploadStoryboardAudio posts the recording as FormData to the draft-scoped audio route', () => {
+  const body = functionBody(APP_JS, 'uploadStoryboardAudio');
+
+  assert.match(body, /\/admin\/storyboards\/\$\{encodeURIComponent\(storyboardDraft\.id\)\}\/narrative\/audio/,
+    'the draft id belongs in the path, encoded');
+  assert.match(body, /method:\s*'POST'/, 'uploading a recording for transcription is a POST');
+  assert.match(body, /new FormData\(\)/, 'a recorded clip is a file upload, not a JSON body');
+});
+
+test('uploadStoryboardAudio starts polling after the upload response, the same path generation uses', () => {
+  const body = functionBody(APP_JS, 'uploadStoryboardAudio');
+
+  assert.match(body, /startStoryboardNarrativePolling\(/,
+    'transcription queues generation server-side — the portal must poll for it, same as a typed prompt');
+});
+
+test('toggleStoryboardAudioRecording confirms before recording over an existing narrative', () => {
+  const body = functionBody(APP_JS, 'toggleStoryboardAudioRecording');
+
+  assert.match(body, /storyboardDraft\.narrativeText/,
+    'recording a new walkthrough must check for an existing narrative before replacing it');
+  assert.match(body, /confirm\(/,
+    'a new recording replaces the current narrative and must be confirmed, not silent');
+});
+
+test('the Storyboard view has a record-audio action wired to toggleStoryboardAudioRecording()', () => {
+  assert.match(INDEX_HTML, /id="storyboardRecordBtn"/, 'an Analyst must be able to start/stop a recording');
+  assert.match(INDEX_HTML, /onclick="toggleStoryboardAudioRecording\(\)"/,
+    'the narrative section must offer a way to record instead of typing');
+});

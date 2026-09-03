@@ -318,7 +318,11 @@ function listFailureMessage(err, what) {
 }
 
 async function apiFetch(path, options = {}) {
-  const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
+  // A FormData body (e.g. an audio recording, #88) must not carry a
+  // 'Content-Type: application/json' header — fetch needs to set its own
+  // multipart boundary, which a hardcoded JSON header would stomp on.
+  const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
+  const headers = { ...(isFormData ? {} : { 'Content-Type': 'application/json' }), ...(options.headers || {}) };
 
   // #39: read the token at call time. It used to be captured once inside
   // onAuthStateChanged and reused for the life of the page, so every request
@@ -333,10 +337,10 @@ async function apiFetch(path, options = {}) {
   if (idToken) {
     headers['Authorization'] = `Bearer ${idToken}`;
   }
-  
+
   const res = await fetch(`${API_BASE}${path}`, {
-    headers,
-    ...options
+    ...options,
+    headers
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
@@ -1139,7 +1143,9 @@ async function buildStoryboard() {
 
   try {
     if (activeStoryboardNarrativePoller) clearInterval(activeStoryboardNarrativePoller);
+    if (storyboardMediaRecorder && storyboardMediaRecorder.state === 'recording') storyboardMediaRecorder.stop();
     document.getElementById('storyboardNarrativePrompt').value = '';
+    document.getElementById('storyboardRecordBtn').textContent = 'Record audio walkthrough';
     delete document.getElementById('storyboardNarrativeText').dataset.loadedText;
     storyboardDraft = await apiFetch(`/admin/projects/${encodeURIComponent(projectId)}/storyboards`, { method: 'POST' });
     showView('storyboard');
@@ -1225,6 +1231,11 @@ function renderStoryboardNarrative() {
   const busy = narrativeStatus === 'queued' || narrativeStatus === 'generating';
   btn.disabled = busy;
   btn.textContent = busy ? 'Generating…' : 'Generate narrative';
+
+  const recordBtn = document.getElementById('storyboardRecordBtn');
+  if (recordBtn.textContent !== 'Stop recording') {
+    recordBtn.disabled = busy;
+  }
 
   const statusLabels = { queued: 'Queued…', generating: 'Generating…', done: 'Done', error: 'Failed' };
   statusEl.textContent = narrativeStatus ? statusLabels[narrativeStatus] || '' : '';
@@ -1319,6 +1330,77 @@ function startStoryboardNarrativePolling(draftId) {
       showToast(`Failed to check narrative status: ${err.message}`, 'error');
     }
   }, 3000);
+}
+
+// ── Recorded audio as an alternate prompt input (#88) ─────────────
+// The recording is transcribed server-side into narrativePrompt — the exact
+// field a typed prompt uses — so generation afterward is the same "queue,
+// then poll" path startStoryboardNarrativePolling already drives. There is
+// no separate audio-driven UI state beyond capturing the recording itself.
+
+let storyboardMediaRecorder = null;
+let storyboardAudioChunks = [];
+
+async function toggleStoryboardAudioRecording() {
+  if (storyboardMediaRecorder && storyboardMediaRecorder.state === 'recording') {
+    storyboardMediaRecorder.stop();
+    return;
+  }
+
+  if (!storyboardDraft) return;
+  if (storyboardDraft.narrativeText) {
+    const proceed = confirm('Recording a new walkthrough replaces the current narrative, including any unsaved edits. Continue?');
+    if (!proceed) return;
+  }
+
+  const btn = document.getElementById('storyboardRecordBtn');
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    storyboardAudioChunks = [];
+    storyboardMediaRecorder = new MediaRecorder(stream);
+    storyboardMediaRecorder.ondataavailable = (e) => {
+      if (e.data.size > 0) storyboardAudioChunks.push(e.data);
+    };
+    storyboardMediaRecorder.onstop = () => {
+      stream.getTracks().forEach(t => t.stop());
+      const mimeType = storyboardMediaRecorder.mimeType || 'audio/webm';
+      const blob = new Blob(storyboardAudioChunks, { type: mimeType });
+      uploadStoryboardAudio(blob, mimeType);
+    };
+    storyboardMediaRecorder.start();
+    btn.textContent = 'Stop recording';
+  } catch (err) {
+    showToast(`Microphone access failed: ${err.message}`, 'error');
+  }
+}
+
+/** Uploads the recorded clip for transcription, then starts polling — the
+ * response already carries the resulting narrativeStatus/narrativePrompt,
+ * same shape POST .../narrative returns for a typed prompt. */
+async function uploadStoryboardAudio(blob, mimeType) {
+  if (!storyboardDraft) return;
+  const btn = document.getElementById('storyboardRecordBtn');
+  const label = 'Record audio walkthrough';
+  btn.disabled = true;
+  btn.textContent = 'Transcribing…';
+
+  try {
+    const ext = (mimeType.split('/')[1] || 'webm').split(';')[0];
+    const formData = new FormData();
+    formData.append('file', blob, `walkthrough.${ext}`);
+
+    storyboardDraft = await apiFetch(`/admin/storyboards/${encodeURIComponent(storyboardDraft.id)}/narrative/audio`, {
+      method: 'POST',
+      body: formData
+    });
+    renderStoryboardNarrative();
+    startStoryboardNarrativePolling(storyboardDraft.id);
+  } catch (err) {
+    showToast(`Failed to transcribe recording: ${err.message}`, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = label;
+  }
 }
 
 function findStoryboardCapture(captureId) {

@@ -533,8 +533,10 @@
         <p class="muted">Type what you want the narrative to focus on. The AI reads the included slides in order, plus their notes, and infers its own structure.</p>
         <textarea class="form-input" id="storyboardNarrativePrompt" rows="3"
                   placeholder="e.g. Tell the story of this campaign from setup through launch."></textarea>
+        <p class="muted">Or record a short walkthrough instead of typing — it's transcribed and used as the prompt above.</p>
         <div class="storyboard-narrative-actions">
           <button class="btn btn-primary" id="storyboardGenerateBtn" type="button" onclick="generateStoryboardNarrative()">Generate narrative</button>
+          <button class="btn btn-ghost" id="storyboardRecordBtn" type="button" onclick="toggleStoryboardAudioRecording()">Record audio walkthrough</button>
           <span id="storyboardNarrativeStatus" class="muted"></span>
         </div>
         <div id="storyboardNarrativeError" class="form-error" style="display:none"></div>

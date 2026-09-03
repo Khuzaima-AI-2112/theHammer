@@ -32,8 +32,24 @@
  * hand edit only moves aside when the Analyst explicitly triggers
  * regeneration (POST, above) — nothing else overwrites it.
  *
- * Audio input (#88) and finalizing into a PDF (#89) are separate tickets and
- * do not live here.
+ * Recorded audio as an alternate prompt input (#88)  —
+ * POST /admin/storyboards/:id/narrative/audio uploads a short recording,
+ * transcribes it via Vertex AI Gemini, and feeds the transcript through
+ * queueNarrativeGeneration() — the exact function POST .../narrative (above)
+ * calls with a typed prompt. There is no separate audio-driven generation
+ * path, only an alternate way to arrive at the prompt string. A
+ * transcription failure writes narrativeStatus 'error' with a message
+ * identifying it as a transcription failure, the same way a generation
+ * failure does; it never falls back to an empty prompt. The upload itself
+ * gets the same pre-multer Content-Length guard (rejectOversizedAudio) that
+ * index.js's /capture route uses for Captures, sized for a recording instead
+ * of a screenshot, so an oversized body is refused before it is buffered.
+ *
+ * Every route below that addresses an existing draft (as opposed to creating
+ * one) goes through loadOwnedDraft() for its exists/workspace-ownership
+ * check, rather than repeating it inline.
+ *
+ * Finalizing into a PDF (#89) is a separate ticket and does not live here.
  *
  * Auth: requireAnalyst, not requireAdmin like exports.js/activity.js — #85's
  * own acceptance criteria call for Analyst-and-above, matching the gate
@@ -44,6 +60,7 @@
 'use strict';
 
 const express = require('express');
+const multer = require('multer');
 const { Timestamp } = require('firebase-admin/firestore');
 const { Storage } = require('@google-cloud/storage');
 const logger = require('../../lib/logger');
@@ -56,6 +73,92 @@ const router = express.Router();
 
 const storage = new Storage();
 const BUCKET = process.env.GCS_BUCKET || 'thehammer-storage-2026';
+
+// A short spoken walkthrough, not a file transfer — generous for a few
+// minutes of audio without inviting an arbitrary media upload.
+const MAX_AUDIO_BYTES = 15 * 1024 * 1024;
+
+// What MediaRecorder in a browser actually produces (webm/ogg), plus the
+// common container formats a client could otherwise send.
+const ACCEPTED_AUDIO_TYPES = {
+  'audio/webm': 'webm',
+  'audio/ogg':  'ogg',
+  'audio/wav':  'wav',
+  'audio/mp4':  'm4a',
+  'audio/mpeg': 'mp3',
+};
+
+// A browser's MediaRecorder reports its mimeType with a codecs parameter
+// (e.g. `audio/webm;codecs=opus`), which is what multer sees as the part's
+// Content-Type. Matching ACCEPTED_AUDIO_TYPES against the bare type — the
+// part before ';' — is what makes a real recording (not just a hand-built
+// test upload) accepted.
+function baseMimeType(mimetype) {
+  return (mimetype || '').split(';')[0].trim().toLowerCase();
+}
+
+const audioUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_AUDIO_BYTES },
+  fileFilter: (_req, file, cb) => {
+    if (!ACCEPTED_AUDIO_TYPES[baseMimeType(file.mimetype)]) {
+      const err = new Error(`Unsupported audio type: expected one of ${Object.keys(ACCEPTED_AUDIO_TYPES).join(', ')}, received ${file.mimetype}`);
+      err.status = 400;
+      return cb(err);
+    }
+    cb(null, true);
+  }
+});
+
+// SEC-07-style guard (index.js's rejectOversizedUpload, ahead of /capture's
+// multer) sized for a recording instead of a screenshot: refuse an oversized
+// body by its declared Content-Length before multer buffers any of it.
+const AUDIO_ENVELOPE_ALLOWANCE = 64 * 1024;
+const MAX_AUDIO_REQUEST_BYTES = MAX_AUDIO_BYTES + AUDIO_ENVELOPE_ALLOWANCE;
+const AUDIO_DRAIN_BUDGET_BYTES = 2 * MAX_AUDIO_REQUEST_BYTES;
+
+function requireAudioMultipart(req, res, next) {
+  const ct = req.headers['content-type'] || '';
+  if (!ct.startsWith('multipart/form-data')) {
+    return res.status(400).json({
+      error: 'Content-Type must be multipart/form-data',
+      received: ct.slice(0, 120) || '(none)'
+    });
+  }
+  next();
+}
+
+function rejectOversizedAudio(req, res, next) {
+  const declared = Number(req.headers['content-length']);
+  if (!Number.isFinite(declared) || declared <= MAX_AUDIO_REQUEST_BYTES) {
+    return next();
+  }
+
+  let replied = false;
+  const reply = () => {
+    if (replied || res.headersSent) return;
+    replied = true;
+    res.status(413).json({
+      error: `Payload Too Large: recording exceeds ${MAX_AUDIO_BYTES / (1024 * 1024)}MB limit`,
+      declaredBytes: declared
+    });
+  };
+
+  // Drain rather than destroy immediately — answering while the client is
+  // still sending would reset the socket before it sees the 413. The budget
+  // caps how much of an attacker-declared size the server actually reads.
+  let drained = 0;
+  req.on('data', (chunk) => {
+    drained += chunk.length;
+    if (drained > AUDIO_DRAIN_BUDGET_BYTES) {
+      reply();
+      req.destroy();
+    }
+  });
+  req.on('end', reply);
+  req.on('error', reply);
+  req.on('aborted', reply);
+}
 
 // Prompts are typed by hand on one draft, not machine-generated — 4000
 // characters is generous headroom without inviting a pasted document.
@@ -129,6 +232,29 @@ async function enrichWithSignedUrls(draft) {
   };
 }
 
+/**
+ * Loads a draft by id, enforcing existence and workspace ownership — the
+ * guard every route below that addresses an existing draft (as opposed to
+ * creating one) needs first. Writes the 404/403 response itself and returns
+ * null when the draft can't be used; returns `{ ref, snap, existing }` when
+ * it can, so the caller never has to repeat the exists/workspace check or
+ * re-fetch the document it already has in hand.
+ */
+async function loadOwnedDraft(req, res) {
+  const ref = db.collection(collections.STORYBOARD_DRAFTS).doc(req.params.id);
+  const snap = await ref.get();
+  if (!snap.exists) {
+    res.status(404).json({ error: 'storyboard draft not found' });
+    return null;
+  }
+  const existing = snap.data();
+  if (existing.workspaceId !== req.hammerUser.workspaceId) {
+    res.status(403).json({ error: 'Forbidden: draft belongs to another workspace' });
+    return null;
+  }
+  return { ref, snap, existing };
+}
+
 router.post('/projects/:id/storyboards', requireAnalyst, async (req, res, next) => {
   try {
     const projectId = req.params.id;
@@ -192,29 +318,18 @@ router.post('/projects/:id/storyboards', requireAnalyst, async (req, res, next) 
 
 router.get('/storyboards/:id', requireAnalyst, async (req, res, next) => {
   try {
-    const snap = await db.collection(collections.STORYBOARD_DRAFTS).doc(req.params.id).get();
-    if (!snap.exists) {
-      return res.status(404).json({ error: 'storyboard draft not found' });
-    }
-    if (snap.data().workspaceId !== req.hammerUser.workspaceId) {
-      return res.status(403).json({ error: 'Forbidden: draft belongs to another workspace' });
-    }
-    const draft = await enrichWithSignedUrls(serializeDraft(snap));
+    const loaded = await loadOwnedDraft(req, res);
+    if (!loaded) return;
+    const draft = await enrichWithSignedUrls(serializeDraft(loaded.snap));
     return res.json(draft);
   } catch (err) { next(err); }
 });
 
 router.patch('/storyboards/:id', requireAnalyst, async (req, res, next) => {
   try {
-    const ref = db.collection(collections.STORYBOARD_DRAFTS).doc(req.params.id);
-    const snap = await ref.get();
-    if (!snap.exists) {
-      return res.status(404).json({ error: 'storyboard draft not found' });
-    }
-    const existing = snap.data();
-    if (existing.workspaceId !== req.hammerUser.workspaceId) {
-      return res.status(403).json({ error: 'Forbidden: draft belongs to another workspace' });
-    }
+    const loaded = await loadOwnedDraft(req, res);
+    if (!loaded) return;
+    const { ref, existing } = loaded;
 
     const incoming = req.body?.captures;
     if (!Array.isArray(incoming) || incoming.length === 0) {
@@ -306,6 +421,13 @@ async function buildNarrativeRequest(draft, prompt) {
   return { contents: [{ role: 'user', parts }] };
 }
 
+/** The Project's configured llmModel, shared by narrative generation and
+ * audio transcription — both are Gemini calls against the same Project. */
+async function getProjectModelId(projectId) {
+  const projSnap = await db.collection(collections.PROJECTS).doc(projectId).get();
+  return projSnap.data()?.llmModel || 'gemini-1.5-flash';
+}
+
 /**
  * Runs the generation and writes the outcome back onto the draft. Not
  * awaited by the route — the portal polls GET /admin/storyboards/:id for the
@@ -320,9 +442,7 @@ async function generateNarrative(draftId, prompt) {
 
     const snap = await ref.get();
     const draft = serializeDraft(snap);
-
-    const projSnap = await db.collection(collections.PROJECTS).doc(draft.projectId).get();
-    const modelId = projSnap.data()?.llmModel || 'gemini-1.5-flash';
+    const modelId = await getProjectModelId(draft.projectId);
 
     const request = await buildNarrativeRequest(draft, prompt);
     const client = getAIClient();
@@ -348,16 +468,34 @@ async function generateNarrative(draftId, prompt) {
   }
 }
 
+/**
+ * Writes the queued state and fires generation. Shared by the typed-prompt
+ * route below and the audio-transcript route further down (#88) — whichever
+ * produced the prompt string, triggering generation from it is one code
+ * path, not two.
+ */
+async function queueNarrativeGeneration(ref, draftId, prompt) {
+  await ref.update({
+    narrativeStatus: 'queued',
+    narrativePrompt: prompt,
+    narrativeText: null,
+    narrativeError: null,
+    updatedAt: nowISO(),
+  });
+
+  generateNarrative(draftId, prompt).catch((err) => {
+    logger.error(`[Storyboard Narrative] unhandled error for draft ${draftId}:`, err);
+  });
+
+  const queuedSnap = await ref.get();
+  return enrichWithSignedUrls(serializeDraft(queuedSnap));
+}
+
 router.post('/storyboards/:id/narrative', requireAnalyst, async (req, res, next) => {
   try {
-    const ref = db.collection(collections.STORYBOARD_DRAFTS).doc(req.params.id);
-    const snap = await ref.get();
-    if (!snap.exists) {
-      return res.status(404).json({ error: 'storyboard draft not found' });
-    }
-    if (snap.data().workspaceId !== req.hammerUser.workspaceId) {
-      return res.status(403).json({ error: 'Forbidden: draft belongs to another workspace' });
-    }
+    const loaded = await loadOwnedDraft(req, res);
+    if (!loaded) return;
+    const { ref } = loaded;
 
     const prompt = typeof req.body?.prompt === 'string' ? req.body.prompt.trim() : '';
     if (!prompt) {
@@ -367,34 +505,15 @@ router.post('/storyboards/:id/narrative', requireAnalyst, async (req, res, next)
       return res.status(400).json({ error: `prompt must be ${MAX_PROMPT_LENGTH} characters or fewer` });
     }
 
-    await ref.update({
-      narrativeStatus: 'queued',
-      narrativePrompt: prompt,
-      narrativeText: null,
-      narrativeError: null,
-      updatedAt: nowISO(),
-    });
-
-    generateNarrative(req.params.id, prompt).catch((err) => {
-      logger.error(`[Storyboard Narrative] unhandled error for draft ${req.params.id}:`, err);
-    });
-
-    const queuedSnap = await ref.get();
-    return res.status(202).json(await enrichWithSignedUrls(serializeDraft(queuedSnap)));
+    return res.status(202).json(await queueNarrativeGeneration(ref, req.params.id, prompt));
   } catch (err) { next(err); }
 });
 
 router.patch('/storyboards/:id/narrative', requireAnalyst, async (req, res, next) => {
   try {
-    const ref = db.collection(collections.STORYBOARD_DRAFTS).doc(req.params.id);
-    const snap = await ref.get();
-    if (!snap.exists) {
-      return res.status(404).json({ error: 'storyboard draft not found' });
-    }
-    const existing = snap.data();
-    if (existing.workspaceId !== req.hammerUser.workspaceId) {
-      return res.status(403).json({ error: 'Forbidden: draft belongs to another workspace' });
-    }
+    const loaded = await loadOwnedDraft(req, res);
+    if (!loaded) return;
+    const { ref, existing } = loaded;
 
     // Nothing to correct before a narrative has ever finished generating —
     // an edit here would write into a field the rest of the flow doesn't
@@ -419,7 +538,96 @@ router.patch('/storyboards/:id/narrative', requireAnalyst, async (req, res, next
   } catch (err) { next(err); }
 });
 
+/**
+ * Builds the Gemini transcription request for one recorded audio clip, as a
+ * gs:// reference plus an instruction to return the transcript verbatim.
+ *
+ * Exported for direct testing, same reasoning as buildNarrativeRequest.
+ */
+function buildTranscriptionRequest(gcsUri, mimeType) {
+  return {
+    contents: [{
+      role: 'user',
+      parts: [
+        { text: 'Transcribe this audio recording verbatim. Return only the transcript text, with no commentary or formatting.' },
+        { fileData: { mimeType, fileUri: gcsUri } },
+      ],
+    }],
+  };
+}
+
+router.post(
+  '/storyboards/:id/narrative/audio',
+  requireAnalyst,
+  requireAudioMultipart,
+  rejectOversizedAudio,
+  (req, res, next) => {
+    audioUpload.single('file')(req, res, (err) => {
+      if (err instanceof multer.MulterError) {
+        if (err.code === 'LIMIT_FILE_SIZE') {
+          return res.status(413).json({ error: `Payload Too Large: recording exceeds ${MAX_AUDIO_BYTES / (1024 * 1024)}MB limit` });
+        }
+        return res.status(400).json({ error: err.message });
+      } else if (err) {
+        return res.status(err.status === 400 ? 400 : 500).json({ error: err.message });
+      }
+      next();
+    });
+  },
+  async (req, res, next) => {
+    try {
+      const loaded = await loadOwnedDraft(req, res);
+      if (!loaded) return;
+      const { ref, existing } = loaded;
+
+      if (!req.file) {
+        return res.status(400).json({ error: 'Missing required field: file' });
+      }
+
+      // One fixed object per draft — a re-recording replaces the last one,
+      // there is no need to keep every take.
+      const mimeType = baseMimeType(req.file.mimetype);
+      const ext = ACCEPTED_AUDIO_TYPES[mimeType];
+      const audioPath = `${existing.projectId}/storyboards/${req.params.id}/audio.${ext}`;
+      await storage.bucket(BUCKET).file(audioPath).save(req.file.buffer, {
+        metadata: { contentType: mimeType },
+      });
+
+      const modelId = await getProjectModelId(existing.projectId);
+
+      let transcript;
+      try {
+        const client = getAIClient();
+        const transcriptionRequest = buildTranscriptionRequest(`gs://${BUCKET}/${audioPath}`, mimeType);
+        const resp = await client.models.generateContent({ model: modelId, ...transcriptionRequest });
+        transcript = (resp.text ?? '').trim();
+        if (!transcript) {
+          throw new Error('transcription returned no text');
+        }
+      } catch (err) {
+        // Explicit failure, never a silent fall-through to an empty prompt —
+        // the same shape generateNarrative uses for a generation failure.
+        logger.error(`[Storyboard Narrative] transcription failed for draft ${req.params.id}:`, err);
+        await ref.update({
+          narrativeStatus: 'error',
+          narrativeError: `Transcription failed: ${err.message}`,
+          updatedAt: nowISO(),
+        });
+        const errSnap = await ref.get();
+        return res.status(202).json(await enrichWithSignedUrls(serializeDraft(errSnap)));
+      }
+
+      // From here the transcript IS the prompt — queueNarrativeGeneration is
+      // the exact function the typed-prompt route calls (#88's own scope:
+      // no separate downstream logic for audio vs. typed input).
+      const prompt = transcript.slice(0, MAX_PROMPT_LENGTH);
+      return res.status(202).json(await queueNarrativeGeneration(ref, req.params.id, prompt));
+    } catch (err) { next(err); }
+  }
+);
+
 router.buildNarrativeRequest = buildNarrativeRequest;
+router.buildTranscriptionRequest = buildTranscriptionRequest;
 router.generateNarrative = generateNarrative;
 
 module.exports = router;
