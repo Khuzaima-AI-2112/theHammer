@@ -66,6 +66,19 @@ const inactivityModal = document.getElementById('inactivity-modal');
 const btnSnooze       = document.getElementById('btn-snooze');
 const btnCaptureNow   = document.getElementById('btn-capture-now');
 
+// #72 — one status message per capture() refusal, shared by both response
+// handlers below so a new reason cannot silently reuse another's text. Before
+// this, every refusal but 'no_api_key'/'unauthorized' fell through to the same
+// "Blocked — set Project & save first.", which was simply false for a cancel
+// or an upload that had already been queued safely.
+const REFUSAL_STATUS = {
+  no_project:             'Blocked — set Project & save first.',
+  restricted_page:        "Blocked — this page can't be captured.",
+  invalid_screenshot:     'Capture failed — screenshot data looks invalid. Try again.',
+  blob_conversion_failed: 'Capture failed — could not convert the screenshot. Try again.',
+  queued:                 'Capture saved — will upload when your connection returns.'
+};
+
 document.addEventListener('DOMContentLoaded', async () => {
   const { session, settings } = await chrome.storage.local.get(['session', 'settings']);
 
@@ -185,12 +198,14 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (response?.ok) {
         setStatus('Uploaded ✓');
         refreshHistory();
-      } else if (response?.reason === 'blocked') {
-        setStatus('Blocked — set Project & save first.');
+      } else if (response?.reason === 'cancelled') {
+        setStatus('Cancelled.');
       } else if (response?.reason === 'no_api_key' || response?.reason === 'unauthorized') {
         setStatus('Sign in to your account.');
         welcomeScreen.style.display = 'block';
         captureControls.style.display = 'none';
+      } else if (response?.reason && REFUSAL_STATUS[response.reason]) {
+        setStatus(REFUSAL_STATUS[response.reason]);
       } else {
         setStatus('Failed: ' + (response?.error ?? 'unknown'));
       }
@@ -229,12 +244,12 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (response?.ok) {
         setStatus(fellBack ? fellBack + 'Uploaded ✓' : 'Uploaded ✓');
         refreshHistory();
-      } else if (response?.reason === 'blocked') {
-        setStatus(fellBack + 'Blocked — set Project & save first.');
       } else if (response?.reason === 'no_api_key' || response?.reason === 'unauthorized') {
         setStatus('Sign in to your account.');
         welcomeScreen.style.display = 'block';
         captureControls.style.display = 'none';
+      } else if (response?.reason && REFUSAL_STATUS[response.reason]) {
+        setStatus(fellBack + REFUSAL_STATUS[response.reason]);
       } else {
         setStatus(fellBack + 'Failed: ' + (response?.error ?? 'unknown'));
       }

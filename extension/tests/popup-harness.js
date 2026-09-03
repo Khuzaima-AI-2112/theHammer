@@ -105,6 +105,8 @@ function makeElement(id, tagName = 'div') {
     addEventListener(type, fn) { (this.listeners[type] ||= []).push(fn); },
     removeEventListener() {},
     click() { for (const fn of this.listeners.click ?? []) fn({ preventDefault() {} }); },
+    setAttribute() {},
+    getAttribute() { return null; },
     classList: { add() {}, remove() {}, toggle() {}, contains() { return false; } },
     querySelector: () => null,
     querySelectorAll: () => []

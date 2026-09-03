@@ -124,9 +124,13 @@ function loadServiceWorker(opts = {}) {
   const SIGNED_PUT = 'https://gcs.test/signed-put';
 
   const defaultFetch = async (url, init = {}) => {
-    // capture() turns its data URL into a Blob by fetching it.
+    // capture() turns its data URL into a Blob by fetching it. opts.blobFails
+    // simulates that conversion producing something capture()'s own sanity
+    // check rejects (#72's "Could not convert screenshot to PNG blob").
     if (String(url).startsWith('data:')) {
-      return { ok: true, status: 200, blob: async () => new Blob(['png'], { type: 'image/png' }) };
+      return opts.blobFails
+        ? { ok: true, status: 200, blob: async () => new Blob([], { type: 'text/plain' }) }
+        : { ok: true, status: 200, blob: async () => new Blob(['png'], { type: 'image/png' }) };
     }
     requests.push({ url, init, body: jsonBody(init) });
     if (String(url) === SIGNED_PUT) {
@@ -212,7 +216,10 @@ function loadServiceWorker(opts = {}) {
       },
       async captureVisibleTab(windowId) {
         tabs.captures.push(windowId);
-        return FAKE_PNG;
+        // opts.captureVisibleTabResult lets a test simulate Chrome handing back
+        // something capture()'s own sanity check rejects (#72's "Screenshot
+        // data looks invalid").
+        return opts.captureVisibleTabResult ?? FAKE_PNG;
       }
     },
     offscreen: {
@@ -251,11 +258,29 @@ function loadServiceWorker(opts = {}) {
   // whenever the bucket CORS policy does not name the extension origin, and
   // it is the one case that sends a single Capture down both upload paths.
 
+  // Node has Blob but not FileReader. Real MV3 service workers do have it —
+  // File API's FileReader is Worker-scope, unlike XMLHttpRequest (#70) — so its
+  // absence here was never testing a real constraint, only blocking
+  // blobToBase64 (the offline-queue path) with an unrelated ReferenceError
+  // before it ever ran. Just enough of the interface for that one call site.
+  class HarnessFileReader {
+    readAsDataURL(blob) {
+      blob.arrayBuffer()
+        .then((buf) => {
+          this.result = `data:${blob.type || 'application/octet-stream'};base64,` +
+            Buffer.from(buf).toString('base64');
+          this.onloadend?.();
+        })
+        .catch((err) => this.onerror?.(err));
+    }
+  }
+
   const sandbox = {
     chrome,
     fetch: fetchImpl,
     crypto: globalThis.crypto,
     structuredClone,
+    FileReader: HarnessFileReader,
     // Unreffed so a pending timeout inside the worker — the 2s semantic-data
     // guard, for one — cannot hold the test process open.
     setTimeout: (fn, ms, ...args) => {

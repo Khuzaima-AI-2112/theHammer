@@ -318,7 +318,11 @@ function listFailureMessage(err, what) {
 }
 
 async function apiFetch(path, options = {}) {
-  const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
+  // A FormData body (e.g. an audio recording, #88) must not carry a
+  // 'Content-Type: application/json' header — fetch needs to set its own
+  // multipart boundary, which a hardcoded JSON header would stomp on.
+  const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
+  const headers = { ...(isFormData ? {} : { 'Content-Type': 'application/json' }), ...(options.headers || {}) };
 
   // #39: read the token at call time. It used to be captured once inside
   // onAuthStateChanged and reused for the life of the page, so every request
@@ -333,10 +337,10 @@ async function apiFetch(path, options = {}) {
   if (idToken) {
     headers['Authorization'] = `Bearer ${idToken}`;
   }
-  
+
   const res = await fetch(`${API_BASE}${path}`, {
-    headers,
-    ...options
+    ...options,
+    headers
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
@@ -1109,6 +1113,346 @@ function toggleAutoRefresh(enabled) {
         loadActivity();
       }
     }, 30_000);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// STORYBOARD DRAFT VIEW (#85)
+// ═══════════════════════════════════════════════════════════════
+
+let storyboardDraft = null;
+let activeStoryboardNarrativePoller = null;
+
+/**
+ * Opens a Storyboard draft for the Project selected in the Activity view.
+ * The backend route is a find-or-create, so a second click on a Project
+ * that already has an open draft resumes it rather than starting over —
+ * that's what makes reopening after leaving mid-curation work.
+ */
+async function buildStoryboard() {
+  const projectId = document.getElementById('activityProjectSelect').value;
+  if (!projectId) {
+    showToast('Select a project first', 'error');
+    return;
+  }
+
+  const btn = document.getElementById('activityBuildStoryboardBtn');
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Opening…';
+
+  try {
+    if (activeStoryboardNarrativePoller) clearInterval(activeStoryboardNarrativePoller);
+    if (storyboardMediaRecorder && storyboardMediaRecorder.state === 'recording') storyboardMediaRecorder.stop();
+    document.getElementById('storyboardNarrativePrompt').value = '';
+    document.getElementById('storyboardRecordBtn').textContent = 'Record audio walkthrough';
+    delete document.getElementById('storyboardNarrativeText').dataset.loadedText;
+    storyboardDraft = await apiFetch(`/admin/projects/${encodeURIComponent(projectId)}/storyboards`, { method: 'POST' });
+    showView('storyboard');
+    renderStoryboardDraft();
+    if (storyboardDraft.narrativeStatus === 'queued' || storyboardDraft.narrativeStatus === 'generating') {
+      startStoryboardNarrativePolling(storyboardDraft.id);
+    }
+  } catch (err) {
+    showToast(`Failed to open Storyboard: ${err.message}`, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = label;
+  }
+}
+
+function renderStoryboardDraft() {
+  const grid  = document.getElementById('storyboardGrid');
+  const empty = document.getElementById('storyboardEmptyState');
+
+  if (!storyboardDraft || storyboardDraft.captures.length === 0) {
+    grid.innerHTML = '';
+    grid.style.display = 'none';
+    empty.style.display = 'flex';
+    return;
+  }
+  grid.style.display = '';
+  empty.style.display = 'none';
+
+  const sorted = [...storyboardDraft.captures].sort((a, b) => a.order - b.order);
+
+  grid.innerHTML = sorted.map(c => `
+    <div class="storyboard-card${c.included ? '' : ' excluded'}" data-capture-id="${esc(c.captureId)}">
+      <div class="storyboard-thumb-wrap">
+        <img class="storyboard-thumb" src="${esc(c.signedUrl || '')}" alt="Slide ${c.order}"
+             onclick="this.classList.toggle('zoomed')">
+      </div>
+      <div class="storyboard-card-controls">
+        <label class="storyboard-checkbox">
+          <input type="checkbox" ${c.included ? 'checked' : ''}
+                 onchange="toggleStoryboardCapture('${esc(c.captureId)}', this.checked)">
+          Include
+        </label>
+        <label class="storyboard-order-label">
+          Slide #
+          <input class="form-input storyboard-order-input" type="number" min="1" value="${c.order}"
+                 onchange="updateStoryboardOrder('${esc(c.captureId)}', this.value)">
+        </label>
+      </div>
+      <textarea class="form-input storyboard-note" placeholder="Note for this slide…"
+                onchange="updateStoryboardNote('${esc(c.captureId)}', this.value)">${esc(c.note)}</textarea>
+    </div>`).join('');
+
+  renderStoryboardNarrative();
+}
+
+/**
+ * Reflects storyboardDraft's narrativeStatus/narrativeText/narrativeError.
+ * The prompt textarea is only pre-filled from the draft the first time it
+ * renders empty — typing should never be clobbered by a background poll.
+ *
+ * The narrative textarea is the same: it's only overwritten from the server
+ * value when that value has actually changed since the last sync (tracked
+ * via dataset.loadedText). A background poll re-rendering with the *same*
+ * server text — the common case while an Analyst is mid-edit — leaves the
+ * textarea alone. A regeneration finishing with *new* text does overwrite
+ * it, which is the point (#87): regeneration explicitly replaces the
+ * narrative, including an edit that hadn't been saved.
+ */
+function renderStoryboardNarrative() {
+  const statusEl = document.getElementById('storyboardNarrativeStatus');
+  const errorEl  = document.getElementById('storyboardNarrativeError');
+  const textWrap = document.getElementById('storyboardNarrativeTextWrap');
+  const textEl   = document.getElementById('storyboardNarrativeText');
+  const btn      = document.getElementById('storyboardGenerateBtn');
+  const promptEl = document.getElementById('storyboardNarrativePrompt');
+
+  const narrativeStatus = storyboardDraft?.narrativeStatus ?? null;
+
+  if (!promptEl.value && storyboardDraft?.narrativePrompt) {
+    promptEl.value = storyboardDraft.narrativePrompt;
+  }
+
+  const busy = narrativeStatus === 'queued' || narrativeStatus === 'generating';
+  btn.disabled = busy;
+  btn.textContent = busy ? 'Generating…' : 'Generate narrative';
+
+  const recordBtn = document.getElementById('storyboardRecordBtn');
+  if (recordBtn.textContent !== 'Stop recording') {
+    recordBtn.disabled = busy;
+  }
+
+  const statusLabels = { queued: 'Queued…', generating: 'Generating…', done: 'Done', error: 'Failed' };
+  statusEl.textContent = narrativeStatus ? statusLabels[narrativeStatus] || '' : '';
+
+  if (narrativeStatus === 'error' && storyboardDraft.narrativeError) {
+    errorEl.textContent = storyboardDraft.narrativeError;
+    errorEl.style.display = '';
+  } else {
+    errorEl.style.display = 'none';
+  }
+
+  if (narrativeStatus === 'done' && storyboardDraft.narrativeText != null) {
+    if (textEl.dataset.loadedText !== storyboardDraft.narrativeText) {
+      textEl.value = storyboardDraft.narrativeText;
+      textEl.dataset.loadedText = storyboardDraft.narrativeText;
+    }
+    textWrap.style.display = '';
+  } else {
+    textWrap.style.display = 'none';
+  }
+}
+
+/** POSTs the typed prompt, then polls GET /admin/storyboards/:id until the
+ * generation settles — same "queue, then poll" shape as the Reports view.
+ * Regenerating over an existing narrative is confirmed first (#87) — it
+ * replaces the current text, including any unsaved edit, and that must
+ * never happen as a side effect the Analyst didn't ask for. */
+async function generateStoryboardNarrative() {
+  if (!storyboardDraft) return;
+  const prompt = document.getElementById('storyboardNarrativePrompt').value.trim();
+  if (!prompt) {
+    showToast('Type a prompt first', 'error');
+    return;
+  }
+
+  if (storyboardDraft.narrativeText) {
+    const proceed = confirm('Regenerating replaces the current narrative, including any unsaved edits. Continue?');
+    if (!proceed) return;
+  }
+
+  try {
+    storyboardDraft = await apiFetch(`/admin/storyboards/${encodeURIComponent(storyboardDraft.id)}/narrative`, {
+      method: 'POST',
+      body: JSON.stringify({ prompt })
+    });
+    renderStoryboardNarrative();
+    startStoryboardNarrativePolling(storyboardDraft.id);
+  } catch (err) {
+    showToast(`Failed to start narrative generation: ${err.message}`, 'error');
+  }
+}
+
+/** PATCHes the hand-edited narrative text directly — #87's review/edit step.
+ * Only reachable once a narrative exists (the textarea is hidden until
+ * then), matching the backend's rejection of an edit with nothing to edit. */
+async function saveStoryboardNarrativeEdit() {
+  if (!storyboardDraft) return;
+  const textEl = document.getElementById('storyboardNarrativeText');
+  const btn = document.getElementById('storyboardNarrativeSaveEditBtn');
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Saving…';
+
+  try {
+    storyboardDraft = await apiFetch(`/admin/storyboards/${encodeURIComponent(storyboardDraft.id)}/narrative`, {
+      method: 'PATCH',
+      body: JSON.stringify({ narrativeText: textEl.value })
+    });
+    renderStoryboardNarrative();
+    showToast('Narrative saved', 'success');
+  } catch (err) {
+    showToast(`Failed to save narrative edit: ${err.message}`, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = label;
+  }
+}
+
+function startStoryboardNarrativePolling(draftId) {
+  if (activeStoryboardNarrativePoller) clearInterval(activeStoryboardNarrativePoller);
+  activeStoryboardNarrativePoller = setInterval(async () => {
+    try {
+      const draft = await apiFetch(`/admin/storyboards/${encodeURIComponent(draftId)}`);
+      if (!storyboardDraft || storyboardDraft.id !== draftId) return; // left the draft — drop the update
+      storyboardDraft = draft;
+      renderStoryboardNarrative();
+      if (draft.narrativeStatus === 'done' || draft.narrativeStatus === 'error') {
+        clearInterval(activeStoryboardNarrativePoller);
+      }
+    } catch (err) {
+      clearInterval(activeStoryboardNarrativePoller);
+      showToast(`Failed to check narrative status: ${err.message}`, 'error');
+    }
+  }, 3000);
+}
+
+// ── Recorded audio as an alternate prompt input (#88) ─────────────
+// The recording is transcribed server-side into narrativePrompt — the exact
+// field a typed prompt uses — so generation afterward is the same "queue,
+// then poll" path startStoryboardNarrativePolling already drives. There is
+// no separate audio-driven UI state beyond capturing the recording itself.
+
+let storyboardMediaRecorder = null;
+let storyboardAudioChunks = [];
+
+async function toggleStoryboardAudioRecording() {
+  if (storyboardMediaRecorder && storyboardMediaRecorder.state === 'recording') {
+    storyboardMediaRecorder.stop();
+    return;
+  }
+
+  if (!storyboardDraft) return;
+  if (storyboardDraft.narrativeText) {
+    const proceed = confirm('Recording a new walkthrough replaces the current narrative, including any unsaved edits. Continue?');
+    if (!proceed) return;
+  }
+
+  const btn = document.getElementById('storyboardRecordBtn');
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    storyboardAudioChunks = [];
+    storyboardMediaRecorder = new MediaRecorder(stream);
+    storyboardMediaRecorder.ondataavailable = (e) => {
+      if (e.data.size > 0) storyboardAudioChunks.push(e.data);
+    };
+    storyboardMediaRecorder.onstop = () => {
+      stream.getTracks().forEach(t => t.stop());
+      const mimeType = storyboardMediaRecorder.mimeType || 'audio/webm';
+      const blob = new Blob(storyboardAudioChunks, { type: mimeType });
+      uploadStoryboardAudio(blob, mimeType);
+    };
+    storyboardMediaRecorder.start();
+    btn.textContent = 'Stop recording';
+  } catch (err) {
+    showToast(`Microphone access failed: ${err.message}`, 'error');
+  }
+}
+
+/** Uploads the recorded clip for transcription, then starts polling — the
+ * response already carries the resulting narrativeStatus/narrativePrompt,
+ * same shape POST .../narrative returns for a typed prompt. */
+async function uploadStoryboardAudio(blob, mimeType) {
+  if (!storyboardDraft) return;
+  const btn = document.getElementById('storyboardRecordBtn');
+  const label = 'Record audio walkthrough';
+  btn.disabled = true;
+  btn.textContent = 'Transcribing…';
+
+  try {
+    const ext = (mimeType.split('/')[1] || 'webm').split(';')[0];
+    const formData = new FormData();
+    formData.append('file', blob, `walkthrough.${ext}`);
+
+    storyboardDraft = await apiFetch(`/admin/storyboards/${encodeURIComponent(storyboardDraft.id)}/narrative/audio`, {
+      method: 'POST',
+      body: formData
+    });
+    renderStoryboardNarrative();
+    startStoryboardNarrativePolling(storyboardDraft.id);
+  } catch (err) {
+    showToast(`Failed to transcribe recording: ${err.message}`, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = label;
+  }
+}
+
+function findStoryboardCapture(captureId) {
+  return storyboardDraft?.captures.find(c => c.captureId === captureId) ?? null;
+}
+
+function toggleStoryboardCapture(captureId, included) {
+  const c = findStoryboardCapture(captureId);
+  if (c) c.included = included;
+}
+
+function updateStoryboardOrder(captureId, order) {
+  const c = findStoryboardCapture(captureId);
+  const n = parseInt(order, 10);
+  if (c && Number.isInteger(n) && n >= 1) c.order = n;
+}
+
+function updateStoryboardNote(captureId, note) {
+  const c = findStoryboardCapture(captureId);
+  if (c) c.note = note;
+}
+
+/**
+ * PATCH /admin/storyboards/:id requires every Capture the draft was
+ * created with in the payload, so the whole local set is sent back each
+ * time — not just the row that changed.
+ */
+async function saveStoryboardDraft() {
+  if (!storyboardDraft) return;
+  const btn = document.getElementById('storyboardSaveBtn');
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Saving…';
+
+  try {
+    const captures = storyboardDraft.captures.map(c => ({
+      captureId: c.captureId,
+      order:     c.order,
+      included:  c.included,
+      note:      c.note
+    }));
+    storyboardDraft = await apiFetch(`/admin/storyboards/${encodeURIComponent(storyboardDraft.id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ captures })
+    });
+    renderStoryboardDraft();
+    showToast('Storyboard saved', 'success');
+  } catch (err) {
+    showToast(`Failed to save Storyboard: ${err.message}`, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = label;
   }
 }
 

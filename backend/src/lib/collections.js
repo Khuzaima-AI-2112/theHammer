@@ -8,6 +8,7 @@ module.exports = {
   SESSION_EVENTS: 'session_events',
   INACTIVITY_EVENTS: 'inactivity_events',
   REPORTS: 'reports',
+  STORYBOARD_DRAFTS: 'storyboard_drafts',
   CONFIG: 'config',
   WORKSPACES: 'workspaces',
   INVITATIONS: 'invitations',

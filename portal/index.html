@@ -479,6 +479,7 @@
             <option value="">All tools</option>
           </select>
           <button class="btn btn-primary" id="activityExportBtn" type="button" onclick="exportProjectCaptures()">Export ZIP</button>
+          <button class="btn btn-ghost" id="activityBuildStoryboardBtn" type="button" onclick="buildStoryboard()">Build Storyboard</button>
         </div>
         <span id="activityLastRefresh" style="font-size:var(--text-xs);color:var(--color-text-faint)"></span>
       </div>
@@ -500,6 +501,51 @@
           <svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
           <h3 id="activityEmptyTitle">Select a project</h3>
           <p id="activityEmptyDesc">Choose a project above to see its capture feed.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════════════
+         STORYBOARD DRAFT VIEW  (#85)
+         ═══════════════════════════════════════════════════════════ -->
+    <section class="view" id="view-storyboard" aria-label="Storyboard">
+      <div class="page-header">
+        <div class="page-header-left">
+          <h1>Storyboard</h1>
+          <p>Choose which Captures tell the story, put them in order, and note each one.</p>
+        </div>
+        <div style="display:flex;align-items:center;gap:var(--space-3)">
+          <button class="btn btn-ghost" type="button" onclick="showView('activity')">Back to Activity</button>
+          <button class="btn btn-primary" id="storyboardSaveBtn" type="button" onclick="saveStoryboardDraft()">Save</button>
+        </div>
+      </div>
+
+      <div id="storyboardEmptyState" class="empty-state" style="display:none" aria-live="polite">
+        <svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+        <h3>No Captures yet</h3>
+        <p>This Project has no Captures to build a Storyboard from.</p>
+      </div>
+
+      <div class="storyboard-grid" id="storyboardGrid"></div>
+
+      <div class="storyboard-narrative" id="storyboardNarrativeSection">
+        <h2>AI narrative</h2>
+        <p class="muted">Type what you want the narrative to focus on. The AI reads the included slides in order, plus their notes, and infers its own structure.</p>
+        <textarea class="form-input" id="storyboardNarrativePrompt" rows="3"
+                  placeholder="e.g. Tell the story of this campaign from setup through launch."></textarea>
+        <p class="muted">Or record a short walkthrough instead of typing — it's transcribed and used as the prompt above.</p>
+        <div class="storyboard-narrative-actions">
+          <button class="btn btn-primary" id="storyboardGenerateBtn" type="button" onclick="generateStoryboardNarrative()">Generate narrative</button>
+          <button class="btn btn-ghost" id="storyboardRecordBtn" type="button" onclick="toggleStoryboardAudioRecording()">Record audio walkthrough</button>
+          <span id="storyboardNarrativeStatus" class="muted"></span>
+        </div>
+        <div id="storyboardNarrativeError" class="form-error" style="display:none"></div>
+        <div id="storyboardNarrativeTextWrap" class="storyboard-narrative-text-wrap" style="display:none">
+          <label class="form-label" for="storyboardNarrativeText">Narrative (edit freely — regenerating replaces this)</label>
+          <textarea class="form-input storyboard-narrative-textarea" id="storyboardNarrativeText" rows="12"></textarea>
+          <div class="storyboard-narrative-actions">
+            <button class="btn btn-ghost" id="storyboardNarrativeSaveEditBtn" type="button" onclick="saveStoryboardNarrativeEdit()">Save edit</button>
+          </div>
         </div>
       </div>
     </section>
