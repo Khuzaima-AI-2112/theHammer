@@ -960,10 +960,12 @@ async function uploadViaProxy(blob, session, tabUrl, cloudRunUrl, token, session
 }
 
 // ── Helpers ──
+// #92, lessons_learned.md #65: FileReader.readAsDataURL yields a data URL,
+// not base64 — strip the prefix so blobBase64 actually is what it's named.
 async function blobToBase64(blob) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onloadend = () => resolve(reader.result);
+    reader.onloadend = () => resolve(String(reader.result).replace(/^data:[^,]*,/, ''));
     reader.onerror = reject;
     reader.readAsDataURL(blob);
   });
