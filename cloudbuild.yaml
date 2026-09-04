@@ -90,7 +90,13 @@ steps:
       - '--service-account'
       - 'thehammer-backend@$PROJECT_ID.iam.gserviceaccount.com'
       - '--set-env-vars'
-      - 'NODE_ENV=production,GCS_BUCKET=thehammer-storage-2026,EXTENSION_ID=$_EXTENSION_IDS,ADMIN_ORIGIN=https://thehammer-portal-282689937365.northamerica-northeast1.run.app'
+      - 'NODE_ENV=production,GCS_BUCKET=thehammer-storage-2026,EXTENSION_ID=$_EXTENSION_IDS,ADMIN_ORIGIN=https://thehammer-portal-282689937365.northamerica-northeast1.run.app,SHOTSTACK_ENV=v1'
+      # SHOTSTACK_API_KEY (#90) is a real third-party credential, never a
+      # plain env var — infra/add-shotstack-secret.ps1 provisions the
+      # `shotstack-api-key` secret and the backend SA's read access to it;
+      # this just points Cloud Run at it.
+      - '--set-secrets'
+      - 'SHOTSTACK_API_KEY=shotstack-api-key:latest'
 
   # ── 5a. Inject backend URL into Portal ──────────────────────────────────────
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'

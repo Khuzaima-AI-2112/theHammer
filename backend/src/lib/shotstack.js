@@ -25,8 +25,12 @@ const { Storage } = require('@google-cloud/storage');
 const logger = require('./logger');
 
 const SHOTSTACK_API_KEY = process.env.SHOTSTACK_API_KEY || '';
-const SHOTSTACK_ENV = process.env.SHOTSTACK_ENV || 'stage'; // 'stage' is Shotstack's free sandbox
-const SHOTSTACK_BASE_URL = process.env.SHOTSTACK_BASE_URL || `https://api.shotstack.io/${SHOTSTACK_ENV}`;
+const SHOTSTACK_ENV = process.env.SHOTSTACK_ENV || 'stage'; // 'stage' is Shotstack's sandbox, 'v1' is production
+// Confirmed against Shotstack's own dashboard/playground (2026-09-04): the
+// real path is /edit/{env}/render, not /{env}/render as first guessed —
+// api.shotstack.io/stage/render 404s, api.shotstack.io/edit/stage/render
+// doesn't.
+const SHOTSTACK_BASE_URL = process.env.SHOTSTACK_BASE_URL || `https://api.shotstack.io/edit/${SHOTSTACK_ENV}`;
 
 const storage = new Storage();
 const BUCKET = process.env.GCS_BUCKET || 'thehammer-storage-2026';
