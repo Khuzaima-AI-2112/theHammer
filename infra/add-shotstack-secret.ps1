@@ -70,6 +70,6 @@ Write-Host ''
 Write-Host '  If that deploy step fails with a permission error reading the secret,' -ForegroundColor Yellow
 Write-Host '  Cloud Build''s own service account (not thehammer-backend) also needs' -ForegroundColor Yellow
 Write-Host '  roles/secretmanager.secretAccessor on this secret — grant it with:' -ForegroundColor Yellow
-Write-Host "    gcloud secrets add-iam-policy-binding $SECRET_NAME \`" -ForegroundColor Yellow
+Write-Host "    gcloud secrets add-iam-policy-binding $SECRET_NAME \" -ForegroundColor Yellow
 Write-Host '      --member="serviceAccount:<PROJECT_NUMBER>@cloudbuild.gserviceaccount.com" \' -ForegroundColor Yellow
 Write-Host "      --role='roles/secretmanager.secretAccessor' --project=$PROJECT_ID" -ForegroundColor Yellow
