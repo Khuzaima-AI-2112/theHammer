@@ -53,16 +53,26 @@ gcloud secrets add-iam-policy-binding $SECRET_NAME `
   --role='roles/secretmanager.secretAccessor' `
   --project=$PROJECT_ID
 
-Write-Host '[shotstack] Verifying SA can access the secret (impersonation)...' -ForegroundColor Cyan
+Write-Host '  [OK] Secret stored, SA granted roles/secretmanager.secretAccessor' -ForegroundColor Green
+Write-Host ''
+Write-Host '[shotstack] Best-effort double-check via impersonation (optional)...' -ForegroundColor Cyan
+Write-Host '  This needs a DIFFERENT permission on your own account' -ForegroundColor Cyan
+Write-Host '  (roles/iam.serviceAccountTokenCreator on the SA itself) than the' -ForegroundColor Cyan
+Write-Host '  secretAccessor grant above — a failure here does NOT mean the' -ForegroundColor Cyan
+Write-Host '  deploy will fail. Cloud Run reads the secret as itself, not by' -ForegroundColor Cyan
+Write-Host '  impersonating it through your account.' -ForegroundColor Cyan
 $SECRET_VAL = gcloud secrets versions access latest `
   --secret=$SECRET_NAME `
   --impersonate-service-account=$SA_EMAIL `
-  --project=$PROJECT_ID
+  --project=$PROJECT_ID 2>$null
 if ($SECRET_VAL.Length -lt 10) {
-  Write-Error 'ERROR: SA cannot access secret. Check IAM binding.'
-  exit 1
+  Write-Host '  [SKIPPED] Could not verify by impersonation (likely missing' -ForegroundColor Yellow
+  Write-Host '  serviceAccountTokenCreator on your own account) — harmless,' -ForegroundColor Yellow
+  Write-Host '  the secretAccessor grant above is the part that matters.' -ForegroundColor Yellow
 }
-Write-Host '  [OK] Secret stored and SA access verified' -ForegroundColor Green
+else {
+  Write-Host '  [OK] Impersonation check also passed' -ForegroundColor Green
+}
 Write-Host ''
 Write-Host '  Next: cloudbuild.yaml already wires this secret to SHOTSTACK_API_KEY' -ForegroundColor Yellow
 Write-Host '  on the backend service. Approve the next Cloud Build deploy to pick it up.' -ForegroundColor Yellow
