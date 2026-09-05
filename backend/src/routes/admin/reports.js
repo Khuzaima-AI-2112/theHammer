@@ -25,6 +25,20 @@ router.post('/reports/generate', requireAnalyst, analystReportLimiter, async (re
       return res.status(400).json({ error: 'Missing projectId or reportType' });
     }
 
+    // #8: this route took a projectId on trust, which was survivable only while
+    // the metrics were invented — a caller from another Workspace got fiction.
+    // Now that the numbers are real, the same request would answer with another
+    // Customer's Capture counts, Monitored User count and Session timings. The
+    // check is the one every other project-scoped route already makes
+    // (exports.js, storyboards.js, projects.js).
+    const projSnap = await db.collection(collections.PROJECTS).doc(projectId).get();
+    if (!projSnap.exists) {
+      return res.status(404).json({ error: 'project not found' });
+    }
+    if (projSnap.data().workspaceId !== req.hammerUser.workspaceId) {
+      return res.status(403).json({ error: 'Forbidden: Project belongs to another workspace' });
+    }
+
     const now = nowISO();
     const reportRef = await db.collection(collections.REPORTS).add({
       projectId,
