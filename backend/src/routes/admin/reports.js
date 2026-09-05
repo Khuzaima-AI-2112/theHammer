@@ -15,6 +15,40 @@ const router = express.Router();
 
 function nowISO() { return new Date().toISOString(); }
 
+// requireAnalyst is a role check, not a Workspace check, so every route here
+// has to scope its own projectId to the caller's Workspace. The status codes
+// and the error bodies are the ones exports.js and storyboards.js already
+// answer with; those two keep the check inline at each call site, which was
+// fine at one call site apiece and is not at three, so this file follows
+// storyboards.js's other precedent (loadOwnedDraft) and extracts it.
+//
+// It answers the request itself when the Project is out of reach and reports
+// having done so, so a caller reads as `if (await denyForeignProject(...)) return;`.
+//
+// A missing Project is a 404 rather than a 403 because there is no Workspace
+// left to compare against; the Project id came from the caller either way, so
+// this leaks nothing a 403 would not.
+async function denyForeignProject(req, res, projectId) {
+  // A report row with no projectId cannot be placed in a Workspace, so it is
+  // out of reach for the same reason a deleted Project is. Guarded here rather
+  // than left to Firestore, which throws on doc(undefined) and would turn a
+  // refusal into a 500.
+  if (!projectId) {
+    res.status(404).json({ error: 'project not found' });
+    return true;
+  }
+  const projSnap = await db.collection(collections.PROJECTS).doc(projectId).get();
+  if (!projSnap.exists) {
+    res.status(404).json({ error: 'project not found' });
+    return true;
+  }
+  if (projSnap.data().workspaceId !== req.hammerUser.workspaceId) {
+    res.status(403).json({ error: 'Forbidden: Project belongs to another workspace' });
+    return true;
+  }
+  return false;
+}
+
 const { analystReportLimiter } = require('../../middleware/rateLimiters');
 
 // POST /reports/generate
@@ -28,16 +62,8 @@ router.post('/reports/generate', requireAnalyst, analystReportLimiter, async (re
     // #8: this route took a projectId on trust, which was survivable only while
     // the metrics were invented — a caller from another Workspace got fiction.
     // Now that the numbers are real, the same request would answer with another
-    // Customer's Capture counts, Monitored User count and Session timings. The
-    // check is the one every other project-scoped route already makes
-    // (exports.js, storyboards.js, projects.js).
-    const projSnap = await db.collection(collections.PROJECTS).doc(projectId).get();
-    if (!projSnap.exists) {
-      return res.status(404).json({ error: 'project not found' });
-    }
-    if (projSnap.data().workspaceId !== req.hammerUser.workspaceId) {
-      return res.status(403).json({ error: 'Forbidden: Project belongs to another workspace' });
-    }
+    // Customer's Capture counts, Monitored User count and Session timings.
+    if (await denyForeignProject(req, res, projectId)) return;
 
     const now = nowISO();
     const reportRef = await db.collection(collections.REPORTS).add({
@@ -90,6 +116,12 @@ router.get('/reports/:id/status', requireAnalyst, async (req, res, next) => {
     const snap = await ref.get();
     if (!snap.exists) return res.status(404).json({ error: 'report not found' });
 
+    // #94: the report id alone used to be enough to read back another
+    // Customer's status, gcsPath and reportType. The check comes before
+    // refreshVideoReportStatus() so a refused caller cannot make this route
+    // poll — or write back — a Shotstack render it has no claim on.
+    if (await denyForeignProject(req, res, snap.data().projectId)) return;
+
     // A `storyboard-video` report's status lives on Shotstack, not in
     // Firestore, until this checks and (if the render has finished since
     // the last poll) persists it — see lib/shotstack.js. Every other
@@ -113,6 +145,10 @@ router.get('/reports', requireAnalyst, async (req, res, next) => {
     if (!projectId) {
       return res.status(400).json({ error: 'Missing projectId query param' });
     }
+
+    // #94: the weaker of the two read routes — an arbitrary projectId listed
+    // every report another Customer had ever run, with no id to guess first.
+    if (await denyForeignProject(req, res, projectId)) return;
 
     const snap = await db.collection(collections.REPORTS)
       .where('projectId', '==', projectId)

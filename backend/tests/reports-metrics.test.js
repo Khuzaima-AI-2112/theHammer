@@ -121,6 +121,23 @@ beforeAll(async () => {
     workspaceId: 'ws-alpha'
   });
 
+  // #94: one finished report in each Workspace, so the read routes have
+  // something real to hand back — or to refuse.
+  await seedReport('report-mine', 'proj-metrics', 'project_progress');
+  await seedReport('report-theirs', 'proj-other', 'project_progress');
+  // A report whose Project has since been deleted: there is no Workspace left
+  // to compare it against, so it cannot be shown to anyone.
+  await seedReport('report-orphan', 'no-such-project', 'project_progress');
+  // A row with no projectId at all: there is no Workspace to compare it
+  // against either, and Firestore throws on doc(undefined).
+  await db.collection(collections.REPORTS).doc('report-projectless').set({
+    reportType: 'project_progress',
+    status: 'queued',
+    gcsPath: null,
+    createdAt: new Date().toISOString(),
+    schemaVersion: 1
+  });
+
   // proj-other: noise that must never be counted.
   await seedUpload('other-1', 'proj-other', 'user-z');
   await seedUpload('other-2', 'proj-other', 'user-z');
@@ -232,6 +249,76 @@ describe('POST /admin/reports/generate — Workspace isolation', () => {
       .post('/admin/reports/generate')
       .set(HEADERS.analyst)
       .send({ projectId: 'no-such-project', reportType: 'project_progress' });
+    expect(res.status).toBe(404);
+  });
+});
+
+describe('GET /admin/reports/:id/status — Workspace isolation', () => {
+  // #94: requireAnalyst is a role check, not a Workspace check. Before this,
+  // any report id read back its status, gcsPath and reportType regardless of
+  // which Customer owned it.
+  it('returns the status of a report inside the calling Workspace', async () => {
+    const res = await request(app)
+      .get('/admin/reports/report-mine/status')
+      .set(HEADERS.analyst);
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('queued');
+  });
+
+  it('refuses a report whose Project belongs to another Customer', async () => {
+    const res = await request(app)
+      .get('/admin/reports/report-theirs/status')
+      .set(HEADERS.analyst);
+    expect(res.status).toBe(403);
+    // The refusal must not leak what it refused.
+    expect(res.body.gcsPath).toBeUndefined();
+  });
+
+  it('404s a report that does not exist', async () => {
+    const res = await request(app)
+      .get('/admin/reports/no-such-report/status')
+      .set(HEADERS.analyst);
+    expect(res.status).toBe(404);
+  });
+
+  it('404s a report whose Project no longer exists', async () => {
+    const res = await request(app)
+      .get('/admin/reports/report-orphan/status')
+      .set(HEADERS.analyst);
+    expect(res.status).toBe(404);
+  });
+
+  it('404s a report carrying no projectId, rather than failing', async () => {
+    const res = await request(app)
+      .get('/admin/reports/report-projectless/status')
+      .set(HEADERS.analyst);
+    expect(res.status).toBe(404);
+  });
+});
+
+describe('GET /admin/reports — Workspace isolation', () => {
+  // The weaker of the two routes: it takes an arbitrary projectId, so no
+  // report id has to be guessed first.
+  it('lists reports for a Project inside the calling Workspace', async () => {
+    const res = await request(app)
+      .get('/admin/reports?projectId=proj-metrics')
+      .set(HEADERS.analyst);
+    expect(res.status).toBe(200);
+    expect(res.body.reports.map((r) => r.id)).toContain('report-mine');
+  });
+
+  it('refuses a projectId belonging to another Customer', async () => {
+    const res = await request(app)
+      .get('/admin/reports?projectId=proj-other')
+      .set(HEADERS.analyst);
+    expect(res.status).toBe(403);
+    expect(res.body.reports).toBeUndefined();
+  });
+
+  it('404s a projectId that does not exist', async () => {
+    const res = await request(app)
+      .get('/admin/reports?projectId=no-such-project')
+      .set(HEADERS.analyst);
     expect(res.status).toBe(404);
   });
 });
