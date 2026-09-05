@@ -74,6 +74,23 @@
         { "fieldPath": "role",  "order": "ASCENDING" },
         { "fieldPath": "email", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "users",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "workspaceId", "order": "ASCENDING" },
+        { "fieldPath": "email",       "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "users",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "workspaceId", "order": "ASCENDING" },
+        { "fieldPath": "role",        "order": "ASCENDING" },
+        { "fieldPath": "email",       "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

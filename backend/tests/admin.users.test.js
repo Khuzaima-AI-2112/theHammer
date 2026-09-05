@@ -167,6 +167,7 @@ describe('PATCH /admin/users/:id — role updates', () => {
 describe('GET /admin/users — ?projectId= filter', () => {
   const projA = 'filter-project-a';
   const projB = 'filter-project-b';
+  const projEmpty = 'filter-project-empty';
   // Emails are chosen so the expected email-asc order is unambiguous.
   const alice = 'filter-user-alice';   // member of A, role user
   const bob   = 'filter-user-bob';     // member of A, role analyst
@@ -175,6 +176,7 @@ describe('GET /admin/users — ?projectId= filter', () => {
   beforeAll(async () => {
     await seedProject(projA, { name: 'Filter Project A' });
     await seedProject(projB, { name: 'Filter Project B' });
+    await seedProject(projEmpty, { name: 'Filter Project With No Members' });
 
     await seedUser(alice, { email: 'a-alice@filter.test', role: 'user' });
     await seedUser(bob,   { email: 'b-bob@filter.test',   role: 'analyst' });
@@ -192,7 +194,7 @@ describe('GET /admin/users — ?projectId= filter', () => {
     for (const [p, u] of [[projA, alice], [projA, bob], [projB, carol]]) {
       await db.collection('project_memberships').doc(`${p}_${u}`).delete().catch(() => {});
     }
-    for (const p of [projA, projB]) {
+    for (const p of [projA, projB, projEmpty]) {
       await db.collection('projects').doc(p).delete().catch(() => {});
     }
   });
@@ -222,12 +224,21 @@ describe('GET /admin/users — ?projectId= filter', () => {
     expect(res.body.nextCursor).toBeNull();
   });
 
+  // Written against an id that did not exist until #7, when the filter gained
+  // the same Project-ownership check the other roster routes have and an
+  // unknown id started answering 404 (below). A real Project with nobody in it
+  // is what this case was always about, so it now seeds one.
   test('a project with no members returns an empty page and a null cursor', async () => {
-    const res = await request(app).get('/admin/users?projectId=no-such-project').set(H);
+    const res = await request(app).get(`/admin/users?projectId=${projEmpty}`).set(H);
     expect(res.status).toBe(200);
     expect(res.body.users).toEqual([]);
     expect(res.body.total).toBe(0);
     expect(res.body.nextCursor).toBeNull();
+  });
+
+  test('an unknown project is 404, not an empty roster', async () => {
+    const res = await request(app).get('/admin/users?projectId=no-such-project').set(H);
+    expect(res.status).toBe(404);
   });
 
   test('each filtered user carries the membership the portal renders as "Admitted"', async () => {
