@@ -8,6 +8,7 @@ const { GoogleGenAI } = require('@google/genai');
 const { db } = require('../lib/firestore');
 const { getAIClient } = require('../lib/vertex');
 const collections = require('../lib/collections');
+const { computeReportMetrics } = require('../lib/reportMetrics');
 const { CONFIG_DEFAULTS } = require('../lib/defaults');
 const gcs = new Storage();
 
@@ -22,7 +23,11 @@ async function generateStandardReport(reportId, projectId, reportType, dateRange
     const projectData = projectSnap.data() || {};
     const modelId = projectData.llmModel || 'gemini-1.5-flash';
 
-    // Mock data aggregation logic since full implementation requires detailed queries
+    // #8: every figure below is queried from this Project's own Captures and
+    // Sessions. It used to be four hardcoded numbers with a narrative written
+    // about them, which read as measurement and was not.
+    const { metrics, captureCount } = await computeReportMetrics(projectId, reportType);
+
     const resultData = {
       projectId,
       reportType,
@@ -31,34 +36,40 @@ async function generateStandardReport(reportId, projectId, reportType, dateRange
       modelUsed: modelId
     };
 
-    if (reportType === 'user_efficiency') {
-      resultData.metrics = { capturesPerHour: 42, medianSessionLength: "12m 30s" };
-    } else if (reportType === 'project_progress') {
-      resultData.metrics = { totalCaptures: 1045, activeUsers: 8 };
-    }
+    if (metrics) resultData.metrics = metrics;
 
-    // Call Vertex AI LLM Router to generate narrative summary based on metrics
-    try {
-      const prompt = `You are an executive assistant. Generate a short narrative summary (max 3 sentences) for a report of type ${reportType}. 
+    // Two cases have nothing to narrate, and asking the model anyway is
+    // exactly how invented activity gets back in: a Project that has recorded
+    // no Captures at all, and a report type no metric is defined for. Say so
+    // plainly instead.
+    if (captureCount === 0) {
+      resultData.summary = 'No Captures have been recorded for this Project, so there is nothing to report on yet.';
+    } else if (!metrics) {
+      resultData.summary = `No metrics are defined for a report of type ${reportType}.`;
+    } else {
+      // Call Vertex AI LLM Router to generate narrative summary based on metrics
+      try {
+        const prompt = `You are an executive assistant. Generate a short narrative summary (max 3 sentences) for a report of type ${reportType}.
       The metrics are: ${JSON.stringify(resultData.metrics)}`;
 
-      const client = getAIClient();
-      const resp = await client.models.generateContent({
-        model: modelId,
-        contents: prompt,
-        config: {
-          maxOutputTokens: 2048,
-          temperature: 0.2,
-          topP: 0.8,
-        },
-      });
-      
-      const summaryText = resp.text;
-      resultData.summary = summaryText;
-    } catch (llmError) {
-      logger.error(`[Reports Worker] LLM Error for ${reportId} using ${modelId}:`, llmError);
-      resultData.summary = "LLM generation failed. Showing raw metrics only.";
-      resultData.llmError = llmError.message;
+        const client = getAIClient();
+        const resp = await client.models.generateContent({
+          model: modelId,
+          contents: prompt,
+          config: {
+            maxOutputTokens: 2048,
+            temperature: 0.2,
+            topP: 0.8,
+          },
+        });
+
+        const summaryText = resp.text;
+        resultData.summary = summaryText;
+      } catch (llmError) {
+        logger.error(`[Reports Worker] LLM Error for ${reportId} using ${modelId}:`, llmError);
+        resultData.summary = "LLM generation failed. Showing raw metrics only.";
+        resultData.llmError = llmError.message;
+      }
     }
 
     // Write to GCS
