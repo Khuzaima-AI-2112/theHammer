@@ -236,9 +236,13 @@ describe('GET /admin/users — ?projectId= filter', () => {
     expect(res.body.nextCursor).toBeNull();
   });
 
-  test('an unknown project is 404, not an empty roster', async () => {
+  // #99: the refusal is 403 rather than 404. What this case is really about is
+  // that an unknown Project is refused rather than answered with an empty
+  // roster, which would read as "this Project has no members".
+  test('an unknown project is refused, not an empty roster', async () => {
     const res = await request(app).get('/admin/users?projectId=no-such-project').set(H);
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(403);
+    expect(res.body.users).toBeUndefined();
   });
 
   test('each filtered user carries the membership the portal renders as "Admitted"', async () => {

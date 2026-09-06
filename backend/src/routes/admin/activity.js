@@ -21,6 +21,7 @@ const { Storage } = require('@google-cloud/storage');
 const { db } = require('../../lib/firestore');
 const { requireAdmin } = require('../../middleware/requireAuth');
 const collections = require('../../lib/collections');
+const { loadOwnedProject } = require('../../lib/ownership');
 
 const router    = express.Router({ mergeParams: true });
 const MAX_LIMIT = 500;
@@ -77,16 +78,11 @@ router.get('/projects/:id/activity', requireAdmin, async (req, res, next) => {
       MAX_LIMIT
     );
 
-    const projSnap = await db.collection(collections.PROJECTS).doc(projectId).get();
-    if (!projSnap.exists) return res.status(404).json({ error: 'project not found' });
     // #7 (SEC-03): requireAdmin proves the caller is an Admin, not that they
     // are an Admin *here*. Without this an Admin in any Workspace could read
     // another Customer's Captures — rows, file names and 15-minute signed URLs
-    // to the images themselves — by naming their Project id. Same check, same
-    // status and same wording as exports.js, which reads the same Captures.
-    if (projSnap.data().workspaceId !== req.hammerUser.workspaceId) {
-      return res.status(403).json({ error: 'Forbidden: Project belongs to another workspace' });
-    }
+    // to the images themselves — by naming their Project id.
+    if (!await loadOwnedProject(req, res, projectId)) return;
 
     let query = db.collection(collections.UPLOADS)
       .where('projectId', '==', projectId)

@@ -128,12 +128,15 @@ describe('PATCH /admin/projects/:id', () => {
     expect(res.body.name).toBe('Renamed Project');
   });
 
-  test('404 — non-existent project', async () => {
+  // #99: 403, not 404. A Project the caller cannot have and a Project that
+  // does not exist now answer identically — see tests/workspace-isolation.js
+  // for why the split answer was a disclosure.
+  test('403 — non-existent project', async () => {
     const res = await request(app)
       .patch('/admin/projects/does-not-exist-xyz')
       .set(H)
       .send({ name: 'Ghost' });
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(403);
   });
 });
 
@@ -150,9 +153,9 @@ describe('DELETE /admin/projects/:id', () => {
     expect(check.exists).toBe(false);
   });
 
-  test('404 — non-existent project', async () => {
+  test('403 — non-existent project', async () => {
     const res = await request(app).delete('/admin/projects/ghost-project-xyz').set(H);
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(403);
   });
 });
 

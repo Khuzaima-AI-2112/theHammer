@@ -27,6 +27,7 @@ const { FieldValue, Timestamp } = require('firebase-admin/firestore');
 const { db }   = require('../../lib/firestore');
 const { requireAdmin } = require('../../middleware/requireAuth');
 const collections = require('../../lib/collections');
+const { loadOwnedProject } = require('../../lib/ownership');
 
 const router = express.Router();
 
@@ -121,11 +122,8 @@ router.get('/projects', requireAdmin, async (req, res, next) => {
 // 5.4  GET /admin/projects/:id
 router.get('/projects/:id', requireAdmin, async (req, res, next) => {
   try {
-    const snap = await db.collection(collections.PROJECTS).doc(req.params.id).get();
-    if (!snap.exists) return res.status(404).json({ error: 'project not found' });
-    if (snap.data().workspaceId !== req.hammerUser.workspaceId) {
-      return res.status(403).json({ error: 'forbidden: project belongs to another workspace' });
-    }
+    const snap = await loadOwnedProject(req, res, req.params.id);
+    if (!snap) return;
     return res.json(serializeDoc(snap));
   } catch (err) { next(err); }
 });
@@ -139,12 +137,9 @@ router.patch('/projects/:id', requireAdmin, async (req, res, next) => {
     if (!name || name.length > 128) {
       return res.status(400).json({ error: 'name must be 1–128 characters' });
     }
-    const ref  = db.collection(collections.PROJECTS).doc(req.params.id);
-    const snap = await ref.get();
-    if (!snap.exists) return res.status(404).json({ error: 'project not found' });
-    if (snap.data().workspaceId !== req.hammerUser.workspaceId) {
-      return res.status(403).json({ error: 'forbidden: project belongs to another workspace' });
-    }
+    const snap = await loadOwnedProject(req, res, req.params.id);
+    if (!snap) return;
+    const ref = snap.ref;
     await ref.update({ name, webhookUrl, llmModel, updatedAt: nowISO() });
     const updated = await ref.get();
     return res.json(serializeDoc(updated));
@@ -156,12 +151,9 @@ router.patch('/projects/:id', requireAdmin, async (req, res, next) => {
 router.delete('/projects/:id', requireAdmin, async (req, res, next) => {
   try {
     const { id } = req.params;
-    const projectRef = db.collection(collections.PROJECTS).doc(id);
-    const snap       = await projectRef.get();
-    if (!snap.exists) return res.status(404).json({ error: 'project not found' });
-    if (snap.data().workspaceId !== req.hammerUser.workspaceId) {
-      return res.status(403).json({ error: 'forbidden: project belongs to another workspace' });
-    }
+    const snap = await loadOwnedProject(req, res, id);
+    if (!snap) return;
+    const projectRef = snap.ref;
 
     const membersSnap = await db.collection(collections.MEMBERSHIPS)
       .where('projectId', '==', id)

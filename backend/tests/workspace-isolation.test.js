@@ -57,7 +57,14 @@ const ALPHA_PROJECT   = 'alpha-project';
 
 const PNG = Buffer.from('89504e470d0a1a0a', 'hex');
 
-/** Every refusal in this file is one of these two, and never a 2xx. */
+/**
+ * Every refusal in this file is one of these two, and never a 2xx.
+ *
+ * #99 narrowed what a foreign *Project* answers to 403 alone: unknown and
+ * foreign are now one answer, so nothing here can tell them apart. 404 is still
+ * accepted because a foreign Storyboard draft or report id is refused by a
+ * route that looks the record up by a different collection first.
+ */
 function expectRefused(res) {
   expect([403, 404]).toContain(res.status);
 }
@@ -404,5 +411,43 @@ describe("SEC-12 — the report routes refuse another Workspace's reports", () =
     expectRefused(res);
     expect(res.body.reports).toBeUndefined();
     expect(JSON.stringify(res.body)).not.toContain(BETA_REPORT);
+  });
+});
+
+// #99 — SEC-13: a foreign Project id and a nonexistent one are one answer.
+//
+// The twelve cases above prove Alpha cannot *reach* Beta. This one proves Alpha
+// cannot *distinguish*: before #99 the Admin routes answered 404 for a Project
+// that does not exist and 403 for one belonging to another Customer, so an
+// outsider could sort real Project ids from imaginary ones by reading the
+// status code — a smaller disclosure than the rows themselves, and the last one
+// the split answer made possible.
+//
+// Asserting the two responses are identical, rather than that each is 403,
+// is what makes this fail if either side drifts.
+describe('SEC-13 — an unreachable Project does not say why it is unreachable', () => {
+  const NONEXISTENT = 'no-such-project-at-all';
+
+  test('GET /admin/projects/:id answers a foreign id and an unknown id alike', async () => {
+    const foreign = await request(app).get(`/admin/projects/${BETA_PROJECT}`).set(ADMIN);
+    const unknown = await request(app).get(`/admin/projects/${NONEXISTENT}`).set(ADMIN);
+
+    expect(foreign.status).toBe(403);
+    expect(unknown.status).toBe(foreign.status);
+    expect(unknown.body).toEqual(foreign.body);
+  });
+
+  test('GET /admin/projects/:id/activity answers a foreign id and an unknown id alike', async () => {
+    const foreign = await request(app).get(`/admin/projects/${BETA_PROJECT}/activity`).set(ADMIN);
+    const unknown = await request(app).get(`/admin/projects/${NONEXISTENT}/activity`).set(ADMIN);
+
+    expect(foreign.status).toBe(403);
+    expect(unknown.status).toBe(foreign.status);
+    expect(unknown.body).toEqual(foreign.body);
+  });
+
+  test('a Project the caller does own still answers normally', async () => {
+    const res = await request(app).get(`/admin/projects/${ALPHA_PROJECT}`).set(ADMIN);
+    expect(res.status).toBe(200);
   });
 });

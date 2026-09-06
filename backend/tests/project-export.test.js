@@ -247,9 +247,11 @@ describe('GET /admin/projects/:id/export', () => {
     for (const id of ids) await db.collection(collections.UPLOADS).doc(id).delete();
   });
 
-  test('404 — unknown Project', async () => {
+  // #99: unknown and foreign are one answer now. The 404 below is a different
+  // thing — a Project the caller owns that simply has nothing to export.
+  test('403 — unknown Project', async () => {
     const res = await request(app).get('/admin/projects/no-such-project/export').set(ADMIN);
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(403);
   });
 
   test('404 — Project with no Captures says so, rather than sending an empty ZIP', async () => {

@@ -74,11 +74,13 @@ describe('POST /admin/projects/:id/storyboards', () => {
     for (const doc of snap.docs) await doc.ref.delete();
   });
 
-  test('404 — project does not exist', async () => {
+  // #99: same answer as the foreign-Project case below, deliberately. A draft
+  // that does not exist is still a 404 — that is a Storyboard, not a Project.
+  test('403 — project does not exist', async () => {
     const res = await request(app)
       .post('/admin/projects/no-such-project/storyboards')
       .set(HEADERS.analyst);
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(403);
   });
 
   test('403 — project belongs to another workspace', async () => {

@@ -105,6 +105,7 @@ const { requireAnalyst } = require('../../middleware/requireAuth');
 const { getAIClient } = require('../../lib/vertex');
 const { submitRender } = require('../../lib/shotstack');
 const collections = require('../../lib/collections');
+const { loadOwnedProject, belongsToCaller } = require('../../lib/ownership');
 
 const router = express.Router();
 
@@ -301,7 +302,10 @@ async function loadOwnedDraft(req, res) {
     return null;
   }
   const existing = snap.data();
-  if (existing.workspaceId !== req.hammerUser.workspaceId) {
+  // #99: the comparison is lib/ownership.js's, so a draft with no workspaceId
+  // is foreign to everyone here too. The 404 above stays — a Storyboard draft
+  // is not a Project, and #99's merged answer covers Projects.
+  if (!belongsToCaller(snap, req)) {
     res.status(403).json({ error: 'Forbidden: draft belongs to another workspace' });
     return null;
   }
@@ -312,13 +316,7 @@ router.post('/projects/:id/storyboards', requireAnalyst, async (req, res, next) 
   try {
     const projectId = req.params.id;
 
-    const projSnap = await db.collection(collections.PROJECTS).doc(projectId).get();
-    if (!projSnap.exists) {
-      return res.status(404).json({ error: 'project not found' });
-    }
-    if (projSnap.data().workspaceId !== req.hammerUser.workspaceId) {
-      return res.status(403).json({ error: 'Forbidden: Project belongs to another workspace' });
-    }
+    if (!await loadOwnedProject(req, res, projectId)) return;
 
     // Resuming an open draft, not starting over — this is what makes
     // "Build Storyboard" safe to click again after leaving mid-curation.

@@ -2,7 +2,7 @@
 
 
 const request = require('supertest');
-const { clearDatabase, seedUser } = require('./helpers/fixtures');
+const { clearDatabase, seedUser, seedProject } = require('./helpers/fixtures');
 
 let app, db;
 let adminId = 'test-integration-admin';
@@ -59,21 +59,30 @@ describe('Sprint 9 Integration Tests', () => {
   // The global limit is 60 req / min. The report generate limit for analysts is 10/hr.
   // We will just verify that the route returns 400 for bad input (meaning rate limiting didn't block first request), 
   // then we might hit rate limit if we loop. But to keep tests fast, we just verify auth works.
+  // #99: this case used to name a Project that does not exist and assert the
+  // Analyst's answer was "not 403", using the status code to tell "the role gate
+  // let me through" apart from "no such Project". Those are one code now, so the
+  // proxy no longer works — and it was always a weak one, since it passed for
+  // any non-403 including a 500. It now names a Project the caller really owns
+  // and asserts the request is accepted, which is what "an Analyst can access
+  // this route" was always supposed to mean.
   test('POST /admin/reports/generate — Analyst can access, User cannot', async () => {
+    await seedProject('integration-report-project', { name: 'Reportable' });
+
     // Promote explicitly. This used to rely on the api_keys sync test above
     // having already set the role, which made the two tests order-dependent.
     await db.collection('users').doc(userId).update({ role: 'analyst' });
 
     const resAnalyst = await request(app).post('/admin/reports/generate').set(H_USER)
-      .send({ projectId: 'missing', reportType: 'executive_summary' });
-    // Expect 404 or 400 because project doesn't exist, but NOT 403.
-    expect(resAnalyst.status).not.toBe(403);
+      .send({ projectId: 'integration-report-project', reportType: 'executive_summary' });
+    expect(resAnalyst.status).toBe(202);
+    expect(resAnalyst.body.reportId).toBeTruthy();
 
     // Revert to user
     await db.collection('users').doc(userId).update({ role: 'user' });
 
     const resUser = await request(app).post('/admin/reports/generate').set(H_USER)
-      .send({ projectId: 'missing', reportType: 'executive_summary' });
+      .send({ projectId: 'integration-report-project', reportType: 'executive_summary' });
     expect(resUser.status).toBe(403);
   });
 

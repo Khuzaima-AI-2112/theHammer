@@ -204,6 +204,7 @@ function keysEqual(provided, expected) {
 // ─────────────────────────────────────────────────────────────────
 
 const { requireAuth, requireAdmin } = require('./middleware/requireAuth');
+const { loadOwnedProject } = require('./lib/ownership');
 
 function requireMultipart(req, res, next) {
   const ct = req.headers['content-type'] || '';
@@ -382,11 +383,9 @@ app.post('/upload-url', requireAuth('user'), async (req, res, next) => {
     if (missing.length > 0) return res.status(400).json({ error: 'Missing required fields', missing });
     if (!BUCKET_NAME) return res.status(500).json({ error: 'Server misconfiguration: GCS_BUCKET not set' });
 
-    // Enforce Tenant Isolation
-    const projSnap = await db.collection(collections.PROJECTS).doc(project).get();
-    if (!projSnap.exists || projSnap.data().workspaceId !== req.hammerUser.workspaceId) {
-      return res.status(403).json({ error: 'Forbidden: Project not found or belongs to another workspace' });
-    }
+    // Enforce Tenant Isolation. #99: this route's merged answer — unknown and
+    // foreign alike — is now what every route family gives (lib/ownership.js).
+    if (!await loadOwnedProject(req, res, project)) return;
 
     // Mirrors /capture: an absent tool is an empty path segment, not the string
     // "undefined".
@@ -487,11 +486,8 @@ app.post('/capture', requireAuth('user'), requireMultipart, rejectOversizedUploa
     if (req.file.size === 0)   return res.status(400).json({ error: 'file must not be empty (0 bytes)' });
     if (!BUCKET_NAME) return res.status(500).json({ error: 'Server misconfiguration: GCS_BUCKET not set' });
 
-    // Enforce Tenant Isolation
-    const projSnap = await db.collection(collections.PROJECTS).doc(projectId).get();
-    if (!projSnap.exists || projSnap.data().workspaceId !== req.hammerUser.workspaceId) {
-      return res.status(403).json({ error: 'Forbidden: Project not found or belongs to another workspace' });
-    }
+    // Enforce Tenant Isolation (#99: lib/ownership.js)
+    if (!await loadOwnedProject(req, res, projectId)) return;
 
     const safeProject  = sanitize(projectId);
     const safeUser     = req.hammerUser.id;
@@ -574,11 +570,8 @@ app.post('/session-events', requireAuth('user'), async (req, res, next) => {
 
     const safeProject = sanitize(body.projectId);
 
-    // Enforce Tenant Isolation
-    const projSnap = await db.collection('projects').doc(safeProject).get();
-    if (!projSnap.exists || projSnap.data().workspaceId !== req.hammerUser.workspaceId) {
-      return res.status(403).json({ error: 'Forbidden: Project not found or belongs to another workspace' });
-    }
+    // Enforce Tenant Isolation (#99: lib/ownership.js)
+    if (!await loadOwnedProject(req, res, safeProject)) return;
     
     // Identity is guaranteed by requireAuth middleware
     const resolvedUserId = req.hammerUser.uid;
@@ -646,11 +639,8 @@ app.post('/inactivity-events', requireAuth('user'), async (req, res, next) => {
     
     if (missing.length > 0) return res.status(400).json({ error: 'Missing required fields', missing });
 
-    // Enforce Tenant Isolation
-    const projSnap = await db.collection(collections.PROJECTS).doc(sanitize(body.projectId)).get();
-    if (!projSnap.exists || projSnap.data().workspaceId !== req.hammerUser.workspaceId) {
-      return res.status(403).json({ error: 'Forbidden: Project not found or belongs to another workspace' });
-    }
+    // Enforce Tenant Isolation (#99: lib/ownership.js)
+    if (!await loadOwnedProject(req, res, sanitize(body.projectId))) return;
 
     const resolvedUserId = req.hammerUser.uid;
 

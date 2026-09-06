@@ -40,6 +40,7 @@ const { db } = require('../../lib/firestore');
 const { requireAdmin } = require('../../middleware/requireAuth');
 const { exportLimiter } = require('../../middleware/rateLimiters');
 const collections = require('../../lib/collections');
+const { loadOwnedProject } = require('../../lib/ownership');
 const logger = require('../../lib/logger');
 
 const router = express.Router({ mergeParams: true });
@@ -88,13 +89,7 @@ router.get('/projects/:id/export', requireAdmin, exportLimiter, async (req, res,
     // same meaning as GET /projects/:id/activity.
     const tool = (req.query.tool ?? '').trim();
 
-    const projSnap = await db.collection(collections.PROJECTS).doc(projectId).get();
-    if (!projSnap.exists) {
-      return res.status(404).json({ error: 'project not found' });
-    }
-    if (projSnap.data().workspaceId !== req.hammerUser.workspaceId) {
-      return res.status(403).json({ error: 'Forbidden: Project belongs to another workspace' });
-    }
+    if (!await loadOwnedProject(req, res, projectId)) return;
 
     // The filter belongs in the query, not in a filter() over the rows: the
     // ceiling below counts what the query returned, so filtering afterwards

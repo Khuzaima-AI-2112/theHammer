@@ -21,6 +21,12 @@ const { requireAdmin } = require('../../middleware/requireAuth');
 const { VALID_ROLES } = require('../../lib/roles');
 const { USER_PREFERENCES } = require('../../lib/defaults');
 const collections = require('../../lib/collections');
+const {
+  belongsToCaller,
+  loadOwnedProject,
+  unreachableProjectError,
+  foreignUserError,
+} = require('../../lib/ownership');
 
 const router = express.Router({ mergeParams: true });
 
@@ -64,37 +70,15 @@ function nowISO() { return new Date().toISOString(); }
 // answer inside a transaction, where they cannot write a response.
 //
 // A record with no `workspaceId` is foreign to everyone. That is deliberate:
-// before this ticket POST /admin/users wrote users without one, and treating
-// those as "belongs to whoever asked" would leave exactly the hole these
-// checks close. Such a record needs a Workspace stamped on it before an Admin
-// can read or edit it again.
-function isInCallersWorkspace(snap, req) {
-  return !!snap.data().workspaceId && snap.data().workspaceId === req.hammerUser.workspaceId;
-}
-
-/**
- * Refuses a Project outside the caller's Workspace, answering the request
- * itself and reporting that it did, so a caller reads as
- * `if (await denyForeignProject(req, res, id)) return;`. Same shape and same
- * status codes as reports.js's helper of this name — 404 when the Project is
- * gone, 403 when it is someone else's — but the error strings are this file's
- * existing lowercase ones, which the routes below and their tests already use.
- * The two files disagreeing on the casing of one word predates this; a fifth
- * copy of the check is the thing worth removing (see lesson 67), and that is
- * a refactor across seven files rather than part of #7.
- */
-async function denyForeignProject(req, res, projectId) {
-  const projSnap = await db.collection(collections.PROJECTS).doc(projectId).get();
-  if (!projSnap.exists) {
-    res.status(404).json({ error: 'project not found' });
-    return true;
-  }
-  if (!isInCallersWorkspace(projSnap, req)) {
-    res.status(403).json({ error: 'forbidden: project belongs to another workspace' });
-    return true;
-  }
-  return false;
-}
+// before #7 POST /admin/users wrote users without one, and treating those as
+// "belongs to whoever asked" would leave exactly the hole these checks close.
+// Such a record needs a Workspace stamped on it before an Admin can read or
+// edit it again.
+//
+// #99: both predicates now come from lib/ownership.js. The Project check and
+// the Monitored User check stay separate functions there for the same reason
+// they were separate here — #7 found a route that checked the Project and not
+// the user, and conflating them is how that happened.
 
 // ─── GET /admin/users ──────────────────────────────────────────────────────
 // Returns up to 100 users per page, ordered by email asc.
@@ -153,7 +137,7 @@ router.get('/users', requireAdmin, async (req, res, next) => {
       // The Project filter reads a roster through a Project id the caller
       // supplied, so it needs the same ownership check as
       // GET /projects/:id/members below.
-      if (await denyForeignProject(req, res, req.query.projectId)) return;
+      if (!await loadOwnedProject(req, res, req.query.projectId)) return;
       let members = await usersInProject(req.query.projectId);
       if (role) members = members.filter((u) => u.role === role);
       const { page, nextCursor } = pageByCursor(members, req.query.cursor);
@@ -190,7 +174,7 @@ router.get('/users/:id', requireAdmin, async (req, res, next) => {
   try {
     const snap = await db.collection(collections.USERS).doc(req.params.id).get();
     if (!snap.exists) return res.status(404).json({ error: 'user not found' });
-    if (!isInCallersWorkspace(snap, req)) {
+    if (!belongsToCaller(snap, req)) {
       return res.status(403).json({ error: 'forbidden: user belongs to another workspace' });
     }
     return res.json(serializeUser(snap));
@@ -219,7 +203,7 @@ router.post('/users', requireAdmin, async (req, res, next) => {
       // User's whole record, which made provisioning a read of someone else's
       // roster — the same disclosure GET /users/:id now refuses, reachable by
       // guessing an email rather than a document id.
-      if (!isInCallersWorkspace(existing.docs[0], req)) {
+      if (!belongsToCaller(existing.docs[0], req)) {
         return res.status(403).json({ error: 'forbidden: that email is already in use' });
       }
       return res.status(200).json(serializeUser(existing.docs[0]));
@@ -251,11 +235,7 @@ router.post('/users', requireAdmin, async (req, res, next) => {
 router.get('/projects/:id/members', requireAdmin, async (req, res, next) => {
   try {
     const projectId = req.params.id;
-    const projSnap  = await db.collection(collections.PROJECTS).doc(projectId).get();
-    if (!projSnap.exists) return res.status(404).json({ error: 'project not found' });
-    if (projSnap.data().workspaceId !== req.hammerUser.workspaceId) {
-      return res.status(403).json({ error: 'forbidden: project belongs to another workspace' });
-    }
+    if (!await loadOwnedProject(req, res, projectId)) return;
 
     const membSnap = await db.collection(collections.MEMBERSHIPS)
       .where('projectId', '==', projectId)
@@ -298,13 +278,13 @@ router.post('/projects/:id/members', requireAdmin, async (req, res, next) => {
       ]);
 
       if (!projSnap.exists) throw Object.assign(new Error('project not found'),       { status: 404 });
-      if (projSnap.data().workspaceId !== req.hammerUser.workspaceId) throw Object.assign(new Error('forbidden: project belongs to another workspace'), { status: 403 });
+      if (!belongsToCaller(projSnap, req)) throw unreachableProjectError();
       if (!userSnap.exists) throw Object.assign(new Error('user not found'),           { status: 404 });
       // The Project is in the caller's Workspace by the line above; the
       // Monitored User has to be too. Admitting a foreign one would put a
       // person from another Customer's staff onto this Project, and from then
       // on their Captures, Sessions and reports would be filed here.
-      if (!isInCallersWorkspace(userSnap, req)) throw Object.assign(new Error('forbidden: user belongs to another workspace'), { status: 403 });
+      if (!belongsToCaller(userSnap, req)) throw foreignUserError();
       if (membSnap.exists)  throw Object.assign(new Error('membership already exists'),{ status: 409 });
 
       const now = nowISO();
@@ -342,7 +322,7 @@ router.delete('/projects/:id/members/:userId', requireAdmin, async (req, res, ne
       ]);
 
       if (!projSnap.exists) throw Object.assign(new Error('project not found'),    { status: 404 });
-      if (projSnap.data().workspaceId !== req.hammerUser.workspaceId) throw Object.assign(new Error('forbidden: project belongs to another workspace'), { status: 403 });
+      if (!belongsToCaller(projSnap, req)) throw unreachableProjectError();
       if (!membSnap.exists) throw Object.assign(new Error('membership not found'), { status: 404 });
 
       tx.delete(membershipRef);
@@ -396,7 +376,7 @@ router.patch('/users/:id', requireAdmin, async (req, res, next) => {
       // The most consequential of these routes: `role` is in `updates`, so
       // without this an Admin could promote — or demote — a Monitored User in
       // another Customer's Workspace.
-      if (!isInCallersWorkspace(snap, req)) {
+      if (!belongsToCaller(snap, req)) {
         throw Object.assign(new Error('forbidden: user belongs to another workspace'), { status: 403 });
       }
 

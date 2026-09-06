@@ -244,12 +244,14 @@ describe('POST /admin/reports/generate — Workspace isolation', () => {
     expect(res.status).toBe(403);
   });
 
-  it('404s a Project that does not exist', async () => {
+  // #99: refuses rather than 404s. A Project id the caller cannot reach is one
+  // answer whether it is gone or somebody else's.
+  it('refuses a Project that does not exist', async () => {
     const res = await request(app)
       .post('/admin/reports/generate')
       .set(HEADERS.analyst)
       .send({ projectId: 'no-such-project', reportType: 'project_progress' });
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(403);
   });
 });
 
@@ -281,18 +283,22 @@ describe('GET /admin/reports/:id/status — Workspace isolation', () => {
     expect(res.status).toBe(404);
   });
 
-  it('404s a report whose Project no longer exists', async () => {
+  // #99: both refuse rather than 404. A report is reachable only through a
+  // Project the caller owns, so a report whose Project is gone — or which
+  // carries no projectId at all — is out of reach for the same reason a
+  // foreign one is, and now says so the same way.
+  it('refuses a report whose Project no longer exists', async () => {
     const res = await request(app)
       .get('/admin/reports/report-orphan/status')
       .set(HEADERS.analyst);
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(403);
   });
 
-  it('404s a report carrying no projectId, rather than failing', async () => {
+  it('refuses a report carrying no projectId, rather than failing', async () => {
     const res = await request(app)
       .get('/admin/reports/report-projectless/status')
       .set(HEADERS.analyst);
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(403);
   });
 });
 
@@ -315,11 +321,11 @@ describe('GET /admin/reports — Workspace isolation', () => {
     expect(res.body.reports).toBeUndefined();
   });
 
-  it('404s a projectId that does not exist', async () => {
+  it('refuses a projectId that does not exist', async () => {
     const res = await request(app)
       .get('/admin/reports?projectId=no-such-project')
       .set(HEADERS.analyst);
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(403);
   });
 });
 
