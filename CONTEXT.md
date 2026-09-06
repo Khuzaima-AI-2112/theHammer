@@ -85,3 +85,16 @@ An ordered set of Captures, with a note against each one, that demonstrates
 a single workflow. A Session measures time; a Storyboard tells a story. The
 two do not have to agree.
 _Avoid_: sequence, slideshow, deck, reel, walkthrough
+
+**Report**:
+An artifact generated from a Project's Captures — a set of metrics, an OCR
+pass, or a Storyboard — that is requested, queued and waited for. It has a
+status and outlives the request that asked for it, which is what separates it
+from an Export.
+_Avoid_: export, summary, analysis, job
+
+**Export**:
+A file an Admin downloads of a Project's Captures. It is produced and returned
+by the request that asks for it; there is no Export record, no status and
+nothing to queue. A Report is generated and waited for — an Export is not.
+_Avoid_: report, job, download job, batch
