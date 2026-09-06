@@ -696,21 +696,72 @@ const { generateOcrReport } = require('./worker/ocrWorker');
 const requireWorkerAuth = (req, res, next) => {
   const secret = req.headers['x-internal-secret'];
   if (secret && secret === (process.env.INTERNAL_SECRET || 'dev-secret')) {
+    // #104: which of the two ways in was taken is what the ownership check
+    // below turns on, so it is recorded rather than re-derived there.
+    req.isInternalWorker = true;
     return next();
   }
   return requireAdmin(req, res, next);
 };
 
-app.post('/worker/reports', express.json(), workerLimiter, requireWorkerAuth, (req, res) => {
-  const { reportId, projectId, reportType, dateRange } = req.body;
-  generateStandardReport(reportId, projectId, reportType, dateRange);
-  res.status(202).send();
+/**
+ * #104 — both ends of a worker request belong to the caller, or it is refused.
+ *
+ * These two routes take a `projectId` and a `reportId` from the body and pass
+ * both to report generation. `requireWorkerAuth` accepts the internal secret
+ * *or falls back to `requireAdmin`*, so an Admin could name another Customer's
+ * Project alongside their own report id and have that Customer's Capture
+ * counts, Session timings and Monitored User counts computed and attached to
+ * an artifact they own — the worker writes back only `status` and `gcsPath`,
+ * never `projectId`, so `GET /admin/reports/:id/status` then answers it
+ * normally. Lesson 66 (`reports/generate` taking a projectId on trust) and
+ * lesson 67 (a guard added one call site at a time is absent everywhere nobody
+ * looked); both routes predate the check existing anywhere.
+ *
+ * The `reportId` is checked as well as the `projectId`, because the defect
+ * mirrors: a Project the caller owns writing into a *foreign* report is the
+ * same disclosure run backwards. A report is scoped by the Project it names,
+ * so both checks are `loadOwnedProject` and the refusal is the merged one
+ * every other Project-scoped route gives — unknown and foreign, at either end,
+ * are one answer.
+ *
+ * The internal-secret path is exempt, and structurally has to be: it is the
+ * trusted caller, and carries no `hammerUser` to scope against.
+ */
+async function workerTargetsAreOwned(req, res) {
+  if (req.isInternalWorker) return true;
+
+  const { reportId, projectId } = req.body;
+  if (!await loadOwnedProject(req, res, projectId)) return false;
+
+  const reportSnap = reportId
+    ? await db.collection(collections.REPORTS).doc(reportId).get()
+    : null;
+  // A report id naming nothing yields no projectId, which loadOwnedProject
+  // refuses with the same answer as a foreign one.
+  return !!await loadOwnedProject(req, res, reportSnap?.exists ? reportSnap.data().projectId : null);
+}
+
+app.post('/worker/reports', express.json(), workerLimiter, requireWorkerAuth, async (req, res, next) => {
+  try {
+    if (!await workerTargetsAreOwned(req, res)) return;
+    const { reportId, projectId, reportType, dateRange } = req.body;
+    generateStandardReport(reportId, projectId, reportType, dateRange);
+    res.status(202).send();
+  } catch (err) {
+    next(err);
+  }
 });
 
-app.post('/worker/ocr', express.json(), workerLimiter, requireWorkerAuth, (req, res) => {
-  const { reportId, projectId, reportType, dateRange } = req.body;
-  generateOcrReport(reportId, projectId, reportType, dateRange);
-  res.status(202).send();
+app.post('/worker/ocr', express.json(), workerLimiter, requireWorkerAuth, async (req, res, next) => {
+  try {
+    if (!await workerTargetsAreOwned(req, res)) return;
+    const { reportId, projectId, reportType, dateRange } = req.body;
+    generateOcrReport(reportId, projectId, reportType, dateRange);
+    res.status(202).send();
+  } catch (err) {
+    next(err);
+  }
 });
 
 // ─ 404 fallback ───────────────────────────────────────────────────

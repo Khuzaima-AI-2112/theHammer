@@ -839,3 +839,16 @@ Run this before starting any new sprint:
 - **When a ticket's acceptance criterion names an existing check, confirm the check can see the new work.** "The audit passes" is worth nothing if the audit's collection step filters the new case out. Read what it collects, not what it asserts.
 - **Widen the check in the same change that reveals the gap.** The extension cost about thirty lines and is what makes #102 and #103's index criteria mean anything; deferring it would have left two more tickets with the same vacuous criterion.
 - **An emulator that accepts every query is not evidence about indexes.** It has no opinion on them. Only the live project does, and only under the real query shape (lesson 68).
+
+### 71. An auth check joined by "or" is only as strong as its weaker half
+
+**What happened:** #104 found `POST /worker/reports` and `POST /worker/ocr` taking a `projectId` and a `reportId` from the request body and passing both to report generation with no ownership check. They looked exempt: they are internal worker endpoints, called by `reports/generate` with a shared secret, and internal callers legitimately have no Workspace to scope against. But `requireWorkerAuth` reads `secret matches` **or** `requireAdmin(...)`, so every one of them is also a normal authenticated Admin route — and on that path the caller does have a Workspace, and was never asked whether the ids named it. An Admin could pair another Customer's `projectId` with their own `reportId`, and #8's real metrics — Capture counts, Session timings, Monitored User counts — were computed over the foreign Project and attached to an artifact the caller owns. The worker writes back only `status` and `gcsPath`, never `projectId`, so `GET /admin/reports/:id/status` then answered it as the caller's own.
+
+**Root cause:** the route was reasoned about under the identity it was designed for, not under every identity its middleware admits. "Internal endpoint" described the intended caller; the `||` described the actual one. The same reasoning hid a second defect in the mirror: only the `projectId` looked like the untrusted input, so the `reportId` — the other end, and the one that decides where the answer lands — went unexamined.
+
+Confirmed while checking this: `INTERNAL_SECRET` is set nowhere. `cloudbuild.yaml`'s `--set-env-vars` does not name it and the deployed `thehammer-backend` revision has no such variable, so production runs on the literal `'dev-secret'` in the code's own fallback. Filed separately rather than fixed here (AGENTS.md §2).
+
+**Rule going forward:**
+- **Enumerate every identity a middleware admits, then check the route against the weakest one.** A guard written as `A || B` is a route with two callers. Exempting it because of `A` leaves `B` unguarded, and `B` is usually the one an attacker already has.
+- **A default credential in code is a production credential until something is proven to override it.** `process.env.X || 'dev-secret'` never fails, never logs, and never looks wrong locally. Check the deployed environment rather than the line that reads it.
+- **When a request names two records, both are untrusted.** The id that selects the data and the id that receives the result are the same defect seen from either end; checking one and not the other closes half of it (lesson 67).
