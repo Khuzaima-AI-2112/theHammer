@@ -64,8 +64,10 @@ function belongsToCaller(snap, req) {
  *     const projSnap = await loadOwnedProject(req, res, projectId);
  *     if (!projSnap) return;
  *
- * Returns the snapshot on success, because every call site needed the document
- * anyway and would otherwise read it twice.
+ * Returns the snapshot on success. Most call sites only need the refusal and
+ * discard it; the three that go on to read or update the Project — the two in
+ * projects.js and the roster route — would otherwise fetch the same document a
+ * second line later.
  *
  * A falsy `projectId` is refused here rather than left to Firestore, which
  * throws on `doc(undefined)` and would turn a refusal into a 500. That is not

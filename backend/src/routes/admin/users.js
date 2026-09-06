@@ -22,6 +22,7 @@ const { VALID_ROLES } = require('../../lib/roles');
 const { USER_PREFERENCES } = require('../../lib/defaults');
 const collections = require('../../lib/collections');
 const {
+  FOREIGN_USER,
   belongsToCaller,
   loadOwnedProject,
   unreachableProjectError,
@@ -175,7 +176,7 @@ router.get('/users/:id', requireAdmin, async (req, res, next) => {
     const snap = await db.collection(collections.USERS).doc(req.params.id).get();
     if (!snap.exists) return res.status(404).json({ error: 'user not found' });
     if (!belongsToCaller(snap, req)) {
-      return res.status(403).json({ error: 'forbidden: user belongs to another workspace' });
+      return res.status(FOREIGN_USER.status).json({ error: FOREIGN_USER.error });
     }
     return res.json(serializeUser(snap));
   } catch (err) { next(err); }
@@ -277,7 +278,8 @@ router.post('/projects/:id/members', requireAdmin, async (req, res, next) => {
         tx.get(membershipRef),
       ]);
 
-      if (!projSnap.exists) throw Object.assign(new Error('project not found'),       { status: 404 });
+      // No exists-check of its own: belongsToCaller is false for a document
+      // that isn't there, so gone and foreign refuse identically here too (#99).
       if (!belongsToCaller(projSnap, req)) throw unreachableProjectError();
       if (!userSnap.exists) throw Object.assign(new Error('user not found'),           { status: 404 });
       // The Project is in the caller's Workspace by the line above; the
@@ -321,7 +323,7 @@ router.delete('/projects/:id/members/:userId', requireAdmin, async (req, res, ne
         tx.get(membershipRef),
       ]);
 
-      if (!projSnap.exists) throw Object.assign(new Error('project not found'),    { status: 404 });
+      // Gone and foreign refuse identically, as above (#99).
       if (!belongsToCaller(projSnap, req)) throw unreachableProjectError();
       if (!membSnap.exists) throw Object.assign(new Error('membership not found'), { status: 404 });
 
@@ -377,7 +379,7 @@ router.patch('/users/:id', requireAdmin, async (req, res, next) => {
       // without this an Admin could promote — or demote — a Monitored User in
       // another Customer's Workspace.
       if (!belongsToCaller(snap, req)) {
-        throw Object.assign(new Error('forbidden: user belongs to another workspace'), { status: 403 });
+        throw foreignUserError();
       }
 
       tx.update(userRef, updates);

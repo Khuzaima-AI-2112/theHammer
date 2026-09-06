@@ -446,6 +446,39 @@ describe('SEC-13 — an unreachable Project does not say why it is unreachable',
     expect(unknown.body).toEqual(foreign.body);
   });
 
+  // The two membership routes check ownership inside a transaction, where they
+  // cannot write a response and throw instead. That is a second code path to
+  // the same rule, and it was the one the first pass of #99 missed: the
+  // workspace comparison moved to the helper while the 404-for-missing above it
+  // stayed, so these two kept the split answer. Nothing failed, because no case
+  // had ever named a Project that does not exist here.
+  test('POST /admin/projects/:id/members answers a foreign id and an unknown id alike', async () => {
+    const body = { userId: 'iso-user-id', role: 'user' };
+    const foreign = await request(app)
+      .post(`/admin/projects/${BETA_PROJECT}/members`).set(ADMIN).send(body);
+    const unknown = await request(app)
+      .post(`/admin/projects/${NONEXISTENT}/members`).set(ADMIN).send(body);
+
+    expect(foreign.status).toBe(403);
+    expect(unknown.status).toBe(foreign.status);
+    expect(unknown.body).toEqual(foreign.body);
+  });
+
+  test('DELETE /admin/projects/:id/members/:userId answers a foreign id and an unknown id alike', async () => {
+    const foreign = await request(app)
+      .delete(`/admin/projects/${BETA_PROJECT}/members/${BETA_USER}`).set(ADMIN);
+    const unknown = await request(app)
+      .delete(`/admin/projects/${NONEXISTENT}/members/${BETA_USER}`).set(ADMIN);
+
+    expect(foreign.status).toBe(403);
+    expect(unknown.status).toBe(foreign.status);
+    expect(unknown.body).toEqual(foreign.body);
+
+    // Beta's membership survives both attempts.
+    const membership = await db.collection(collections.MEMBERSHIPS).doc(BETA_MEMBERSHIP).get();
+    expect(membership.exists).toBe(true);
+  });
+
   test('a Project the caller does own still answers normally', async () => {
     const res = await request(app).get(`/admin/projects/${ALPHA_PROJECT}`).set(ADMIN);
     expect(res.status).toBe(200);
