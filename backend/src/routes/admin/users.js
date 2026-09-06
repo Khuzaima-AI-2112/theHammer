@@ -75,9 +75,13 @@ function isInCallersWorkspace(snap, req) {
 /**
  * Refuses a Project outside the caller's Workspace, answering the request
  * itself and reporting that it did, so a caller reads as
- * `if (await denyForeignProject(req, res, id)) return;`. Mirrors the same
- * helper in reports.js — 404 when the Project is gone, 403 when it is
- * someone else's.
+ * `if (await denyForeignProject(req, res, id)) return;`. Same shape and same
+ * status codes as reports.js's helper of this name — 404 when the Project is
+ * gone, 403 when it is someone else's — but the error strings are this file's
+ * existing lowercase ones, which the routes below and their tests already use.
+ * The two files disagreeing on the casing of one word predates this; a fifth
+ * copy of the check is the thing worth removing (see lesson 67), and that is
+ * a refactor across seven files rather than part of #7.
  */
 async function denyForeignProject(req, res, projectId) {
   const projSnap = await db.collection(collections.PROJECTS).doc(projectId).get();

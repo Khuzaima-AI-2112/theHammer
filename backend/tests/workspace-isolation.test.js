@@ -246,6 +246,31 @@ describe('SEC-07 — /admin/users does not disclose a Monitored User in another 
     expect(after.data().role).toBe('user');
   });
 
+  // The records that made the fallback necessary: POST /admin/users wrote
+  // users with no workspaceId until this ticket, and "no Workspace" must read
+  // as foreign to everyone rather than as "belongs to whoever asked" — the
+  // second reading would leave the hole SEC-07 and SEC-08 close.
+  test('a record carrying no Workspace at all is foreign, not everyone\'s', async () => {
+    const stray = db.collection(collections.USERS).doc('legacy-unstamped-user');
+    await stray.set({
+      email: 'legacy-unstamped@test.com',
+      displayName: 'Provisioned before workspaceId existed',
+      role: 'user',
+      createdAt: new Date('2026-01-01T00:00:00.000Z').toISOString(),
+      schemaVersion: 1,
+    });
+
+    const read = await request(app).get('/admin/users/legacy-unstamped-user').set(ADMIN);
+    expectRefused(read);
+
+    const write = await request(app).patch('/admin/users/legacy-unstamped-user').set(ADMIN)
+      .send({ role: 'admin' });
+    expectRefused(write);
+    expect((await stray.get()).data().role).toBe('user');
+
+    await stray.delete();
+  });
+
   test('a user provisioned by an Admin is placed in that Admin\'s Workspace', async () => {
     const res = await request(app).post('/admin/users').set(ADMIN)
       .send({ email: 'freshly-provisioned@test.com', role: 'user' });
