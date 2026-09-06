@@ -41,9 +41,24 @@ function jsFiles(dir) {
 }
 
 /**
- * Every query in the routes that combines equality filters with an orderBy.
- * A query with no orderBy needs no composite index, so it is skipped.
+ * Every query in the routes that needs a composite index. Two shapes qualify:
+ *
+ *   1. equality filters plus an `orderBy` — the original case, #43
+ *   2. equality filters plus an *inequality* on a different field — added for
+ *      #101, whose scoped Dashboard counts are exactly this and have no
+ *      `orderBy` to be noticed by
+ *
+ * Shape 2 was invisible to this audit until #101. `where(workspaceId ==)` with
+ * `where(memberCount >)` needs an index just as much as an ordered query does,
+ * and Firestore fails it identically — FAILED_PRECONDITION, only once the
+ * collection has data. The emulator serves both without any index, so no local
+ * run will tell you either is missing (lesson 68).
+ *
+ * A query with neither an orderBy nor an inequality needs no composite index
+ * and is skipped.
  */
+const INEQUALITY_OPS = ['<', '<=', '>', '>=', '!='];
+
 function indexRequiringQueries() {
   const names = collectionNames();
   const found = [];
@@ -52,17 +67,32 @@ function indexRequiringQueries() {
     const src = fs.readFileSync(file, 'utf8');
     for (const m of src.matchAll(/db\.collection\(collections\.(\w+)\)/g)) {
       const slice = src.slice(m.index, m.index + src.slice(m.index).indexOf(';') + 1);
-      const order = slice.match(/\.orderBy\('([^']+)',\s*'(asc|desc)'\)/);
-      if (!order) continue;
-
       const equality = [...slice.matchAll(/\.where\('([^']+)',\s*'=='/g)].map((w) => w[1]);
       if (equality.length === 0) continue;
+
+      const order = slice.match(/\.orderBy\('([^']+)',\s*'(asc|desc)'\)/);
+      if (order) {
+        found.push({
+          collection: names[m[1]] || m[1],
+          equality,
+          orderBy: order[1],
+          direction: order[2] === 'asc' ? 'ASCENDING' : 'DESCENDING',
+          where: path.relative(REPO, file).split(path.sep).join('/')
+        });
+        continue;
+      }
+
+      // An inequality sorts by its own field, so the index it needs has that
+      // field last and ascending — the same shape an orderBy would produce.
+      const inequality = [...slice.matchAll(/\.where\('([^']+)',\s*'([^']+)'/g)]
+        .find((w) => INEQUALITY_OPS.includes(w[2]));
+      if (!inequality) continue;
 
       found.push({
         collection: names[m[1]] || m[1],
         equality,
-        orderBy: order[1],
-        direction: order[2] === 'asc' ? 'ASCENDING' : 'DESCENDING',
+        orderBy: inequality[1],
+        direction: 'ASCENDING',
         where: path.relative(REPO, file).split(path.sep).join('/')
       });
     }
