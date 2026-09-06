@@ -9,6 +9,7 @@ const { requireAnalyst } = require('../../middleware/requireAuth');
 const { refreshVideoReportStatus } = require('../../lib/shotstack');
 const collections = require('../../lib/collections');
 const { loadOwnedProject } = require('../../lib/ownership');
+const { resolveInternalSecret } = require('../../lib/internalSecret');
 // Use the Cloud Tasks library if configured, else invoke worker directly (MVP)
 // const { CloudTasksClient } = require('@google-cloud/tasks');
 
@@ -37,6 +38,17 @@ router.post('/reports/generate', requireAnalyst, analystReportLimiter, async (re
     // Now that the numbers are real, the same request would answer with another
     // Customer's Capture counts, Monitored User count and Session timings.
     if (!await loadOwnedProject(req, res, projectId)) return;
+
+    // #105: this route is the only caller of the worker endpoints, and it
+    // authenticates to them with the internal secret. With no secret to
+    // present, the request it is about to fire would be refused — so say so
+    // now, rather than filing a `queued` report no worker can ever pick up.
+    // Checked before the row is created for exactly that reason.
+    const internalSecret = resolveInternalSecret();
+    if (!internalSecret) {
+      logger.error('[Reports] INTERNAL_SECRET is not set; cannot dispatch to the worker.');
+      return res.status(503).json({ error: 'Report generation is not configured' });
+    }
 
     const now = nowISO();
     const reportRef = await db.collection(collections.REPORTS).add({
@@ -70,8 +82,7 @@ router.post('/reports/generate', requireAnalyst, analystReportLimiter, async (re
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        // In real life, secure this with an internal token or OIDC
-        'X-Internal-Secret': process.env.INTERNAL_SECRET || 'dev-secret'
+        'X-Internal-Secret': internalSecret
       },
       body: JSON.stringify({ reportId, projectId, reportType, dateRange })
     }).catch(err => logger.error('[Reports] Failed to trigger worker:', err));

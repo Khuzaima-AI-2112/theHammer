@@ -95,8 +95,16 @@ steps:
       # plain env var — infra/add-shotstack-secret.ps1 provisions the
       # `shotstack-api-key` secret and the backend SA's read access to it;
       # this just points Cloud Run at it.
+      #
+      # INTERNAL_SECRET (#105) is the shared secret POST /reports/generate
+      # presents to the worker routes. It was set nowhere at all until now, so
+      # the backend ran on the 'dev-secret' literal its code fell back to —
+      # published in this repository, on an --allow-unauthenticated service,
+      # and the internal path is exempt from #104's Workspace ownership check.
+      # infra/add-internal-secret.ps1 provisions it. One flag carries both:
+      # --set-secrets replaces the whole set rather than adding to it.
       - '--set-secrets'
-      - 'SHOTSTACK_API_KEY=shotstack-api-key:latest'
+      - 'SHOTSTACK_API_KEY=shotstack-api-key:latest,INTERNAL_SECRET=internal-worker-secret:latest'
 
   # ── 5a. Inject backend URL into Portal ──────────────────────────────────────
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'

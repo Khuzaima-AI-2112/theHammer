@@ -72,6 +72,15 @@ npm start
 # Express backend API will listen on http://localhost:8080
 ```
 
+**`INTERNAL_SECRET` locally:** you do not need to set it. Report generation
+authenticates itself to the `/worker/*` routes with this secret, and outside
+production the process generates a random one at startup — which works because
+the caller and the worker are the same process. You will see one log line
+saying so. In production it must be set, and an unset value refuses the
+internal path rather than falling back to a known string (#105); Cloud Run
+receives it from Secret Manager, provisioned by `infra/add-internal-secret.ps1`
+and wired up in `cloudbuild.yaml`.
+
 ### Testing the Chrome Extension Locally
 1. Open Google Chrome and go to `chrome://extensions`.
 2. Enable **Developer mode** (top-right toggle switch).

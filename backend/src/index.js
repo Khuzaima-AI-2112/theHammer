@@ -693,9 +693,16 @@ const workerLimiter = rateLimit({
 const { generateStandardReport } = require('./worker/reportsWorker');
 const { generateOcrReport } = require('./worker/ocrWorker');
 
+const { resolveInternalSecret } = require('./lib/internalSecret');
+
 const requireWorkerAuth = (req, res, next) => {
   const secret = req.headers['x-internal-secret'];
-  if (secret && secret === (process.env.INTERNAL_SECRET || 'dev-secret')) {
+  // #105: `|| 'dev-secret'` used to stand here. An unset INTERNAL_SECRET now
+  // resolves to null in production, and no presented header equals null, so
+  // the internal path refuses everyone rather than accepting a value anyone
+  // can read out of this repository.
+  const expected = resolveInternalSecret();
+  if (expected && secret === expected) {
     // #104: which of the two ways in was taken is what the ownership check
     // below turns on, so it is recorded rather than re-derived there.
     req.isInternalWorker = true;
