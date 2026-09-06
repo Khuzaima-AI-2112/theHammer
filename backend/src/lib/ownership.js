@@ -43,6 +43,35 @@ const FOREIGN_USER = Object.freeze({
   error: 'Forbidden: user belongs to another workspace',
 });
 
+/** The caller's own Workspace is missing, so there is nothing to scope to. */
+const NO_CALLER_WORKSPACE = Object.freeze({
+  status: 403,
+  error: 'Admin is not associated with a workspace',
+});
+
+/**
+ * The caller's own Workspace id, or `null` having refused the request.
+ *
+ * The mirror image of the checks below: those ask whether a *record* is the
+ * caller's, this asks whether the caller has a Workspace at all. A route that
+ * scopes a query by `req.hammerUser.workspaceId` without asking gets
+ * `where('workspaceId', '==', undefined | null)` — which does not fail. It
+ * matches every record that carries no Workspace, so an Admin belonging to
+ * nobody is answered with every unstamped row in the collection. Verified
+ * against `GET /admin/users`, which returned exactly that.
+ *
+ * Same rule as `belongsToCaller`, seen from the other side: absent means
+ * nobody, never everybody (lesson 67).
+ */
+function callerWorkspace(req, res) {
+  const workspaceId = req.hammerUser?.workspaceId;
+  if (!workspaceId) {
+    res.status(NO_CALLER_WORKSPACE.status).json({ error: NO_CALLER_WORKSPACE.error });
+    return null;
+  }
+  return workspaceId;
+}
+
 /**
  * Does this record belong to the caller's Workspace?
  *
@@ -104,8 +133,10 @@ function foreignUserError() {
 
 module.exports = {
   UNREACHABLE_PROJECT,
+  NO_CALLER_WORKSPACE,
   FOREIGN_USER,
   belongsToCaller,
+  callerWorkspace,
   loadOwnedProject,
   unreachableProjectError,
   foreignUserError,

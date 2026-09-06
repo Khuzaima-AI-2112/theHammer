@@ -4,6 +4,7 @@ const express = require('express');
 const { db } = require('../../lib/firestore');
 const { requireAdmin } = require('../../middleware/requireAuth');
 const collections = require('../../lib/collections');
+const { callerWorkspace } = require('../../lib/ownership');
 
 const router = express.Router();
 
@@ -14,13 +15,9 @@ router.get('/dashboard/stats', requireAdmin, async (req, res, next) => {
 
     // #101: requireAdmin proves the caller is an Admin, not that they are an
     // Admin *here*, and an Admin with no Workspace at all has nothing to be
-    // scoped to. Refused rather than answered: an unscoped count for a caller
-    // who belongs to nobody is every Customer's total, which is the disclosure
-    // this route exists to stop (lesson 67).
-    const workspaceId = req.hammerUser.workspaceId;
-    if (!workspaceId) {
-      return res.status(403).json({ error: 'Admin is not associated with a workspace' });
-    }
+    // scoped to (lesson 67).
+    const workspaceId = callerWorkspace(req, res);
+    if (!workspaceId) return;
 
     // Each count is an aggregation, so the rows never leave Firestore.
     //

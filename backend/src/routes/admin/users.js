@@ -24,6 +24,7 @@ const collections = require('../../lib/collections');
 const {
   FOREIGN_USER,
   belongsToCaller,
+  callerWorkspace,
   loadOwnedProject,
   unreachableProjectError,
   foreignUserError,
@@ -147,7 +148,13 @@ router.get('/users', requireAdmin, async (req, res, next) => {
 
     // #7: unscoped, this listed every Customer's Monitored Users — name,
     // email and role — to any Admin, with no id to guess first.
-    const workspaceId = req.hammerUser.workspaceId;
+    //
+    // #101: and scoped but unguarded, an Admin carrying no Workspace produced
+    // `where('workspaceId', '==', null)`, which matched every Monitored User
+    // who carries none — the records #7 said belong to nobody. Confirmed by
+    // probe before it was fixed: the route answered 200 with them.
+    const workspaceId = callerWorkspace(req, res);
+    if (!workspaceId) return;
     let query = db.collection(collections.USERS)
       .where('workspaceId', '==', workspaceId)
       .orderBy('email', 'asc');

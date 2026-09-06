@@ -38,8 +38,11 @@ const { clearDatabase, seedUser, seedProject } = require('./helpers/fixtures');
 const ALPHA = 'ws-dash-alpha';
 const BETA  = 'ws-dash-beta';
 
+const GAMMA = 'ws-dash-gamma';   // a Workspace with nothing in it but its Admin
+
 const ADMIN = { 'x-dev-user-email': 'dash-admin@test.com', 'content-type': 'application/json' };
 const STRAY = { 'x-dev-user-email': 'dash-stray@test.com', 'content-type': 'application/json' };
+const EMPTY = { 'x-dev-user-email': 'dash-empty@test.com', 'content-type': 'application/json' };
 
 const today     = new Date().toISOString();
 const yesterday = new Date(Date.now() - 36 * 60 * 60 * 1000).toISOString();
@@ -76,10 +79,22 @@ beforeAll(async () => {
     await seedProject(`dash-beta-p${n}`, { workspaceId: BETA, memberCount: 5 });
   }
 
+  // ── Gamma: a real Workspace that simply has no data yet ────────────
+  await seedUser('dash-empty-id', {
+    email: 'dash-empty@test.com', role: 'admin', workspaceId: GAMMA, lastActiveAt: today,
+  });
+
   // An Admin whose record carries no Workspace at all. Before #7, POST
   // /admin/users wrote users like this; such a record belongs to nobody.
   await seedUser('dash-stray-id', { email: 'dash-stray@test.com', role: 'admin', lastActiveAt: today });
   await db.collection(collections.USERS).doc('dash-stray-id').update({ workspaceId: null });
+
+  // A Monitored User and a Project carrying no Workspace either, so the
+  // refusals below are refusing something that genuinely exists.
+  await seedUser('dash-orphan-user', { email: 'orphan@test.com', lastActiveAt: today });
+  await db.collection(collections.USERS).doc('dash-orphan-user').update({ workspaceId: null });
+  await seedProject('dash-orphan-project', { memberCount: 3 });
+  await db.collection(collections.PROJECTS).doc('dash-orphan-project').update({ workspaceId: null });
 });
 
 afterAll(async () => {
@@ -123,5 +138,51 @@ describe('GET /admin/dashboard/stats — the Project and user tiles are scoped',
 
     expect(res.status).toBe(403);
     expect(res.body.activeProjects).toBeUndefined();
+  });
+
+  // The criterion that is easiest to assume and cheapest to break: a count()
+  // over an empty result set returns 0 rather than throwing, but a later
+  // "no rows, must be a bad Workspace" guard would turn this into a refusal.
+  test('an Admin in a Workspace with no data gets zeroes, not an error', async () => {
+    const res = await request(app).get('/admin/dashboard/stats').set(EMPTY);
+
+    expect(res.status).toBe(200);
+    expect(res.body.activeProjects).toBe(0);
+    expect(res.body.activeUsersToday).toBe(1); // only themselves
+  });
+});
+
+// The guard above is shared with two routes that had no guard at all, and were
+// leaking because of it. `where('workspaceId', '==', null)` does not match
+// nothing — it matches every record that carries no Workspace, which since #7
+// means every record that belongs to nobody. An Admin with no Workspace was
+// therefore answered with all of them.
+//
+// These live here rather than in workspace-isolation.test.js because the caller
+// is not in another Workspace; they are in none, which is a different thing and
+// was the hole.
+describe('a Workspace-less Admin is refused by the routes that scope by their Workspace', () => {
+  test('GET /admin/users does not answer with the unstamped roster', async () => {
+    const res = await request(app).get('/admin/users').set(STRAY);
+
+    expect(res.status).toBe(403);
+    expect(res.body.users).toBeUndefined();
+  });
+
+  test('GET /admin/projects does not answer with unstamped Projects', async () => {
+    const res = await request(app).get('/admin/projects').set(STRAY);
+
+    expect(res.status).toBe(403);
+    expect(res.body.projects).toBeUndefined();
+  });
+
+  test('the unstamped records really exist, so the refusals are not vacuous', async () => {
+    const orphanUsers = await db.collection(collections.USERS)
+      .where('workspaceId', '==', null).count().get();
+    const orphanProjects = await db.collection(collections.PROJECTS)
+      .where('workspaceId', '==', null).count().get();
+
+    expect(orphanUsers.data().count).toBeGreaterThan(0);
+    expect(orphanProjects.data().count).toBeGreaterThan(0);
   });
 });

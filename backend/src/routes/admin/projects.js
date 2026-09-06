@@ -27,7 +27,7 @@ const { FieldValue, Timestamp } = require('firebase-admin/firestore');
 const { db }   = require('../../lib/firestore');
 const { requireAdmin } = require('../../middleware/requireAuth');
 const collections = require('../../lib/collections');
-const { loadOwnedProject } = require('../../lib/ownership');
+const { loadOwnedProject, callerWorkspace } = require('../../lib/ownership');
 
 const router = express.Router();
 
@@ -103,8 +103,13 @@ router.post('/projects', requireAdmin, async (req, res, next) => {
 router.get('/projects', requireAdmin, async (req, res, next) => {
   try {
     const PAGE_SIZE = 100;
+    // #101: without this the filter becomes `where('workspaceId', '==', null)`
+    // for an Admin who has none, which matches every unstamped Project rather
+    // than none of them (lesson 67).
+    const workspaceId = callerWorkspace(req, res);
+    if (!workspaceId) return;
     let query = db.collection(collections.PROJECTS)
-      .where('workspaceId', '==', req.hammerUser.workspaceId)
+      .where('workspaceId', '==', workspaceId)
       .orderBy('createdAt', 'desc');
     if (req.query.cursor) {
       const cursorSnap = await db.collection(collections.PROJECTS).doc(req.query.cursor).get();
