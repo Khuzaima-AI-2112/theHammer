@@ -35,22 +35,12 @@ const H_USER = { 'x-dev-user-email': 'user@integration.test', 'content-type': 'a
 
 describe('Sprint 9 Integration Tests', () => {
 
-  test('GET /admin/dashboard/stats — returns dashboard metrics', async () => {
-    const res = await request(app).get('/admin/dashboard/stats').set(H_ADMIN);
-    expect(res.status).toBe(200);
-    expect(typeof res.body.activeProjects).toBe('number');
-    expect(typeof res.body.activeUsersToday).toBe('number');
-    expect(typeof res.body.capturesToday).toBe('number');
-    expect(typeof res.body.pendingReports).toBe('number');
-  });
-
-  // #100: the response shape is asserted exactly, not tile by tile. `pendingExports`
-  // counted a collection nothing has ever written — an Export is produced and
-  // returned by the request that asks for it, so there is nothing for it to be
-  // pending (CONTEXT.md, Export). A tile that has shown a hardcoded 0 since it
-  // shipped tells an Admin their export queue is empty; the system has no export
-  // queue. Listing the keys is what makes reintroducing one fail here.
-  test('GET /admin/dashboard/stats — carries four tiles and no others', async () => {
+  // #100: the key set is asserted exactly, not key by key. A per-key `typeof`
+  // check passes whether or not a sixth key is present, which is how
+  // `pendingExports` survived — it named a collection with no writers and could
+  // only ever be 0 (lesson 69). Listing the keys is what makes reintroducing one
+  // fail here rather than pass.
+  test('GET /admin/dashboard/stats — returns exactly these stat keys', async () => {
     const res = await request(app).get('/admin/dashboard/stats').set(H_ADMIN);
     expect(res.status).toBe(200);
     expect(Object.keys(res.body).sort()).toEqual([
@@ -59,6 +49,9 @@ describe('Sprint 9 Integration Tests', () => {
       'capturesToday',
       'pendingReports'
     ]);
+    for (const key of Object.keys(res.body)) {
+      expect(typeof res.body[key]).toBe('number');
+    }
   });
 
   // Note: testing rate limiting with supertest and express-rate-limit 
