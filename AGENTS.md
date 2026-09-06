@@ -99,8 +99,16 @@ smoke-test), gated behind the project owner's manual approval (ADR-0005).
 > (`--min-instances 0`, `--memory 256Mi`, `API_KEY` via `--set-secrets`).
 > Reconcile whichever of those production actually needs into `cloudbuild.yaml`
 > *before* removing the script. Binary Authorization is now unblocked but needs
-> an attestor, a policy and image signing — a ticket, not a flag. Whether a
-> Cloud Build trigger fires on push is still unverified (test plan INF-08).
+> an attestor, a policy and image signing — a ticket, not a flag.
+>
+> *Changed 2026-09-06:* this used to end "whether a Cloud Build trigger fires on
+> push is still unverified (test plan INF-08)". **It fires.** The trigger is
+> `buildme`, on push to `main` of `cfroszte/thehammer` — the client repo, which
+> is the `client` remote here; `origin` has its push URL set to `DISABLED`, so a
+> push to the personal remote deploys nothing. Verified by pushing `cf5ccfc`
+> (#105), which queued build `8d351cc2` unprompted; it then waited on the manual
+> approval gate (ADR-0005) and ran all 11 steps green. So a push to
+> `client/main` is a deploy request, not a backup — INF-08 is closed.
 
 ## 6. Consult the "Lessons Learned"
 
