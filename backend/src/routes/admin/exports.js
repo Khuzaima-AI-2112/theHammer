@@ -141,9 +141,9 @@ router.get('/projects/:id/export', requireAdmin, exportLimiter, async (req, res,
     res.setHeader('Content-Disposition', `attachment; filename="${stem}.zip"`);
 
     const archive = archiver('zip', { zlib: { level: 0 } });
-    archive.on('warning', (err) => logger.error('[hammer-api] export archive warning:', err.message));
+    archive.on('warning', (err) => logger.error('[hammer-api] export archive warning:', err));
     archive.on('error', (err) => {
-      logger.error('[hammer-api] export archive error:', err.message);
+      logger.error('[hammer-api] export archive error:', err);
       res.destroy(err);
     });
     archive.pipe(res);
@@ -178,7 +178,7 @@ router.get('/projects/:id/export', requireAdmin, exportLimiter, async (req, res,
     // only honest thing is to break the stream: a truncated download fails
     // loudly in every unzip tool, where a short ZIP would not.
     if (res.headersSent) {
-      logger.error('[hammer-api] export failed mid-stream:', err.message);
+      logger.error('[hammer-api] export failed mid-stream:', err);
       return res.destroy(err);
     }
     return next(err);

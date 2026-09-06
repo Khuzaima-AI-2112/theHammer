@@ -21,12 +21,11 @@ function errorHandler(err, req, res, next) {
   if (process.env.NODE_ENV !== 'production') {
     logger.error('[errorHandler]', err);
   } else if (status >= 500) {
-    logger.error(JSON.stringify({
-      severity: 'ERROR',
-      message,
-      stack:    err.stack,
-      url:      req.originalUrl,
-    }));
+    // This used to hand JSON.stringify(...) to the logger as the *message*,
+    // which encoded a whole entry inside the entry's own message field — so
+    // production 500s arrived as one escaped string that Cloud Logging could
+    // not index on any of its fields (#106).
+    logger.error('[errorHandler]', { error: err, url: req.originalUrl, status });
   }
 
   // Never send a stack trace to the client

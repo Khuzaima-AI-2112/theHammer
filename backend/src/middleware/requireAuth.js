@@ -54,7 +54,7 @@ function isActivityStampStale(lastActiveAt) {
 function stampLastActive(userDoc) {
   if (!isActivityStampStale(userDoc.data().lastActiveAt)) return;
   userDoc.ref.update({ lastActiveAt: nowISO() }).catch((err) => {
-    logger.error('[Auth] failed to stamp lastActiveAt:', err.message);
+    logger.error('[Auth] failed to stamp lastActiveAt:', err);
   });
 }
 
@@ -148,7 +148,12 @@ function requireAuth(minRole) {
       stampLastActive(userDoc);
       next();
     } catch (err) {
-      logger.error('[Auth] Token verification failed:', err.message);
+      // Named fields rather than the whole Error: an expired or malformed token
+      // is a routine client condition on the hottest path in the service, and
+      // `code` (auth/id-token-expired and friends) is the diagnostic. The stack
+      // is the same few frames inside firebase-admin every time, so it would be
+      // volume without information.
+      logger.error('[Auth] Token verification failed:', { error: err.message, code: err.code });
       return res.status(401).json({ error: 'unauthenticated: invalid token' });
     }
   };
@@ -199,7 +204,8 @@ async function requireFirebaseUser(req, res, next) {
     req.firebaseUser = { uid, email: email.toLowerCase() };
     return next();
   } catch (err) {
-    logger.error('[Auth] Token verification failed:', err.message);
+    // Named fields rather than the whole Error, for the reason given above.
+    logger.error('[Auth] Token verification failed:', { error: err.message, code: err.code });
     return res.status(401).json({ error: 'unauthenticated: invalid token' });
   }
 }

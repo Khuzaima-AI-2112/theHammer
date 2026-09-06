@@ -310,10 +310,10 @@ async function firestoreWrite(objectPath, fields) {
       },
       { merge: false }
     );
-    logger.info('[hammer-api] Firestore write ✓ | doc:', docId);
+    logger.info('[hammer-api] Firestore write ✓', { doc: docId });
     return null;
   } catch (err) {
-    logger.error('[hammer-api] Firestore write error:', err.message);
+    logger.error('[hammer-api] Firestore write error:', err);
     return err.message;
   }
 }
@@ -339,18 +339,20 @@ async function dispatchWebhook(projectId, payload) {
       if (p.webhookUrl) {
         const ssrfErr = validateWebhookUrl(p.webhookUrl);
         if (ssrfErr) {
-          logger.error('[hammer-api] Webhook blocked (SSRF):', ssrfErr, '| url:', p.webhookUrl);
+          // Four arguments used to be passed here; the logger takes two, so the
+          // blocked URL — the whole point of the entry — was dropped (#106).
+          logger.error('[hammer-api] Webhook blocked (SSRF):', { reason: ssrfErr, url: p.webhookUrl });
           return;
         }
         fetch(p.webhookUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
-        }).catch(err => logger.error('[hammer-api] Webhook dispatch error:', err.message));
+        }).catch(err => logger.error('[hammer-api] Webhook dispatch error:', err));
       }
     }
   } catch(err) {
-    logger.error('[hammer-api] Webhook fetch project error:', err.message);
+    logger.error('[hammer-api] Webhook fetch project error:', err);
   }
 }
 
@@ -365,7 +367,7 @@ app.get('/health', async (_req, res) => {
     await db.collection(collections.PROJECTS).limit(1).get();
     res.json({ status: 'ok', firestore: 'connected' });
   } catch (err) {
-    logger.error('[hammer-api] Health check failed:', err.message);
+    logger.error('[hammer-api] Health check failed:', err);
     res.status(503).json({ status: 'error', reason: 'Firestore disconnected' });
   }
 });
@@ -400,7 +402,7 @@ app.post('/upload-url', requireAuth('user'), async (req, res, next) => {
       const jsonFile = gcs.bucket(BUCKET_NAME).file(jsonPath);
       jsonFile.save(JSON.stringify(req.body.semanticData), {
         contentType: 'application/json'
-      }).catch(err => logger.error('[hammer-api] Semantic data write error:', err.message));
+      }).catch(err => logger.error('[hammer-api] Semantic data write error:', err));
     }
 
     const file = gcs.bucket(BUCKET_NAME).file(objectPath);
@@ -433,7 +435,9 @@ app.post('/upload-url', requireAuth('user'), async (req, res, next) => {
       uploadedAt: new Date().toISOString(),
       hasSemanticData: !!req.body.semanticData
     });
-    if (firestoreErr) logger.error('[hammer-api] upload-url metadata write failed:', firestoreErr);
+    // firestoreWrite() returns err.message, so this is a string rather than an
+    // Error — named explicitly so it does not read as an unlabelled `detail`.
+    if (firestoreErr) logger.error('[hammer-api] upload-url metadata write failed:', { error: firestoreErr });
 
     dispatchWebhook(safeProject, {
       text: `New screenshot capture initiated`,
@@ -518,7 +522,7 @@ app.post('/capture', requireAuth('user'), requireMultipart, rejectOversizedUploa
         const jsonFile = gcs.bucket(BUCKET_NAME).file(jsonPath);
         jsonFile.save(JSON.stringify(parsed), {
           contentType: 'application/json'
-        }).catch(err => logger.error('[hammer-api] Semantic data write error:', err.message));
+        }).catch(err => logger.error('[hammer-api] Semantic data write error:', err));
       } catch (e) {
         logger.error('[hammer-api] Could not parse semanticData');
       }
