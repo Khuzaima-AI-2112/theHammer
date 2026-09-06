@@ -361,7 +361,6 @@ async function loadDashboard() {
     document.getElementById('dashActiveUsers').textContent = stats.activeUsersToday ?? '—';
     document.getElementById('dashCaptures').textContent = stats.capturesToday ?? '—';
     document.getElementById('dashPendingReports').textContent = stats.pendingReports ?? '—';
-    document.getElementById('dashPendingExports').textContent = stats.pendingExports ?? '—';
     dashboardLoaded = true;
   } catch (err) {
     showToast(`Failed to load dashboard stats: ${err.message}`, 'error');

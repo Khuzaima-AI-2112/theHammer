@@ -24,14 +24,13 @@ router.get('/dashboard/stats', requireAdmin, async (req, res, next) => {
     // Captures Today
     const capturesTodaySnap = await db.collection(collections.UPLOADS).where('uploadedAt', '>=', startOfDay).count().get();
 
-    // Pending Exports (assuming we'll use an exports collection later, for now hardcode to 0 as it's Sprint 22 or we don't have it yet)
-    let pendingExportsCount = 0;
-    try {
-      const exportsSnap = await db.collection(collections.EXPORTS).where('status', 'in', ['queued', 'processing']).count().get();
-      pendingExportsCount = exportsSnap.data().count;
-    } catch(err) {
-      // Collection might not exist or be used yet
-    }
+    // #100: there was a fifth tile here, counting `exports` for a pending
+    // Export. Nothing has ever written that collection — an Export is produced
+    // and returned by the request that asks for it, so it has no record and no
+    // status to be pending in (CONTEXT.md, Export). The count was therefore
+    // always 0, and the try/catch around it meant an Admin was told their export
+    // queue was empty by a system that has no export queue. If asynchronous
+    // exports are ever built, this is a new tile, not a restored one.
 
     // Active Users Today
     const activeUsersTodaySnap = await db.collection(collections.USERS).where('lastActiveAt', '>=', startOfDay).count().get();
@@ -41,7 +40,6 @@ router.get('/dashboard/stats', requireAdmin, async (req, res, next) => {
       activeUsersToday: activeUsersTodaySnap.data().count,
       capturesToday: capturesTodaySnap.data().count,
       pendingReports: pendingReportsSnap.data().count,
-      pendingExports: pendingExportsCount,
     });
 
   } catch (err) {

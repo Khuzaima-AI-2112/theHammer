@@ -42,7 +42,23 @@ describe('Sprint 9 Integration Tests', () => {
     expect(typeof res.body.activeUsersToday).toBe('number');
     expect(typeof res.body.capturesToday).toBe('number');
     expect(typeof res.body.pendingReports).toBe('number');
-    expect(typeof res.body.pendingExports).toBe('number');
+  });
+
+  // #100: the response shape is asserted exactly, not tile by tile. `pendingExports`
+  // counted a collection nothing has ever written — an Export is produced and
+  // returned by the request that asks for it, so there is nothing for it to be
+  // pending (CONTEXT.md, Export). A tile that has shown a hardcoded 0 since it
+  // shipped tells an Admin their export queue is empty; the system has no export
+  // queue. Listing the keys is what makes reintroducing one fail here.
+  test('GET /admin/dashboard/stats — carries four tiles and no others', async () => {
+    const res = await request(app).get('/admin/dashboard/stats').set(H_ADMIN);
+    expect(res.status).toBe(200);
+    expect(Object.keys(res.body).sort()).toEqual([
+      'activeProjects',
+      'activeUsersToday',
+      'capturesToday',
+      'pendingReports'
+    ]);
   });
 
   // Note: testing rate limiting with supertest and express-rate-limit 

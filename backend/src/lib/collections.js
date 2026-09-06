@@ -12,6 +12,9 @@ module.exports = {
   CONFIG: 'config',
   WORKSPACES: 'workspaces',
   INVITATIONS: 'invitations',
-  EXPORTS: 'exports',
+  // There was an EXPORTS entry here. Nothing ever wrote that collection: an
+  // Export is a file produced and returned by the request that asks for it, so
+  // it has no record (CONTEXT.md, Export). Removed with the Dashboard tile that
+  // was counting it (#100).
   ACTIVITY_EVENTS: 'activity_events' // if needed, otherwise maps to uploads/similar
 };
