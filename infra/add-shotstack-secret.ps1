@@ -32,7 +32,21 @@ Write-Host '[shotstack] Checking whether the secret already exists...' -Foregrou
 $EXISTING = gcloud secrets describe $SECRET_NAME --project=$PROJECT_ID --format='value(name)' 2>$null
 
 $TMP_FILE = [System.IO.Path]::GetTempFileName()
-[System.IO.File]::WriteAllText($TMP_FILE, $env:SHOTSTACK_API_KEY_VALUE, [System.Text.Encoding]::UTF8)
+# NOT [System.Text.Encoding]::UTF8 — that writes a three-byte BOM (EF BB BF),
+# and a secret is bytes rather than a text document, so the BOM becomes part of
+# the value. This script did exactly that: the stored `shotstack-api-key` was
+# 43 bytes for a 40-character key, so every Shotstack call carried a corrupted
+# key in its x-api-key header. Found while chasing the same bug in
+# add-internal-secret.ps1 (#105), which was modelled on this file.
+$UTF8_NO_BOM = New-Object System.Text.UTF8Encoding($false)
+[System.IO.File]::WriteAllText($TMP_FILE, $env:SHOTSTACK_API_KEY_VALUE, $UTF8_NO_BOM)
+
+$WRITTEN = [System.IO.File]::ReadAllBytes($TMP_FILE)
+if ($WRITTEN.Length -ne $env:SHOTSTACK_API_KEY_VALUE.Length) {
+  Write-Error "ERROR: about to store $($WRITTEN.Length) bytes for a $($env:SHOTSTACK_API_KEY_VALUE.Length)-character key. Refusing."
+  Remove-Item $TMP_FILE
+  exit 1
+}
 
 if ($EXISTING) {
   Write-Host '[shotstack] Secret exists — adding a new version instead of recreating...' -ForegroundColor Cyan
