@@ -57,6 +57,14 @@ Check '0.6d' 'secretmanager.googleapis.com enabled' {
   $r = gcloud services list --enabled --project=$PROJECT_ID --filter='name:secretmanager.googleapis.com' --format='value(name)' 2>$null
   $r -match 'secretmanager'
 }
+Check '0.6e' 'aiplatform.googleapis.com enabled' {
+  $r = gcloud services list --enabled --project=$PROJECT_ID --filter='name:aiplatform.googleapis.com' --format='value(name)' 2>$null
+  $r -match 'aiplatform'
+}
+Check '0.6f' 'Backend SA holds roles/aiplatform.user' {
+  $r = gcloud projects get-iam-policy $PROJECT_ID --flatten='bindings[].members' --filter="bindings.members:$SA_EMAIL" --format='value(bindings.role)' 2>$null
+  $r -match 'aiplatform.user'
+}
 
 # 0.7 — Bucket exists, correct region, lifecycle rule present
 Check '0.7a' "Bucket gs://$BUCKET exists" {

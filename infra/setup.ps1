@@ -36,10 +36,11 @@ gcloud services enable `
   artifactregistry.googleapis.com `
   storage.googleapis.com `
   secretmanager.googleapis.com `
+  aiplatform.googleapis.com `
   --project=$PROJECT_ID
 
 Write-Host '[0.6] Verifying APIs...' -ForegroundColor Cyan
-$APIS = @('run.googleapis.com', 'artifactregistry.googleapis.com', 'storage.googleapis.com', 'secretmanager.googleapis.com')
+$APIS = @('run.googleapis.com', 'artifactregistry.googleapis.com', 'storage.googleapis.com', 'secretmanager.googleapis.com', 'aiplatform.googleapis.com')
 foreach ($API in $APIS) {
   $STATUS = gcloud services list --enabled --project=$PROJECT_ID --filter="name:$API" --format='value(name)'
   if (-not $STATUS) {
@@ -91,6 +92,24 @@ if ($POLICY -notmatch $SA_EMAIL) {
   Write-Error 'ERROR: SA IAM binding not found on bucket.'
 }
 Write-Host '  [OK] Service account bound to bucket' -ForegroundColor Green
+
+# Report and storyboard narratives call Vertex AI as this service account. The
+# role is project-level rather than bucket-level, because Vertex models are
+# project resources rather than objects. Without it the client is constructed
+# correctly and the call is then refused, which reads to a caller exactly like
+# a misconfigured client (#107).
+Write-Host '[0.8] Granting roles/aiplatform.user on the project...' -ForegroundColor Cyan
+gcloud projects add-iam-policy-binding $PROJECT_ID `
+  --member="serviceAccount:$SA_EMAIL" `
+  --role='roles/aiplatform.user' `
+  --condition=None
+
+Write-Host '[0.8] Verifying Vertex AI binding...' -ForegroundColor Cyan
+$AI_ROLES = gcloud projects get-iam-policy $PROJECT_ID --flatten='bindings[].members' --filter="bindings.members:$SA_EMAIL" --format='value(bindings.role)'
+if ($AI_ROLES -notmatch 'aiplatform.user') {
+  Write-Error 'ERROR: SA does not hold roles/aiplatform.user.'
+}
+Write-Host '  [OK] Service account can call Vertex AI' -ForegroundColor Green
 
 # ---------------------------------------------------------------------------
 # 0.9 — Generate API key, store in Secret Manager
