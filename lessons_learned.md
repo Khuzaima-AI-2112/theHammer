@@ -882,3 +882,31 @@ Every check made in #105 passed and none of them looked at the bytes: the script
 - **Assert the stored byte count, not the write.** Both scripts now read the value back from Secret Manager and compare its length to the string they meant to store. Three bytes is the entire bug, and length is enough to catch it. Same rule as lesson 72, one layer further out: the script's report is not evidence, and neither is the deployment's.
 - **`logger.error(message, err)` throws the error away.** The logger spreads its payload, and `{...new Error('x')}` is `{}`; a string payload spreads into `{"0":"F","1":"i",...}`, which is where those character-indexed log entries come from. Pass `{ error: err.message, stack: err.stack }` until the logger is fixed.
 - **A deployed env var proves presence, not correctness.** The only test that would have caught this is the one that exercises the feature end to end against production. #105's acceptance criteria stopped one step short, at `describe`.
+
+### 74. One symptom can have three sufficient causes, and a graceful fallback hides them one at a time
+
+**What happened:** #107 found the Vertex client built as `new GoogleGenAI({ vertexai: { project, location } })` when `vertexai` is a boolean and the other two are its siblings. That was filed as *the* reason no report had ever carried a narrative. It was not. Behind it, `aiplatform.googleapis.com` had never been enabled on `thehammer` at all — a direct probe returned `403 SERVICE_DISABLED` — and the backend service account held only `roles/datastore.user`. Behind *that*, the model every call names, `gemini-1.5-flash`, was withdrawn from projects with no prior usage on 2025-04-29 and is now off Google's deprecation list entirely. A project that never enabled the API has no prior usage by definition, so it does not qualify for the legacy access that kept existing users running.
+
+Three independent causes, each sufficient on its own. Fixing the first and enabling the API would have moved the failure from "Authentication is not set up" to a 404 on the model, and nobody would have seen the difference — because #8's graceful degradation catches every one of them identically: status `done`, real metrics, a `summary` field reading "LLM generation failed. Showing raw metrics only."
+
+**Root cause:** a fallback that converts any failure into the same successful-looking output destroys the information that distinguishes causes. Once one is found it is natural to stop, because the found cause *is* a real cause and it fully explains the symptom. It just does not exhaust it. The only reason the second and third were found is that the environment was checked before the fix was deployed, rather than after.
+
+**Rule going forward:**
+- **Before spending an infrastructure change on a fix, verify the rest of the chain it depends on.** The API, the credential, the permission, the model, the region. A code fix that lands into a broken environment reports success and changes nothing observable.
+- **When a fallback makes all failures look alike, treat the first cause you find as one of an unknown number.** Ask what the *next* error would be if this one were fixed, and go and check. That question is what turned #107 into #107 plus #108.
+- **A model id is a dependency with an expiry date, not a constant.** Pin the check, not just the string: every provider retires models, and the failure arrives as a 404 long after the code was last touched.
+
+### 75. A test that asserts a double's output is measuring the double
+
+**What happened:** two of them, found in one session.
+
+`worker-routes-tenancy.test.js` asserted that `POST /worker/ocr` drove its report to `done` with an artifact at a known path. It passed for months. It passed because `generateOcrReport` never called the model at all — it returned two hardcoded findings and wrote them to GCS (#96). The assertion was satisfied entirely by the fabrication it should have exposed.
+
+Separately, every suite mocks `@google/genai` wholesale through `helpers/genaiMock.js`, which replaces the constructor. So the malformed options object in #107 was never handed to anything that could reject it, and no test could have caught the defect no matter how many were written.
+
+**Root cause:** in both, the value under test was supplied by the test's own scaffolding. The OCR test asserted an outcome the production code invented; the Vertex mock swallowed the only argument that mattered. A test like this is a tautology wearing the shape of a check — and worse than no test, because it reports coverage over exactly the place where none exists.
+
+**Rule going forward:**
+- **Ask what would have to be true for this assertion to fail.** If the answer is "the mock would have to return something else", the test is measuring the mock. The OCR test could not fail while the mock existed.
+- **When a double replaces a constructor, assert on the arguments it received.** `GoogleGenAI.mock.calls[0][0]` was available the whole time; nobody looked at it. That single assertion is what closed #107, and it needs `jest.resetModules()` rather than a cleared mock because the client memoises.
+- **A green suite over a mocked boundary says nothing about the boundary.** Say so in the test's header, so the next person knows which side of the seam is actually covered.
