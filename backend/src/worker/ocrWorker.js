@@ -15,6 +15,19 @@ async function generateOcrReport(reportId, projectId, reportType, dateRange) {
   try {
     await reportRef.update({ status: 'processing', updatedAt: new Date().toISOString() });
 
+    // #96 (interim): everything below this line builds a Gemini request whose
+    // image parts are commented out, never sends it, and returns two hardcoded
+    // findings as though a model had observed them. `POST /reports/generate`
+    // now refuses these report types outright, so this path is reachable only
+    // by calling the worker route directly — and it must not fabricate there
+    // either. Failing is the honest answer until the real selection-and-compare
+    // implementation lands; the schema and prompt below are the scaffolding it
+    // will use.
+    throw new Error(
+      'OCR report generation is not implemented: it has never read a Capture (#96)'
+    );
+
+    // eslint-disable-next-line no-unreachable
     const client = getAIClient();
     
     // We use gemini-1.5-flash for the best balance of speed, cost, and multimodal capability

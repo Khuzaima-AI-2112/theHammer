@@ -25,6 +25,11 @@ function nowISO() { return new Date().toISOString(); }
 
 const { analystReportLimiter } = require('../../middleware/rateLimiters');
 
+// The two report types served by the OCR worker. Named once so the guard below
+// and the dispatch further down cannot drift apart — they used to be two
+// separate inline lists of the same two strings.
+const OCR_REPORT_TYPES = new Set(['ui_state_changes', 'text_entry_tracking']);
+
 // POST /reports/generate
 router.post('/reports/generate', requireAnalyst, analystReportLimiter, async (req, res, next) => {
   try {
@@ -38,6 +43,22 @@ router.post('/reports/generate', requireAnalyst, analystReportLimiter, async (re
     // Now that the numbers are real, the same request would answer with another
     // Customer's Capture counts, Monitored User count and Session timings.
     if (!await loadOwnedProject(req, res, projectId)) return;
+
+    // #96: generateOcrReport has never read a Capture. It builds a Gemini
+    // request with both image parts commented out, never sends it, and returns
+    // two hardcoded findings naming specific UI elements and specific state
+    // transitions — then writes them to GCS stamped with a model that did not
+    // produce them, and marks the report `done`. Invented observations that
+    // read as real ones are worse than a visible gap, so until the real
+    // implementation lands this refuses instead.
+    //
+    // Before the row is written, for #105's reason: a refused report must not
+    // leave a row behind describing work that will never happen.
+    if (OCR_REPORT_TYPES.has(reportType)) {
+      return res.status(501).json({
+        error: 'This report type is not yet implemented. It is being built; see issue #96.'
+      });
+    }
 
     // #105: this route is the only caller of the worker endpoints, and it
     // authenticates to them with the internal secret. With no secret to
@@ -74,8 +95,8 @@ router.post('/reports/generate', requireAnalyst, analystReportLimiter, async (re
     
     // We will fire and forget an HTTP request to our internal worker endpoint
     const backendUrl = process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 8080}`;
-    const workerEndpoint = reportType === 'ui_state_changes' || reportType === 'text_entry_tracking' 
-      ? '/worker/ocr' 
+    const workerEndpoint = OCR_REPORT_TYPES.has(reportType)
+      ? '/worker/ocr'
       : '/worker/reports';
 
     fetch(`${backendUrl}${workerEndpoint}`, {

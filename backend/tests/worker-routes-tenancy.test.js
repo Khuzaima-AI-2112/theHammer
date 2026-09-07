@@ -230,6 +230,15 @@ describe('#104 SEC-19 — the internal secret is unaffected', () => {
     expect(done.gcsPath).toBe(`gs://fake-bucket/${ALPHA_PROJECT}/reports/${ALPHA_REPORT}.json`);
   });
 
+  // What this test is for is the *auth* path: the internal secret is admitted
+  // and reaches the worker, unaffected by the Workspace scoping #104 added.
+  // The 202 and the status transition below are what prove that.
+  //
+  // It used to assert the report reached `done` with an artifact — but that
+  // only ever passed because generateOcrReport fabricated its findings, so the
+  // assertion was measuring the mock rather than the feature (#96). The worker
+  // now refuses instead of inventing, and `error` is the honest outcome until
+  // the real implementation lands. The secret path is no less exercised.
   test('the secret path: /worker/ocr still runs', async () => {
     const ocrReport = 'alpha-ocr-report';
     await seedReport(ocrReport, ALPHA_PROJECT, 'alpha');
@@ -239,9 +248,9 @@ describe('#104 SEC-19 — the internal secret is unaffected', () => {
 
     expect(res.status).toBe(202);
 
-    const done = await waitForReport(ocrReport, (d) => d.status === 'done' || d.status === 'error');
-    expect(done.status).toBe('done');
-    expect(done.gcsPath).toBe(`gs://fake-bucket/${ALPHA_PROJECT}/reports/${ocrReport}.json`);
+    const settled = await waitForReport(ocrReport, (d) => d.status === 'done' || d.status === 'error');
+    expect(settled.status).toBe('error');
+    expect(settled.gcsPath).toBeNull();
   });
 });
 
