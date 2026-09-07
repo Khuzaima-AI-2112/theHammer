@@ -107,8 +107,14 @@ router.get('/projects/:id/export', requireAdmin, exportLimiter, async (req, res,
 
     if (snap.size > MAX_CAPTURES) {
       return res.status(400).json({
+        // #76: an error must not recommend an action the product does not
+        // offer. The unfiltered case has a real way out — filter by Tool. The
+        // filtered case does not: Tool is the narrowest filter there is, and
+        // the date range this used to suggest was never built. Saying so is
+        // worth more than sending someone to look for a control that is not
+        // there, which is what cost a round trip the first time.
         error: tool
-          ? `Tool "${tool}" has more than ${MAX_CAPTURES} Captures in this Project; narrow the date range`
+          ? `Tool "${tool}" has more than ${MAX_CAPTURES} Captures and an export holds at most ${MAX_CAPTURES}. Tool is the narrowest filter available, so this section cannot be exported in one file.`
           : `This Project has more than ${MAX_CAPTURES} Captures and an export holds at most ${MAX_CAPTURES}. Filter by Tool in the Activity view and export each section.`,
         max: MAX_CAPTURES
       });

@@ -231,6 +231,38 @@ describe('GET /admin/projects/:id/export', () => {
     }
   });
 
+  // #76's actual complaint, which survived in the one branch #75 did not touch:
+  // an error must not recommend an action the product does not offer. Tool is
+  // the narrowest filter there is, so once a single section passes the ceiling
+  // the operator has no way out — and the honest thing is to say so rather than
+  // send them looking for a date range that was never built.
+  test('a single Tool over the ceiling says so, without inventing a way out', async () => {
+    const ids = [];
+    for (let i = 0; i < 51; i++) {
+      const id = `onetool-${String(i).padStart(3, '0')}`;
+      ids.push(id);
+      await seedUpload(id, {
+        tool: 'sec-huge',
+        uploadedAt: `2026-08-31T${String(10 + (i % 12)).padStart(2, '0')}:${String(i % 60).padStart(2, '0')}:00.000Z`
+      });
+    }
+
+    try {
+      const res = await request(app)
+        .get('/admin/projects/persona-buyer/export?tool=sec-huge')
+        .set(ADMIN);
+
+      expect(res.status).toBe(400);
+      expect(res.body.max).toBe(50);
+      expect(res.body.error).toContain('sec-huge');
+      // The whole point: no date range exists, so the message must not name one.
+      expect(res.body.error).not.toMatch(/date range/i);
+      expect(res.body.error).toMatch(/narrowest filter|cannot be exported/i);
+    } finally {
+      for (const id of ids) await db.collection(collections.UPLOADS).doc(id).delete();
+    }
+  });
+
   test('400 — refuses more than 50 Captures', async () => {
     const ids = [];
     for (let i = 0; i < 51; i++) {
