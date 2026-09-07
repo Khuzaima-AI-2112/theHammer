@@ -37,13 +37,27 @@ router.get('/dashboard/stats', requireAdmin, async (req, res, next) => {
     // Pending Reports (status == 'queued' or 'processing') in this Workspace
     //
     // #103 stamped `reports` the same way #102 stamped `uploads` (ADR 0014).
-    // Note this pair is *not* the shape the two queries around it are: `in` is
-    // a disjunction of equalities rather than an inequality, so
-    // `npm run test:indexes` does not recognise it as index-requiring and will
-    // stay green whether or not the index exists. The declared index and the
-    // shape added to scripts/index-readiness-probe.js are what cover it, and
-    // only the probe — issuing this query against the live project — actually
-    // answers the question (lesson 68).
+    //
+    // What is known: a (workspaceId, status) index is declared, deployed and
+    // built, and the readiness probe confirms this exact shape serves against
+    // the live project (2026-09-07).
+    //
+    // What is *not* known: whether it needs that index. `in` is a disjunction
+    // of equalities rather than an inequality, and Firestore can serve
+    // equality-only filters by merging single-field indexes — so the composite
+    // may be doing nothing. Do not read the deploy timings as evidence either
+    // way: this shape probed READY while the `uploads` one spent four minutes
+    // BUILDING, but `reports` was empty and an index over no documents builds
+    // instantly, so collection size explains that difference on its own.
+    //
+    // Settling it means dropping the index and re-probing, which is not worth
+    // doing to save one index on a collection this small. Left declared.
+    //
+    // Note also that `npm run test:indexes` cannot see this query at all: its
+    // parser knows equality+orderBy and equality+inequality, so it stays green
+    // whether or not any index exists. The probe is the only thing that
+    // answers questions in this area, and it only answers the one it was
+    // asked (lesson 68).
     const pendingReportsSnap = await db.collection(collections.REPORTS)
       .where('workspaceId', '==', workspaceId)
       .where('status', 'in', ['queued', 'processing'])

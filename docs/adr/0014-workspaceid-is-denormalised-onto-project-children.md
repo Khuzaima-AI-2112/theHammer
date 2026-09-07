@@ -25,7 +25,19 @@ queries per tile — the Dashboard's cost becomes a function of how many Project
 the Customer runs, permanently, in exchange for avoiding a one-off migration.
 
 That migration is as cheap as it will ever be: production currently holds one
-user and effectively no rows. Paying a standing query cost to dodge a
+user and effectively no rows.
+
+> **Corrected 2026-09-07, when the backfill actually ran.** "Effectively no
+> rows" was wrong. Production held **91 `uploads`** (`reports` was genuinely
+> empty), of which 74 resolved to the single Workspace and **17 named Projects
+> that no longer exist** — Captures outliving their deleted Project, which is
+> its own defect and is now filed separately. The decision below is unchanged
+> and if anything better supported: 91 rows is still a one-off of minutes,
+> against an `in`-filter cost paid on every Dashboard load forever. But the
+> premise was asserted rather than measured, and a cheap `count()` against the
+> live project would have settled it before it was written down.
+
+Paying a standing query cost to dodge a
 near-zero one-off cost is the wrong trade, and it is the wrong trade in a
 specific way — `lessons_learned.md` #67 records that *a missing scope field and
 a missing scope check are the same defect*. The `in` filter fixes the check and
