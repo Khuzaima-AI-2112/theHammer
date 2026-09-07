@@ -120,11 +120,43 @@ async function seedCapture(id, data = {}) {
   return docRef;
 }
 
+/**
+ * A Report, as the three writers create one (#103).
+ *
+ * `reports` has three creators — the generate route and two paths in Storyboard
+ * finalisation — so unlike a Capture there is no single function to mirror.
+ * These are the fields all three agree on; a suite testing one writer's own
+ * extras (`storyboardDraftId`, `shotstackRenderId`) passes them.
+ *
+ * `status` defaults to `queued` because the tile these fixtures feed counts
+ * pending Reports, and `workspaceId` to the same Workspace as `seedProject`.
+ */
+async function seedReport(id, data = {}) {
+  const now = new Date().toISOString();
+  const merged = {
+    projectId: 'test-project',
+    workspaceId: 'test-workspace',
+    reportType: 'project_progress',
+    dateRange: null,
+    status: 'queued',
+    gcsPath: null,
+    requestedBy: 'test-user',
+    createdAt: now,
+    updatedAt: now,
+    schemaVersion: 1,
+    ...data
+  };
+  const docRef = db.collection(collections.REPORTS).doc(id);
+  await docRef.set(merged);
+  return docRef;
+}
+
 module.exports = {
   HEADERS,
   clearDatabase,
   seedUser,
   seedProject,
   seedMembership,
-  seedCapture
+  seedCapture,
+  seedReport
 };

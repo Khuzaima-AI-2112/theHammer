@@ -93,6 +93,18 @@ const SHAPES = [
       .count().get(),
   },
   {
+    // #103 — GET /admin/dashboard/stats, pendingReports.
+    //
+    // The one shape here that `npm run test:indexes` cannot see: `in` is a
+    // disjunction of equalities, not an inequality, so the audit's parser skips
+    // it and stays green either way. This probe is the only check that answers.
+    name: 'reports: where(workspaceId ==).where(status in [queued, processing]).count()',
+    run: () => db.collection('reports')
+      .where('workspaceId', '==', WORKSPACE)
+      .where('status', 'in', ['queued', 'processing'])
+      .count().get(),
+  },
+  {
     // #7 — GET /admin/users, scoped roster
     name: 'users: where(workspaceId ==).orderBy(email asc)',
     run: () => db.collection('users')

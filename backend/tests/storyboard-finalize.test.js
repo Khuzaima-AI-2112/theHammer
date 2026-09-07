@@ -248,6 +248,16 @@ describe('POST /admin/storyboards/:id/finalize', () => {
     expect(reportSnap.exists).toBe(true);
     expect(reportSnap.data().reportType).toBe('storyboard');
     expect(reportSnap.data().gcsPath).toBe(res.body.gcsPath);
+
+    // #103, ADR 0014 — the second of `reports`' three writers, asserted here
+    // rather than in a test of its own so the PDF assembly runs once. The
+    // Workspace is taken from the draft, which loadOwnedDraft has already proved
+    // is the caller's and which has carried the field since #88, so it costs no
+    // extra read. Compared against the Project's own stored Workspace rather
+    // than a literal, so the fixture default cannot make it pass by coincidence.
+    const projectSnap = await db.collection(collections.PROJECTS).doc('finalize-proj').get();
+    expect(projectSnap.data().workspaceId).toBeTruthy();
+    expect(reportSnap.data().workspaceId).toBe(projectSnap.data().workspaceId);
   });
 
   test('a finalized Storyboard appears in the existing Reports list, viewable the same way any other report is', async () => {

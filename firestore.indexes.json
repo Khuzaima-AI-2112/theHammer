@@ -67,6 +67,14 @@
       ]
     },
     {
+      "collectionGroup": "reports",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "workspaceId", "order": "ASCENDING" },
+        { "fieldPath": "status",      "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "invitations",
       "queryScope": "COLLECTION",
       "fields": [

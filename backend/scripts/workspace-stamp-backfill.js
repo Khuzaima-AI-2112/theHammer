@@ -14,7 +14,8 @@
  * #98 fixes, which is why this ships with the field rather than after it.
  *
  * A record's Workspace is resolved through its Project:
- *   uploads.projectId -> projects.workspaceId
+ *   uploads.projectId  -> projects.workspaceId
+ *   reports.projectId  -> projects.workspaceId
  *
  * **It never guesses.** A record whose Project is gone, whose Project carries no
  * Workspace of its own, or which names no Project at all is reported and left
@@ -47,7 +48,7 @@ const path = require('path');
  * are deliberately absent: nothing reads them across Projects, and speculative
  * schema is how a field ends up half-written.
  */
-const STAMPED_COLLECTIONS = ['uploads'];
+const STAMPED_COLLECTIONS = ['uploads', 'reports'];
 
 const PROJECTS = 'projects';
 

@@ -1,5 +1,5 @@
 /**
- * #101, #102 — the Dashboard's tiles count one Workspace
+ * #101, #102, #103 — the Dashboard's tiles count one Workspace
  *
  * `GET /admin/dashboard/stats` counted five collections across the whole
  * database and scoped none of them, so every Admin saw every Customer's
@@ -26,9 +26,8 @@
  * is one until the backfill reaches it — and the guarantee is that they are
  * counted by *nobody* rather than by whoever asks (lesson 67).
  *
- * `pendingReports` is deliberately still not asserted here. It stays unscoped
- * until #103 stamps `reports`, and writing a passing test against the leaked
- * number would be worse than writing none.
+ * `pendingReports` was the last, in #103. Every tile on this route is now
+ * scoped, which is what closes #98.
  *
  * Offline like the rest of the suite: Firestore is the `demo-hammer` emulator.
  */
@@ -39,7 +38,9 @@ const request = require('supertest');
 const { db } = require('../src/lib/firestore');
 const { app } = require('../src/index');
 const collections = require('../src/lib/collections');
-const { clearDatabase, seedUser, seedProject, seedCapture } = require('./helpers/fixtures');
+const {
+  clearDatabase, seedUser, seedProject, seedCapture, seedReport,
+} = require('./helpers/fixtures');
 
 const ALPHA = 'ws-dash-alpha';
 const BETA  = 'ws-dash-beta';
@@ -58,6 +59,7 @@ const yesterday = new Date(Date.now() - 36 * 60 * 60 * 1000).toISOString();
 const ALPHA_ACTIVE_PROJECTS = 2;   // two with members, one without
 const ALPHA_ACTIVE_USERS    = 3;   // the Admin plus two, all active today
 const ALPHA_CAPTURES_TODAY  = 2;   // two today, one yesterday, one unstamped
+const ALPHA_PENDING_REPORTS = 2;   // one queued, one processing; done and error are not pending
 
 beforeAll(async () => {
   await clearDatabase();
@@ -84,6 +86,13 @@ beforeAll(async () => {
   await seedCapture('dash-alpha-c2', { workspaceId: ALPHA, projectId: 'dash-alpha-p2', uploadedAt: today });
   await seedCapture('dash-alpha-c-old', { workspaceId: ALPHA, projectId: 'dash-alpha-p1', uploadedAt: yesterday });
 
+  // Reports (#103). Both pending statuses are represented, and both settled
+  // ones, so the "pending" half of the filter is exercised rather than assumed.
+  await seedReport('dash-alpha-r1', { workspaceId: ALPHA, projectId: 'dash-alpha-p1', status: 'queued' });
+  await seedReport('dash-alpha-r2', { workspaceId: ALPHA, projectId: 'dash-alpha-p2', status: 'processing' });
+  await seedReport('dash-alpha-r-done', { workspaceId: ALPHA, projectId: 'dash-alpha-p1', status: 'done' });
+  await seedReport('dash-alpha-r-err', { workspaceId: ALPHA, projectId: 'dash-alpha-p1', status: 'error' });
+
   // ── Beta: another Customer, deliberately larger ────────────────────
   for (const n of [1, 2, 3, 4]) {
     await seedUser(`dash-beta-u${n}`, {
@@ -92,6 +101,9 @@ beforeAll(async () => {
     await seedProject(`dash-beta-p${n}`, { workspaceId: BETA, memberCount: 5 });
     await seedCapture(`dash-beta-c${n}`, {
       workspaceId: BETA, projectId: `dash-beta-p${n}`, uploadedAt: today,
+    });
+    await seedReport(`dash-beta-r${n}`, {
+      workspaceId: BETA, projectId: `dash-beta-p${n}`, status: 'queued',
     });
   }
 
@@ -118,6 +130,11 @@ beforeAll(async () => {
   // backfill exists to repair, and until then it belongs to nobody.
   await seedCapture('dash-orphan-capture', { projectId: 'dash-alpha-p1', uploadedAt: today });
   await db.collection(collections.UPLOADS).doc('dash-orphan-capture').update({ workspaceId: null });
+
+  // The same, for a Report (#103): queued, filed against one of Alpha's own
+  // Projects, and unstamped.
+  await seedReport('dash-orphan-report', { projectId: 'dash-alpha-p1', status: 'queued' });
+  await db.collection(collections.REPORTS).doc('dash-orphan-report').update({ workspaceId: null });
 });
 
 afterAll(async () => {
@@ -163,8 +180,26 @@ describe('GET /admin/dashboard/stats — the Project and user tiles are scoped',
     expect(res.body.capturesToday).toBe(ALPHA_CAPTURES_TODAY);
   });
 
-  // The assertion that would fail on the pre-#101/#102 code: Beta has more of
-  // all three than Alpha does, so an unscoped count cannot accidentally equal
+  test('pendingReports counts the caller\'s Workspace, and is not zero', async () => {
+    const res = await request(app).get('/admin/dashboard/stats').set(ADMIN);
+
+    expect(res.status).toBe(200);
+    expect(res.body.pendingReports).toBe(ALPHA_PENDING_REPORTS);
+    expect(res.body.pendingReports).toBeGreaterThan(0);
+  });
+
+  test('a Report carrying no Workspace is counted by nobody', async () => {
+    const res = await request(app).get('/admin/dashboard/stats').set(ADMIN);
+
+    const unstamped = await db.collection(collections.REPORTS)
+      .where('workspaceId', '==', null).count().get();
+
+    expect(unstamped.data().count).toBeGreaterThan(0);   // it really is there
+    expect(res.body.pendingReports).toBe(ALPHA_PENDING_REPORTS);
+  });
+
+  // The assertion that would fail on the pre-#101/#102/#103 code: Beta has more
+  // of all four than Alpha does, so an unscoped count cannot accidentally equal
   // the right answer.
   test('no tile counts the other Customer', async () => {
     const res = await request(app).get('/admin/dashboard/stats').set(ADMIN);
@@ -175,10 +210,13 @@ describe('GET /admin/dashboard/stats — the Project and user tiles are scoped',
       .where('workspaceId', '==', BETA).count().get();
     const betaCaptures = await db.collection(collections.UPLOADS)
       .where('workspaceId', '==', BETA).count().get();
+    const betaReports = await db.collection(collections.REPORTS)
+      .where('workspaceId', '==', BETA).count().get();
 
     expect(betaProjects.data().count).toBeGreaterThan(res.body.activeProjects);
     expect(betaUsers.data().count).toBeGreaterThan(res.body.activeUsersToday);
     expect(betaCaptures.data().count).toBeGreaterThan(res.body.capturesToday);
+    expect(betaReports.data().count).toBeGreaterThan(res.body.pendingReports);
   });
 
   test('an Admin carrying no Workspace is refused, not answered', async () => {
@@ -198,6 +236,7 @@ describe('GET /admin/dashboard/stats — the Project and user tiles are scoped',
     expect(res.body.activeProjects).toBe(0);
     expect(res.body.activeUsersToday).toBe(1); // only themselves
     expect(res.body.capturesToday).toBe(0);
+    expect(res.body.pendingReports).toBe(0);
   });
 });
 

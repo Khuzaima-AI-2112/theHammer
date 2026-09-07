@@ -1,11 +1,19 @@
 /**
- * #102 — the backfill that makes pre-ADR-0014 Captures countable again
+ * #102, #103 — the backfill that makes pre-ADR-0014 records countable again
  *
- * `uploads` gained a denormalised `workspaceId` stamped at write time. Every
- * Capture written before that carries nothing, and an absent `workspaceId` means
- * the record belongs to nobody (lesson 67) — so those Captures exist in Cloud
- * Storage and in Firestore and are counted by no Dashboard at all. This script
- * resolves each one's Workspace through its Project and stamps it.
+ * `uploads` and `reports` gained a denormalised `workspaceId` stamped at write
+ * time. Every record written before that carries nothing, and an absent
+ * `workspaceId` means the record belongs to nobody (lesson 67) — so those
+ * Captures and Reports exist in Firestore and are counted by no Dashboard at
+ * all. This script resolves each one's Workspace through its Project and
+ * stamps it.
+ *
+ * #103 extended the script to a second collection rather than writing a second
+ * script, so the refusal to guess, the dry-run default and the exit codes are
+ * defined once. The cases below are therefore run against `reports` on the same
+ * terms as `uploads`, and once against both together — because "it works on
+ * each" and "it works on both in one pass" are different claims, and the second
+ * is the one an operator actually runs.
  *
  * **Tested at the module boundary**, which is the one new seam here. The script
  * exports its work as a function taking a `db`, and these tests call it directly
@@ -33,25 +41,56 @@
 
 'use strict';
 
+const { FieldValue } = require('@google-cloud/firestore');
 const { db } = require('../src/lib/firestore');
 const collections = require('../src/lib/collections');
-const { clearDatabase, seedProject, seedCapture } = require('./helpers/fixtures');
-const { backfillWorkspaceIds } = require('../scripts/workspace-stamp-backfill');
+const {
+  clearDatabase, seedProject, seedCapture, seedReport,
+} = require('./helpers/fixtures');
+const {
+  backfillWorkspaceIds, STAMPED_COLLECTIONS,
+} = require('../scripts/workspace-stamp-backfill');
 
 const ALPHA = 'ws-backfill-alpha';
 
-/** A Capture written before the field existed: no `workspaceId` key at all. */
-async function seedUnstampedCapture(id, projectId) {
-  await seedCapture(id, { projectId });
-  const { FieldValue } = require('@google-cloud/firestore');
-  await db.collection(collections.UPLOADS).doc(id).update({
+/**
+ * The two stamped collections, described the same way, so every case below is
+ * stated once and run twice. A third collection added to ADR 0014's list is a
+ * row here.
+ */
+const SUBJECTS = [
+  { label: 'Captures', collection: collections.UPLOADS, seed: seedCapture, prefix: 'bf' },
+  { label: 'Reports',  collection: collections.REPORTS, seed: seedReport,  prefix: 'br' },
+];
+
+async function workspaceOf(collection, id) {
+  const snap = await db.collection(collection).doc(id).get();
+  return snap.data().workspaceId;
+}
+
+/** A record written before the field existed: no `workspaceId` key at all. */
+async function seedAbsent(subject, id, projectId) {
+  await subject.seed(id, { projectId });
+  await db.collection(subject.collection).doc(id).update({
     workspaceId: FieldValue.delete(),
   });
 }
 
-async function workspaceOf(id) {
-  const snap = await db.collection(collections.UPLOADS).doc(id).get();
-  return snap.data().workspaceId;
+async function seedSubject(subject) {
+  const p = subject.prefix;
+
+  // Already stamped, and stamped to somewhere else, so "left alone" is
+  // distinguishable from "re-stamped to the right answer by luck".
+  await subject.seed(`${p}-already`, { projectId: 'bf-project', workspaceId: 'ws-somewhere-else' });
+
+  // The two shapes a legacy row really takes.
+  await subject.seed(`${p}-null`, { projectId: 'bf-project', workspaceId: null });
+  await seedAbsent(subject, `${p}-absent`, 'bf-project');
+
+  // Three the script must refuse to resolve.
+  await subject.seed(`${p}-orphan`, { projectId: 'bf-project-gone', workspaceId: null });
+  await subject.seed(`${p}-unstamped-project`, { projectId: 'bf-project-unstamped', workspaceId: null });
+  await subject.seed(`${p}-no-project`, { projectId: null, workspaceId: null });
 }
 
 beforeEach(async () => {
@@ -62,104 +101,88 @@ beforeEach(async () => {
   await seedProject('bf-project-unstamped', {});
   await db.collection(collections.PROJECTS).doc('bf-project-unstamped').update({ workspaceId: null });
 
-  // Already stamped, and stamped to somewhere else, so "left alone" is
-  // distinguishable from "re-stamped to the right answer by luck".
-  await seedCapture('bf-already', { projectId: 'bf-project', workspaceId: 'ws-somewhere-else' });
-
-  // The two shapes a legacy row really takes.
-  await seedCapture('bf-null', { projectId: 'bf-project', workspaceId: null });
-  await seedUnstampedCapture('bf-absent', 'bf-project');
-
-  // Three the script must refuse to resolve.
-  await seedCapture('bf-orphan', { projectId: 'bf-project-gone', workspaceId: null });
-  await seedCapture('bf-project-unstamped', { projectId: 'bf-project-unstamped', workspaceId: null });
-  await seedCapture('bf-no-project', { projectId: null, workspaceId: null });
+  for (const subject of SUBJECTS) await seedSubject(subject);
 });
 
 afterAll(async () => {
   await clearDatabase();
 });
 
-describe('a dry run', () => {
+describe.each(SUBJECTS)('$label — a dry run', (subject) => {
+  const { collection, prefix } = subject;
+
   test('writes nothing', async () => {
-    const report = await backfillWorkspaceIds({ db, collections: [collections.UPLOADS] });
+    const report = await backfillWorkspaceIds({ db, collections: [collection] });
 
     expect(report.applied).toBe(false);
-    expect(report.repairable).toBe(2);          // bf-null and bf-absent
-    expect(report.collections.uploads.stamped).toBe(0);
+    expect(report.repairable).toBe(2);          // -null and -absent
+    expect(report.collections[collection].stamped).toBe(0);
 
     // The database is untouched, which is the property, not the report field.
-    expect(await workspaceOf('bf-null')).toBeNull();
-    expect(await workspaceOf('bf-absent')).toBeUndefined();
-    expect(await workspaceOf('bf-orphan')).toBeNull();
-    expect(await workspaceOf('bf-already')).toBe('ws-somewhere-else');
+    expect(await workspaceOf(collection, `${prefix}-null`)).toBeNull();
+    expect(await workspaceOf(collection, `${prefix}-absent`)).toBeUndefined();
+    expect(await workspaceOf(collection, `${prefix}-orphan`)).toBeNull();
+    expect(await workspaceOf(collection, `${prefix}-already`)).toBe('ws-somewhere-else');
   });
 
   test('is the default, so --apply is what writes', async () => {
-    await backfillWorkspaceIds({ db, collections: [collections.UPLOADS] });
+    await backfillWorkspaceIds({ db, collections: [collection] });
 
-    expect(await workspaceOf('bf-null')).toBeNull();
+    expect(await workspaceOf(collection, `${prefix}-null`)).toBeNull();
   });
 });
 
-describe('applying the backfill', () => {
-  test('stamps a Capture with the Workspace of its Project, in both legacy shapes', async () => {
-    const report = await backfillWorkspaceIds({
-      db, collections: [collections.UPLOADS], apply: true,
-    });
+describe.each(SUBJECTS)('$label — applying the backfill', (subject) => {
+  const { collection, prefix } = subject;
+
+  test('stamps a record with the Workspace of its Project, in both legacy shapes', async () => {
+    const report = await backfillWorkspaceIds({ db, collections: [collection], apply: true });
 
     expect(report.applied).toBe(true);
-    expect(report.collections.uploads.stamped).toBe(2);
-    expect(await workspaceOf('bf-null')).toBe(ALPHA);
-    expect(await workspaceOf('bf-absent')).toBe(ALPHA);
+    expect(report.collections[collection].stamped).toBe(2);
+    expect(await workspaceOf(collection, `${prefix}-null`)).toBe(ALPHA);
+    expect(await workspaceOf(collection, `${prefix}-absent`)).toBe(ALPHA);
   });
 
-  test('leaves an already-stamped Capture exactly as it was', async () => {
-    await backfillWorkspaceIds({ db, collections: [collections.UPLOADS], apply: true });
+  test('leaves an already-stamped record exactly as it was', async () => {
+    await backfillWorkspaceIds({ db, collections: [collection], apply: true });
 
-    expect(await workspaceOf('bf-already')).toBe('ws-somewhere-else');
+    expect(await workspaceOf(collection, `${prefix}-already`)).toBe('ws-somewhere-else');
   });
 });
 
-describe('it refuses to guess', () => {
-  test('a Capture whose Project is gone is left alone and reported', async () => {
-    const report = await backfillWorkspaceIds({
-      db, collections: [collections.UPLOADS], apply: true,
-    });
+describe.each(SUBJECTS)('$label — it refuses to guess', (subject) => {
+  const { collection, prefix } = subject;
 
-    expect(await workspaceOf('bf-orphan')).toBeNull();
+  async function rowFor(id) {
+    const report = await backfillWorkspaceIds({ db, collections: [collection], apply: true });
+    return report.collections[collection].rows.find((r) => r.id === id);
+  }
 
-    const orphan = report.collections.uploads.rows.find((r) => r.id === 'bf-orphan');
-    expect(orphan.verdict).toBe('orphan');
+  test('a record whose Project is gone is left alone and reported', async () => {
+    const row = await rowFor(`${prefix}-orphan`);
+
+    expect(await workspaceOf(collection, `${prefix}-orphan`)).toBeNull();
+    expect(row.verdict).toBe('orphan');
   });
 
-  test('a Capture whose Project carries no Workspace is left alone and reported', async () => {
-    const report = await backfillWorkspaceIds({
-      db, collections: [collections.UPLOADS], apply: true,
-    });
+  test('a record whose Project carries no Workspace is left alone and reported', async () => {
+    const row = await rowFor(`${prefix}-unstamped-project`);
 
-    expect(await workspaceOf('bf-project-unstamped')).toBeNull();
-
-    const row = report.collections.uploads.rows.find((r) => r.id === 'bf-project-unstamped');
+    expect(await workspaceOf(collection, `${prefix}-unstamped-project`)).toBeNull();
     expect(row.verdict).toBe('project-unstamped');
   });
 
-  test('a Capture naming no Project at all is left alone and reported', async () => {
-    const report = await backfillWorkspaceIds({
-      db, collections: [collections.UPLOADS], apply: true,
-    });
+  test('a record naming no Project at all is left alone and reported', async () => {
+    const row = await rowFor(`${prefix}-no-project`);
 
-    expect(await workspaceOf('bf-no-project')).toBeNull();
-
-    const row = report.collections.uploads.rows.find((r) => r.id === 'bf-no-project');
+    expect(await workspaceOf(collection, `${prefix}-no-project`)).toBeNull();
     expect(row.verdict).toBe('no-project-id');
   });
 
   // The count the command-line wrapper turns into exit code 1.
   test('reports that a human is needed, rather than finishing quietly', async () => {
-    const report = await backfillWorkspaceIds({
-      db, collections: [collections.UPLOADS], apply: true,
-    });
+    const report = await backfillWorkspaceIds({ db, collections: [collection], apply: true });
 
     expect(report.needsHuman).toBe(3);
   });
@@ -167,13 +190,48 @@ describe('it refuses to guess', () => {
 
 // An interrupted run is repeated, not reconciled by hand, so the second run has
 // to be a no-op over what the first one did.
-test('running it twice is safe', async () => {
-  await backfillWorkspaceIds({ db, collections: [collections.UPLOADS], apply: true });
-  const second = await backfillWorkspaceIds({ db, collections: [collections.UPLOADS], apply: true });
+describe.each(SUBJECTS)('$label — running it twice', (subject) => {
+  const { collection, prefix } = subject;
 
-  expect(second.repairable).toBe(0);
-  expect(second.collections.uploads.stamped).toBe(0);
-  expect(second.needsHuman).toBe(3);          // the three it still will not guess at
-  expect(await workspaceOf('bf-null')).toBe(ALPHA);
-  expect(await workspaceOf('bf-absent')).toBe(ALPHA);
+  test('is safe', async () => {
+    await backfillWorkspaceIds({ db, collections: [collection], apply: true });
+    const second = await backfillWorkspaceIds({ db, collections: [collection], apply: true });
+
+    expect(second.repairable).toBe(0);
+    expect(second.collections[collection].stamped).toBe(0);
+    expect(second.needsHuman).toBe(3);        // the three it still will not guess at
+    expect(await workspaceOf(collection, `${prefix}-null`)).toBe(ALPHA);
+    expect(await workspaceOf(collection, `${prefix}-absent`)).toBe(ALPHA);
+  });
+});
+
+// What an operator actually runs: no `collections` argument at all.
+describe('both collections in one pass, which is what the command line does', () => {
+  test('the default list is exactly ADR 0014\'s stamped collections', () => {
+    expect([...STAMPED_COLLECTIONS].sort())
+      .toEqual([collections.REPORTS, collections.UPLOADS].sort());
+  });
+
+  test('stamps Captures and Reports together, and totals across both', async () => {
+    const report = await backfillWorkspaceIds({ db, apply: true });
+
+    expect(report.repairable).toBe(4);        // two in each collection
+    expect(report.needsHuman).toBe(6);        // three in each
+
+    for (const { collection, prefix } of SUBJECTS) {
+      expect(report.collections[collection].stamped).toBe(2);
+      expect(await workspaceOf(collection, `${prefix}-null`)).toBe(ALPHA);
+      expect(await workspaceOf(collection, `${prefix}-absent`)).toBe(ALPHA);
+      expect(await workspaceOf(collection, `${prefix}-orphan`)).toBeNull();
+    }
+  });
+
+  test('a dry run over both writes nothing to either', async () => {
+    await backfillWorkspaceIds({ db });
+
+    for (const { collection, prefix } of SUBJECTS) {
+      expect(await workspaceOf(collection, `${prefix}-null`)).toBeNull();
+      expect(await workspaceOf(collection, `${prefix}-absent`)).toBeUndefined();
+    }
+  });
 });

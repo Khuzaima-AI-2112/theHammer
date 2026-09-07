@@ -268,6 +268,17 @@ describe('POST /admin/storyboards/:id/video', () => {
     expect(res.body.status).toBe('processing');
     expect(res.body.shotstackRenderId).toBe('mock-render-id');
     expect(res.body.storyboardDraftId).toBe(draft.id);
+
+    // #103, ADR 0014 — the third and last of `reports`' writers, asserted here
+    // rather than in a test of its own so the render flow runs once. The
+    // Workspace is taken from the draft, which loadOwnedDraft has already proved
+    // is the caller's and which has carried the field since #88. Compared
+    // against the Project's own stored Workspace rather than a literal, so the
+    // fixture default cannot make it pass by coincidence.
+    const projectSnap = await db.collection(collections.PROJECTS).doc('video-proj').get();
+    const reportSnap = await db.collection(collections.REPORTS).doc(res.body.id).get();
+    expect(projectSnap.data().workspaceId).toBeTruthy();
+    expect(reportSnap.data().workspaceId).toBe(projectSnap.data().workspaceId);
   });
 
   test('a generation failure (e.g. text-to-speech) surfaces as an explicit error status', async () => {

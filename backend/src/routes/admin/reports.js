@@ -42,7 +42,11 @@ router.post('/reports/generate', requireAnalyst, analystReportLimiter, async (re
     // the metrics were invented — a caller from another Workspace got fiction.
     // Now that the numbers are real, the same request would answer with another
     // Customer's Capture counts, Monitored User count and Session timings.
-    if (!await loadOwnedProject(req, res, projectId)) return;
+    //
+    // The snapshot is kept rather than discarded (#103): it is the Project whose
+    // Workspace the Report is stamped with below, and it has already been read.
+    const projectSnap = await loadOwnedProject(req, res, projectId);
+    if (!projectSnap) return;
 
     // #96: generateOcrReport has never read a Capture. It builds a Gemini
     // request with both image parts commented out, never sends it, and returns
@@ -74,6 +78,11 @@ router.post('/reports/generate', requireAnalyst, analystReportLimiter, async (re
     const now = nowISO();
     const reportRef = await db.collection(collections.REPORTS).add({
       projectId,
+      // The Workspace this Report belongs to, denormalised off the Project
+      // (#103, ADR 0014). One of three writers of this collection; the other
+      // two are in routes/admin/storyboards.js. Any fourth stamps it too — a
+      // Report written without it is counted by nobody.
+      workspaceId: projectSnap.data().workspaceId,
       reportType,
       dateRange: dateRange || null,
       status: 'queued',

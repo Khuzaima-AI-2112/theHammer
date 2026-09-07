@@ -34,9 +34,20 @@ router.get('/dashboard/stats', requireAdmin, async (req, res, next) => {
       .where('memberCount', '>', 0)
       .count().get();
 
-    // Pending Reports (status == 'queued' or 'processing')
-    // Still unscoped: a Report carries only a projectId until #103 stamps it.
-    const pendingReportsSnap = await db.collection(collections.REPORTS).where('status', 'in', ['queued', 'processing']).count().get();
+    // Pending Reports (status == 'queued' or 'processing') in this Workspace
+    //
+    // #103 stamped `reports` the same way #102 stamped `uploads` (ADR 0014).
+    // Note this pair is *not* the shape the two queries around it are: `in` is
+    // a disjunction of equalities rather than an inequality, so
+    // `npm run test:indexes` does not recognise it as index-requiring and will
+    // stay green whether or not the index exists. The declared index and the
+    // shape added to scripts/index-readiness-probe.js are what cover it, and
+    // only the probe — issuing this query against the live project — actually
+    // answers the question (lesson 68).
+    const pendingReportsSnap = await db.collection(collections.REPORTS)
+      .where('workspaceId', '==', workspaceId)
+      .where('status', 'in', ['queued', 'processing'])
+      .count().get();
 
     // Captures Today, in this Workspace
     //

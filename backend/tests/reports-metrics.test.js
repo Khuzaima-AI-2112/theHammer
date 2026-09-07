@@ -244,6 +244,23 @@ describe('POST /admin/reports/generate — Workspace isolation', () => {
     expect(res.status).toBe(403);
   });
 
+  // #103, ADR 0014: `reports` carries a denormalised workspaceId so the
+  // Dashboard's pending-Reports tile can count one Customer's without an `in`
+  // filter over their Project ids. This is the first of the collection's three
+  // writers; the other two are in storyboard-finalize and storyboard-video,
+  // asserted the same way. A fourth writer copies this test.
+  it('stamps the Report with the Workspace of the Project it is generated for', async () => {
+    const res = await request(app)
+      .post('/admin/reports/generate')
+      .set(HEADERS.analyst)
+      .send({ projectId: 'proj-metrics', reportType: 'project_progress' });
+
+    expect(res.status).toBe(202);
+
+    const snap = await db.collection(collections.REPORTS).doc(res.body.reportId).get();
+    expect(snap.data().workspaceId).toBe('ws-alpha');
+  });
+
   // #99: refuses rather than 404s. A Project id the caller cannot reach is one
   // answer whether it is gone or somebody else's.
   it('refuses a Project that does not exist', async () => {

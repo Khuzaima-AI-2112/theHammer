@@ -754,6 +754,11 @@ router.post('/storyboards/:id/finalize', requireAnalyst, async (req, res, next) 
 
     const reportRef = await db.collection(collections.REPORTS).add({
       projectId: draft.projectId,
+      // #103, ADR 0014 — the second of this collection's three writers. Taken
+      // from the draft rather than by re-reading the Project: loadOwnedDraft has
+      // already proved this draft is the caller's, and a draft has carried
+      // workspaceId since #88, so the value is in hand.
+      workspaceId: existing.workspaceId,
       reportType: 'storyboard',
       dateRange: null,
       status: 'processing',
@@ -902,6 +907,8 @@ router.post('/storyboards/:id/video', requireAnalyst, async (req, res, next) => 
 
     const reportRef = await db.collection(collections.REPORTS).add({
       projectId: draft.projectId,
+      // #103, ADR 0014 — the third writer, same source as finalize's above.
+      workspaceId: existing.workspaceId,
       reportType: 'storyboard-video',
       dateRange: null,
       status: 'queued',
