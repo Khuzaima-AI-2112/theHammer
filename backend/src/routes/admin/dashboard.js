@@ -38,9 +38,22 @@ router.get('/dashboard/stats', requireAdmin, async (req, res, next) => {
     // Still unscoped: a Report carries only a projectId until #103 stamps it.
     const pendingReportsSnap = await db.collection(collections.REPORTS).where('status', 'in', ['queued', 'processing']).count().get();
 
-    // Captures Today
-    // Still unscoped: a Capture carries only a projectId until #102 stamps it.
-    const capturesTodaySnap = await db.collection(collections.UPLOADS).where('uploadedAt', '>=', startOfDay).count().get();
+    // Captures Today, in this Workspace
+    //
+    // #102 stamped `uploads` with a denormalised `workspaceId` (ADR 0014), so
+    // this filters the field directly rather than resolving the Workspace's
+    // Projects and using `in` — which Firestore caps at 30 values, making the
+    // tile's cost a function of how many Projects the Customer runs.
+    //
+    // A Capture written before that stamp carries no `workspaceId` and is
+    // therefore counted by nobody until the backfill reaches it. That is the
+    // deliberate reading of absent (lesson 67), and why
+    // scripts/workspace-stamp-backfill.js ships with the field rather than after
+    // it.
+    const capturesTodaySnap = await db.collection(collections.UPLOADS)
+      .where('workspaceId', '==', workspaceId)
+      .where('uploadedAt', '>=', startOfDay)
+      .count().get();
 
     // #100 removed a fifth count here, over a collection nothing writes; see
     // lesson 69. If asynchronous Exports are ever built, this is a new tile

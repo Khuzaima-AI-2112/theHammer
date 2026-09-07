@@ -85,6 +85,14 @@ const SHAPES = [
       .count().get(),
   },
   {
+    // #102 — GET /admin/dashboard/stats, capturesToday
+    name: 'uploads: where(workspaceId ==).where(uploadedAt >= startOfDay).count()',
+    run: () => db.collection('uploads')
+      .where('workspaceId', '==', WORKSPACE)
+      .where('uploadedAt', '>=', startOfDay)
+      .count().get(),
+  },
+  {
     // #7 — GET /admin/users, scoped roster
     name: 'users: where(workspaceId ==).orderBy(email asc)',
     run: () => db.collection('users')

@@ -1,5 +1,5 @@
 /**
- * #101 — the Dashboard's Project and user tiles count one Workspace
+ * #101, #102 — the Dashboard's tiles count one Workspace
  *
  * `GET /admin/dashboard/stats` counted five collections across the whole
  * database and scoped none of them, so every Admin saw every Customer's
@@ -20,9 +20,15 @@
  * with *more* rows than Alpha, so a leak reads as a wrong number rather than as
  * a coincidence.
  *
- * `capturesToday` and `pendingReports` are deliberately not asserted here. They
- * are still unscoped until #102 and #103 stamp their collections, and writing a
- * passing test against the leaked number would be worse than writing none.
+ * `capturesToday` joined them in #102, once `uploads` gained a stamped
+ * `workspaceId`. It carries one case the other two cannot: a Capture that
+ * carries no Workspace at all. Those exist — every Capture written before #102
+ * is one until the backfill reaches it — and the guarantee is that they are
+ * counted by *nobody* rather than by whoever asks (lesson 67).
+ *
+ * `pendingReports` is deliberately still not asserted here. It stays unscoped
+ * until #103 stamps `reports`, and writing a passing test against the leaked
+ * number would be worse than writing none.
  *
  * Offline like the rest of the suite: Firestore is the `demo-hammer` emulator.
  */
@@ -33,7 +39,7 @@ const request = require('supertest');
 const { db } = require('../src/lib/firestore');
 const { app } = require('../src/index');
 const collections = require('../src/lib/collections');
-const { clearDatabase, seedUser, seedProject } = require('./helpers/fixtures');
+const { clearDatabase, seedUser, seedProject, seedCapture } = require('./helpers/fixtures');
 
 const ALPHA = 'ws-dash-alpha';
 const BETA  = 'ws-dash-beta';
@@ -51,6 +57,7 @@ const yesterday = new Date(Date.now() - 36 * 60 * 60 * 1000).toISOString();
 // expectation rather than against a number recomputed in the assertion.
 const ALPHA_ACTIVE_PROJECTS = 2;   // two with members, one without
 const ALPHA_ACTIVE_USERS    = 3;   // the Admin plus two, all active today
+const ALPHA_CAPTURES_TODAY  = 2;   // two today, one yesterday, one unstamped
 
 beforeAll(async () => {
   await clearDatabase();
@@ -71,12 +78,21 @@ beforeAll(async () => {
   // No members, so the "active" half of the filter is exercised too.
   await seedProject('dash-alpha-p3', { workspaceId: ALPHA, memberCount: 0 });
 
+  // Captures (#102). Two today, and one the day before so the "today" half of
+  // the filter is exercised rather than assumed.
+  await seedCapture('dash-alpha-c1', { workspaceId: ALPHA, projectId: 'dash-alpha-p1', uploadedAt: today });
+  await seedCapture('dash-alpha-c2', { workspaceId: ALPHA, projectId: 'dash-alpha-p2', uploadedAt: today });
+  await seedCapture('dash-alpha-c-old', { workspaceId: ALPHA, projectId: 'dash-alpha-p1', uploadedAt: yesterday });
+
   // ── Beta: another Customer, deliberately larger ────────────────────
   for (const n of [1, 2, 3, 4]) {
     await seedUser(`dash-beta-u${n}`, {
       email: `b${n}@test.com`, workspaceId: BETA, lastActiveAt: today,
     });
     await seedProject(`dash-beta-p${n}`, { workspaceId: BETA, memberCount: 5 });
+    await seedCapture(`dash-beta-c${n}`, {
+      workspaceId: BETA, projectId: `dash-beta-p${n}`, uploadedAt: today,
+    });
   }
 
   // ── Gamma: a real Workspace that simply has no data yet ────────────
@@ -95,6 +111,13 @@ beforeAll(async () => {
   await db.collection(collections.USERS).doc('dash-orphan-user').update({ workspaceId: null });
   await seedProject('dash-orphan-project', { memberCount: 3 });
   await db.collection(collections.PROJECTS).doc('dash-orphan-project').update({ workspaceId: null });
+
+  // A Capture written before #102 stamped the field: it is filed against one of
+  // Alpha's own Projects and was taken today, so the *only* thing keeping it out
+  // of Alpha's count is the missing stamp. That is the point — it is what the
+  // backfill exists to repair, and until then it belongs to nobody.
+  await seedCapture('dash-orphan-capture', { projectId: 'dash-alpha-p1', uploadedAt: today });
+  await db.collection(collections.UPLOADS).doc('dash-orphan-capture').update({ workspaceId: null });
 });
 
 afterAll(async () => {
@@ -118,19 +141,44 @@ describe('GET /admin/dashboard/stats — the Project and user tiles are scoped',
     expect(res.body.activeUsersToday).toBeGreaterThan(0);
   });
 
-  // The assertion that would fail on the pre-#101 code: Beta has more of both
-  // than Alpha does, so an unscoped count cannot accidentally equal the right
-  // answer.
-  test('neither tile counts the other Customer', async () => {
+  test('capturesToday counts the caller\'s Workspace, and is not zero', async () => {
+    const res = await request(app).get('/admin/dashboard/stats').set(ADMIN);
+
+    expect(res.status).toBe(200);
+    expect(res.body.capturesToday).toBe(ALPHA_CAPTURES_TODAY);
+    expect(res.body.capturesToday).toBeGreaterThan(0);
+  });
+
+  // Absent means nobody, not everybody (lesson 67). The unstamped Capture is in
+  // one of Alpha's Projects and was taken today, so a query that treated a
+  // missing stamp as a match — or that scoped by Project id instead — would
+  // count it and this number would be one higher.
+  test('a Capture carrying no Workspace is counted by nobody', async () => {
+    const res = await request(app).get('/admin/dashboard/stats').set(ADMIN);
+
+    const unstamped = await db.collection(collections.UPLOADS)
+      .where('workspaceId', '==', null).count().get();
+
+    expect(unstamped.data().count).toBeGreaterThan(0);   // it really is there
+    expect(res.body.capturesToday).toBe(ALPHA_CAPTURES_TODAY);
+  });
+
+  // The assertion that would fail on the pre-#101/#102 code: Beta has more of
+  // all three than Alpha does, so an unscoped count cannot accidentally equal
+  // the right answer.
+  test('no tile counts the other Customer', async () => {
     const res = await request(app).get('/admin/dashboard/stats').set(ADMIN);
 
     const betaProjects = await db.collection(collections.PROJECTS)
       .where('workspaceId', '==', BETA).count().get();
     const betaUsers = await db.collection(collections.USERS)
       .where('workspaceId', '==', BETA).count().get();
+    const betaCaptures = await db.collection(collections.UPLOADS)
+      .where('workspaceId', '==', BETA).count().get();
 
     expect(betaProjects.data().count).toBeGreaterThan(res.body.activeProjects);
     expect(betaUsers.data().count).toBeGreaterThan(res.body.activeUsersToday);
+    expect(betaCaptures.data().count).toBeGreaterThan(res.body.capturesToday);
   });
 
   test('an Admin carrying no Workspace is refused, not answered', async () => {
@@ -149,6 +197,7 @@ describe('GET /admin/dashboard/stats — the Project and user tiles are scoped',
     expect(res.status).toBe(200);
     expect(res.body.activeProjects).toBe(0);
     expect(res.body.activeUsersToday).toBe(1); // only themselves
+    expect(res.body.capturesToday).toBe(0);
   });
 });
 

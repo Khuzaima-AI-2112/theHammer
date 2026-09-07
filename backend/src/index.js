@@ -297,6 +297,17 @@ async function firestoreWrite(objectPath, fields) {
         bucket:     fields.bucket,
         size:       fields.size,
         projectId:  fields.projectId,
+        // The Workspace this Capture belongs to, denormalised off the Project
+        // (#102, ADR 0014). `uploads` is counted and listed per Customer, and
+        // resolving that through `projectId` means an `in` filter capped at 30
+        // Project ids. The value costs no extra read: both callers below have
+        // already loaded the Project to prove the caller owns it.
+        //
+        // Absent means the Capture belongs to nobody, never to whoever asks
+        // (lesson 67) — so this must never be allowed to fall back to the
+        // caller's own Workspace. It is the Project's, or it is missing and the
+        // backfill in scripts/workspace-stamp-backfill.js repairs it.
+        workspaceId: fields.workspaceId ?? null,
         userId:     fields.userId,
         tool:       fields.tool,
         // The Persona this Capture was taken in (#63). The extension has always
@@ -387,7 +398,11 @@ app.post('/upload-url', requireAuth('user'), async (req, res, next) => {
 
     // Enforce Tenant Isolation. #99: this route's merged answer — unknown and
     // foreign alike — is now what every route family gives (lib/ownership.js).
-    if (!await loadOwnedProject(req, res, project)) return;
+    //
+    // The snapshot is kept rather than discarded (#102): it is the Project whose
+    // Workspace the Capture is stamped with below, and it has already been read.
+    const projectSnap = await loadOwnedProject(req, res, project);
+    if (!projectSnap) return;
 
     // Mirrors /capture: an absent tool is an empty path segment, not the string
     // "undefined".
@@ -430,7 +445,8 @@ app.post('/upload-url', requireAuth('user'), async (req, res, next) => {
     const firestoreErr = await firestoreWrite(objectPath, {
       path: objectPath, bucket: BUCKET_NAME,
       size: Number.isFinite(Number(req.body?.size)) ? Number(req.body.size) : null,
-      projectId: safeProject, userId: req.hammerUser.id, tool: safeTool,
+      projectId: safeProject, workspaceId: projectSnap.data().workspaceId,
+      userId: req.hammerUser.id, tool: safeTool,
       stage: safeStage, tabUrl: safeTabUrl,
       uploadedAt: new Date().toISOString(),
       hasSemanticData: !!req.body.semanticData
@@ -490,8 +506,11 @@ app.post('/capture', requireAuth('user'), requireMultipart, rejectOversizedUploa
     if (req.file.size === 0)   return res.status(400).json({ error: 'file must not be empty (0 bytes)' });
     if (!BUCKET_NAME) return res.status(500).json({ error: 'Server misconfiguration: GCS_BUCKET not set' });
 
-    // Enforce Tenant Isolation (#99: lib/ownership.js)
-    if (!await loadOwnedProject(req, res, projectId)) return;
+    // Enforce Tenant Isolation (#99: lib/ownership.js). The snapshot is kept
+    // for the same reason as on /upload-url: it carries the Workspace this
+    // Capture is stamped with (#102).
+    const projectSnap = await loadOwnedProject(req, res, projectId);
+    if (!projectSnap) return;
 
     const safeProject  = sanitize(projectId);
     const safeUser     = req.hammerUser.id;
@@ -530,7 +549,8 @@ app.post('/capture', requireAuth('user'), requireMultipart, rejectOversizedUploa
 
     const firestoreErr = await firestoreWrite(objectPath, {
       path: objectPath, bucket: BUCKET_NAME, size: req.file.size,
-      projectId: safeProject, userId: safeUser, tool: safeTool,
+      projectId: safeProject, workspaceId: projectSnap.data().workspaceId,
+      userId: safeUser, tool: safeTool,
       stage: safeStage, tabUrl: safeTabUrl, uploadedAt, hasSemanticData
     });
 

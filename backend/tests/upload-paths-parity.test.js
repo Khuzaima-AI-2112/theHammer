@@ -35,6 +35,11 @@ const { clearDatabase, seedUser, seedProject } = require('./helpers/fixtures');
 
 const H = { 'x-dev-user-email': 'parity@test.com' };
 
+// Named rather than left to the fixtures' default, so the #102 assertions below
+// read against a Workspace this file chose. A stamp that happened to match the
+// fixture default would prove nothing.
+const PARITY_WORKSPACE = 'ws-parity';
+
 /** The uploads document id is the object path, percent-encoded. */
 function uploadDoc(objectPath) {
   return db.collection(collections.UPLOADS).doc(encodeURIComponent(objectPath));
@@ -42,8 +47,8 @@ function uploadDoc(objectPath) {
 
 beforeAll(async () => {
   await clearDatabase();
-  await seedUser('parity-user-id', { email: 'parity@test.com', role: 'user' });
-  await seedProject('parity-project', { name: 'Parity' });
+  await seedUser('parity-user-id', { email: 'parity@test.com', role: 'user', workspaceId: PARITY_WORKSPACE });
+  await seedProject('parity-project', { name: 'Parity', workspaceId: PARITY_WORKSPACE });
 });
 
 afterAll(async () => {
@@ -74,6 +79,19 @@ describe('POST /upload-url', () => {
     expect(snap.data()?.stage).toBe('gads-expert');
   });
 
+  // #102: the Capture records the Workspace of the Project it is filed under.
+  // Read back from Firestore rather than from the response, because the count
+  // this feeds is a query over the stored row.
+  test('stamps the Capture with the Project\'s Workspace', async () => {
+    const res = await request(app)
+      .post('/upload-url')
+      .set(H)
+      .send({ project: 'parity-project', tool: 'Softomedia' });
+
+    const snap = await uploadDoc(res.body.path).get();
+    expect(snap.data().workspaceId).toBe(PARITY_WORKSPACE);
+  });
+
   test('does not demand a tool, since /capture does not', async () => {
     // The two routes disagree today: /upload-url answers 400 without a tool and
     // /capture treats it as optional. That disagreement decides which path a
@@ -102,5 +120,20 @@ describe('POST /capture', () => {
     const snap = await uploadDoc(res.body.path).get();
     expect(snap.exists).toBe(true);
     expect(snap.data().stage).toBe('media-buyer');
+  });
+
+  // #102, and the parity this file exists to state: the fallback path stamps
+  // the same Workspace as the primary one. A Capture must not become countable
+  // or uncountable according to which route carried it.
+  test('stamps the Capture with the Project\'s Workspace', async () => {
+    const res = await request(app)
+      .post('/capture')
+      .set(H)
+      .field('projectId', 'parity-project')
+      .field('tool', 'Softomedia')
+      .attach('file', Buffer.from('not-really-a-png'), 'shot.png');
+
+    const snap = await uploadDoc(res.body.path).get();
+    expect(snap.data().workspaceId).toBe(PARITY_WORKSPACE);
   });
 });

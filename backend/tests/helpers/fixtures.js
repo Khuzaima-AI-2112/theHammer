@@ -83,10 +83,48 @@ async function seedMembership(projectId, userId, data = {}) {
   return docRef;
 }
 
+/**
+ * A Capture, as `firestoreWrite` in src/index.js writes one (#102).
+ *
+ * Both upload paths write through that one function, so the defaults here are
+ * its field list rather than a subset chosen per suite — Capture rows used to
+ * be hand-rolled in each file, which is how `workspaceId` could be added to the
+ * writer and missed by every fixture.
+ *
+ * `workspaceId` defaults to the same Workspace as `seedProject`, so a suite
+ * that seeds a Capture without thinking about tenancy gets a consistent one.
+ * A suite testing the unstamped legacy rows passes `workspaceId: null`
+ * explicitly.
+ */
+async function seedCapture(id, data = {}) {
+  const merged = {
+    bucket: 'test-bucket',
+    size: 1024,
+    projectId: 'test-project',
+    userId: 'test-user',
+    tool: '',
+    stage: '',
+    tabUrl: '',
+    uploadedAt: new Date().toISOString(),
+    hasSemanticData: false,
+    workspaceId: 'test-workspace',
+    schemaVersion: 1,
+    ...data
+  };
+  // The production doc id is the object path percent-encoded; the path is
+  // derived so a seeded row still looks like one the backend wrote.
+  merged.path = merged.path || `${merged.projectId}/${merged.userId}/${id}.png`;
+
+  const docRef = db.collection(collections.UPLOADS).doc(id);
+  await docRef.set(merged);
+  return docRef;
+}
+
 module.exports = {
   HEADERS,
   clearDatabase,
   seedUser,
   seedProject,
-  seedMembership
+  seedMembership,
+  seedCapture
 };
