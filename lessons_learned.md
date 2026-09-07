@@ -910,3 +910,16 @@ Separately, every suite mocks `@google/genai` wholesale through `helpers/genaiMo
 - **Ask what would have to be true for this assertion to fail.** If the answer is "the mock would have to return something else", the test is measuring the mock. The OCR test could not fail while the mock existed.
 - **When a double replaces a constructor, assert on the arguments it received.** `GoogleGenAI.mock.calls[0][0]` was available the whole time; nobody looked at it. That single assertion is what closed #107, and it needs `jest.resetModules()` rather than a cleared mock because the client memoises.
 - **A green suite over a mocked boundary says nothing about the boundary.** Say so in the test's header, so the next person knows which side of the seam is actually covered.
+
+### 76. A verification script that asserts the old decision keeps confirming it
+
+**What happened:** ADR 0010 fixed the answer at "captures are kept indefinitely". Three things went on saying otherwise. `infra/lifecycle.json` declared a 90-day Delete rule; `setup.sh` and `setup.ps1` applied it; and `verify.sh` and `verify.ps1` carried a check named `Bucket has lifecycle rule` that **passed** when the rule was there. So a green verify run was certifying the opposite of what the product had decided, and reading it as reassurance was reasonable — it said PASS.
+
+Two further layers sat underneath. The bucket all of it named, `thehammer-screenshots`, has been deleted; every reader and writer of captures uses `thehammer-storage-2026`. The next `setup.sh` run would therefore have created the dead bucket back into existence and applied the delete rule to it, against a name nothing reads. And the Settings panel offered a Retention (days) field whose value was stored, validated as a positive integer, reported back by `GET /config` — and read by nothing that deletes. Three contradictory values for one number, none of which did anything.
+
+**Root cause:** a decision was recorded in an ADR and never chased into the scripts that assert it. A check is not neutral about a decision it names — it *is* the decision, restated in a place that runs. Inverting the product's answer while leaving the check alone gives you a check that actively defends the discarded answer, and there is nothing in a passing run to tell you which side it is on.
+
+**Rule going forward:**
+- **When a decision changes, grep for its assertions, not just its implementations.** Removing the code that deletes is half the job; the check that demands deletion is the half that will still be there in a year saying PASS.
+- **Fail closed when the tool cannot answer.** `! gcloud ... | grep -q rule` reports "no rule" for a bucket you are not authenticated against, because an error prints nothing and nothing does not match. Capture the output and require the command to have succeeded before judging what it said — both verify scripts do this now, and `infra/tests/bucket-lifecycle.test.js` asserts they still do.
+- **A control that stores and validates a value nobody reads is worse than no control.** It tells an Admin something untrue about their data, and it survives review precisely because it looks complete.

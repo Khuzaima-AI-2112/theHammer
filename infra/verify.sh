@@ -9,7 +9,7 @@ set -euo pipefail
 
 PROJECT_ID="YOUR_GCP_PROJECT_ID"
 REGION="northamerica-northeast1"
-BUCKET="thehammer-screenshots"
+BUCKET="thehammer-storage-2026"
 SA_NAME="thehammer-backend"
 SA_EMAIL="${SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
 SECRET_NAME="thehammer-api-key"
@@ -49,13 +49,20 @@ check "0.6e" "aiplatform.googleapis.com enabled" \
 check "0.6f" "Backend SA holds roles/aiplatform.user" \
   "gcloud projects get-iam-policy ${PROJECT_ID} --flatten='bindings[].members' --filter='bindings.members:${SA_EMAIL}' --format='value(bindings.role)' | grep -q aiplatform.user"
 
-# 0.7 — Bucket exists in correct region with lifecycle rule
+# 0.7 — Bucket exists in correct region and ages nothing out
 check "0.7a" "Bucket gs://${BUCKET} exists" \
   "gcloud storage ls gs://${BUCKET}"
 check "0.7b" "Bucket region is NORTHAMERICA-NORTHEAST1" \
   "gcloud storage buckets describe gs://${BUCKET} --format=json | grep -q NORTHAMERICA-NORTHEAST1"
-check "0.7c" "Bucket has lifecycle rule" \
-  "gcloud storage buckets describe gs://${BUCKET} --format=json | grep -q lifecycleConfig"
+# Captures are kept indefinitely (ADR 0010). A lifecycle rule can only come
+# back by hand, and this is what would catch it.
+#
+# The describe is captured first rather than piped straight into grep, so the
+# check fails closed. An unauthenticated or misdirected gcloud prints nothing,
+# and nothing does not match 'rule' — which would report a bucket nobody could
+# even see as free of a rule.
+check "0.7c" "Bucket has no lifecycle rule" \
+  "LC=\$(gcloud storage buckets describe gs://${BUCKET} --format='value(lifecycle_config)') && ! grep -q rule <<< \"\${LC}\""
 
 # 0.8 — Service account IAM binding on bucket
 check "0.8" "SA ${SA_EMAIL} has objectCreator on bucket" \

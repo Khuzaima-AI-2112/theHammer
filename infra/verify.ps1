@@ -8,7 +8,7 @@ $ErrorActionPreference = 'SilentlyContinue'
 
 $PROJECT_ID = 'thehammer'
 $REGION = 'northamerica-northeast1'
-$BUCKET = 'thehammer-screenshots'
+$BUCKET = 'thehammer-storage-2026'
 $SA_NAME = 'thehammer-backend'
 $SA_EMAIL = "$SA_NAME@$PROJECT_ID.iam.gserviceaccount.com"
 $SECRET_NAME = 'thehammer-api-key'
@@ -66,7 +66,7 @@ Check '0.6f' 'Backend SA holds roles/aiplatform.user' {
   $r -match 'aiplatform.user'
 }
 
-# 0.7 — Bucket exists, correct region, lifecycle rule present
+# 0.7 — Bucket exists, correct region, ages nothing out
 Check '0.7a' "Bucket gs://$BUCKET exists" {
   $r = gcloud storage buckets describe "gs://$BUCKET" --format='value(name)' 2>$null
   $null -ne $r
@@ -75,9 +75,15 @@ Check '0.7b' 'Bucket region is NORTHAMERICA-NORTHEAST1' {
   $r = gcloud storage buckets describe "gs://$BUCKET" --format='json(location)' 2>$null
   $r -match 'NORTHAMERICA-NORTHEAST1'
 }
-Check '0.7c' 'Bucket has lifecycle rule' {
-  $r = gcloud storage buckets describe "gs://$BUCKET" --format='json' 2>$null
-  $r -match 'lifecycle_config'
+# Captures are kept indefinitely (ADR 0010). A lifecycle rule can only come
+# back by hand, and this is what would catch it.
+#
+# $LASTEXITCODE is checked first so the check fails closed. An unauthenticated
+# or misdirected gcloud prints nothing, and nothing does not match 'rule' —
+# which would report a bucket nobody could even see as free of a rule.
+Check '0.7c' 'Bucket has no lifecycle rule' {
+  $r = gcloud storage buckets describe "gs://$BUCKET" --format='value(lifecycle_config)' 2>$null
+  ($LASTEXITCODE -eq 0) -and (($r -join '') -notmatch 'rule')
 }
 
 # 0.8 — SA has objectCreator on bucket

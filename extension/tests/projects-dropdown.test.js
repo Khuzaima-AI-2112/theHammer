@@ -31,7 +31,7 @@ function backend(projects) {
   return async (url) => {
     if (url.endsWith('/config')) {
       return { ok: true, status: 200, json: async () => ({
-        retentionDays: 90, maxFileSizeBytes: 10485760,
+        maxFileSizeBytes: 10485760,
         defaultCaptureQuality: 'png', backendUrl: 'https://backend.test',
         schemaVersion: 1
       }) };

@@ -15,7 +15,7 @@ $ErrorActionPreference = 'Continue'
 $PROJECT_ID = 'thehammer'                 # e.g. thehammer-prod
 $BILLING_ACCOUNT = '015B81-E00AF4-9480BF'      # e.g. 01ABCD-EF1234-567890
 $REGION = 'northamerica-northeast1'
-$BUCKET = 'thehammer-screenshots'
+$BUCKET = 'thehammer-storage-2026'
 $SA_NAME = 'thehammer-backend'
 $SA_EMAIL = "$SA_NAME@$PROJECT_ID.iam.gserviceaccount.com"
 $SECRET_NAME = 'thehammer-api-key'
@@ -62,8 +62,8 @@ gcloud storage buckets create "gs://$BUCKET" `
 Write-Host '[0.7] Disabling versioning...' -ForegroundColor Cyan
 gcloud storage buckets update "gs://$BUCKET" --no-versioning
 
-Write-Host '[0.7] Applying 90-day lifecycle rule...' -ForegroundColor Cyan
-gcloud storage buckets update "gs://$BUCKET" --lifecycle-file='infra\lifecycle.json'
+# No lifecycle rule is applied. Captures are kept indefinitely and deleted
+# only on request (ADR 0010, #113), so nothing here may age them out.
 
 Write-Host '[0.7] Verifying bucket...' -ForegroundColor Cyan
 $BUCKET_INFO = gcloud storage buckets describe "gs://$BUCKET" --format='json'

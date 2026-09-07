@@ -3,11 +3,10 @@
 //   5.17 — loadConfig() added: fetches GET /config with the Firebase ID token
 //          in an Authorization: Bearer header on every
 //          popup open (when a key exists) and writes the result into
-//          chrome.storage.local as settings.cloudRunUrl, settings.retention,
-//          settings.maxSize.
+//          chrome.storage.local as settings.cloudRunUrl, settings.maxSize.
 //   5.17 — loadConfig() is fired in parallel with loadProjects() so the
 //          popup open path does not wait for both sequentially.
-//   5.17 — Admin-managed fields (cloudRunUrl, retention, maxSize) in the
+//   5.17 — Admin-managed fields (cloudRunUrl, maxSize) in the
 //          Settings panel are now always sourced from /config; they are never
 //          editable by the user (already read-only in HTML).
 //   5.17 — Removed cloudRunUrlInput reference (admin-managed URL display removed from popup UI)
@@ -49,7 +48,6 @@ const settingsPanel    = document.getElementById('settings-panel');
 const authStatusText   = document.getElementById('auth-status-text');
 const authLoginBtn     = document.getElementById('auth-login-btn');
 const openAdminBtn     = document.getElementById('open-admin-btn');
-const retentionInput   = document.getElementById('retention-input'); // read-only (admin-managed)
 const maxSizeInput     = document.getElementById('max-size-input');  // read-only (admin-managed)
 const notifyInput      = document.getElementById('notify-input');
 const settingsSaveBtn  = document.getElementById('settings-save-btn');
@@ -97,10 +95,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   // ── 5.15 / 5.17: Restore settings fields from storage ──
-  // cloudRunUrl, retention, maxSize are authoritative from GET /config (5.17);
+  // cloudRunUrl and maxSize are authoritative from GET /config (5.17);
   // we show cached values here while the async fetch runs.
   if (settings?.notify != null) notifyInput.checked    = settings.notify;
-  if (settings?.retention)      retentionInput.value   = settings.retention;
   if (settings?.maxSize)        maxSizeInput.value     = settings.maxSize;
 
   // ── 5.16: Restore stage + tool (safe before async project load) ──
@@ -406,14 +403,14 @@ document.addEventListener('DOMContentLoaded', async () => {
 // Fetches GET /config using the hardcoded fallback URL first (the key is
 // required but cloudRunUrl may not yet be in storage on first run).
 // On success:
-//   — writes cloudRunUrl, retention, maxSize into settings storage
+//   — writes cloudRunUrl, maxSize into settings storage
 //   — updates the read-only display fields in the Settings panel
 // On failure:
 //   — leaves existing cached values untouched (offline-safe)
 //   — does NOT block capture or project load
 //
 // config response shape expected from backend:
-//   { cloudRunUrl?: string, retention?: number, maxSize?: number }
+//   { cloudRunUrl?: string, maxSize?: number }
 // All fields are optional; backend may return a subset.
 // ─────────────────────────────────────────────────────────────────
 // #26: no `/api` prefix — the backend serves /config and /me/projects at the
@@ -487,7 +484,6 @@ async function loadConfig() {
     // hands out a prefixed URL, storing it raw would undo the cleanup on every
     // popup open.
     if (config.cloudRunUrl) updated.cloudRunUrl = normaliseApiBase(config.cloudRunUrl);
-    if (config.retention)   updated.retention   = config.retention;
     if (config.maxSize)     updated.maxSize      = config.maxSize;
     if (typeof config.inactivityTimerSeconds === 'number') {
       updated.inactivityTimerSeconds = config.inactivityTimerSeconds;
@@ -502,11 +498,10 @@ async function loadConfig() {
     await chrome.storage.local.set({ settings: updated });
 
     // Reflect in read-only display fields
-    if (updated.retention)   retentionInput.value   = updated.retention;
     if (updated.maxSize)     maxSizeInput.value     = updated.maxSize;
 
     console.log('[Hammer popup] GET /config ✓ | url:', updated.cloudRunUrl,
-                '| retention:', updated.retention, '| maxSize:', updated.maxSize);
+                '| maxSize:', updated.maxSize);
   } catch (err) {
     // Offline or key invalid — silently fall back to cached values
     console.warn('[Hammer popup] GET /config failed (using cache):', err.message);

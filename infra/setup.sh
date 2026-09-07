@@ -16,7 +16,7 @@ set -euo pipefail
 PROJECT_ID="YOUR_GCP_PROJECT_ID"          # e.g. thehammer-prod
 BILLING_ACCOUNT="YOUR_BILLING_ACCOUNT_ID" # e.g. 01ABCD-EF1234-567890
 REGION="northamerica-northeast1"
-BUCKET="thehammer-screenshots"
+BUCKET="thehammer-storage-2026"
 SA_NAME="thehammer-backend"
 SA_EMAIL="${SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
 SECRET_NAME="thehammer-api-key"
@@ -64,13 +64,12 @@ gcloud storage buckets create "gs://${BUCKET}" \
 echo "[0.7] Disabling versioning..."
 gcloud storage buckets update "gs://${BUCKET}" --no-versioning
 
-echo "[0.7] Applying 90-day lifecycle rule..."
-gcloud storage buckets update "gs://${BUCKET}" \
-  --lifecycle-file="infra/lifecycle.json"
+# No lifecycle rule is applied. Captures are kept indefinitely and deleted
+# only on request (ADR 0010, #113), so nothing here may age them out.
 
-echo "[0.7] Verifying bucket region and lifecycle..."
-gcloud storage buckets describe "gs://${BUCKET}" --format="json(location,lifecycle)" | grep -E 'NORTHAMERICA-NORTHEAST1|lifecycleConfig'
-echo "  ✓ Bucket created and lifecycle rule applied"
+echo "[0.7] Verifying bucket region..."
+gcloud storage buckets describe "gs://${BUCKET}" --format="json(location)" | grep -E 'NORTHAMERICA-NORTHEAST1'
+echo "  ✓ Bucket created"
 
 # ---------------------------------------------------------------------------
 # 0.8 — Create service account and grant storage.objectCreator on bucket

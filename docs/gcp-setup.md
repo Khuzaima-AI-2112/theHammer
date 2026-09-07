@@ -7,8 +7,6 @@
 > - The preflight check expects `projectplan.md` and `sprintplan.md` in the repo
 >   root. Neither is there: `projectplan.md` is in `docs/planning/`, and
 >   `sprintplan.md` does not exist anywhere in the repository.
-> - `$BUCKET = 'thehammer-screenshots'`, but `infra/deploy.ps1` deploys against
->   `thehammer-storage-2026`.
 > - `$SECRET_NAME = 'thehammer-api-key'` provisions the API-key auth model that
 >   `docs/architecture.md` §3.2 records as deprecated in favour of Firebase ID
 >   tokens.
@@ -181,7 +179,7 @@ gcloud iam service-accounts describe $SA_EMAIL --project=$PROJECT_ID
 ### 3.2 Grant Storage write permission
 
 ```powershell
-$BUCKET = 'thehammer-screenshots'
+$BUCKET = 'thehammer-storage-2026'
 
 gcloud storage buckets add-iam-policy-binding "gs://$BUCKET" `
   --member="serviceAccount:$SA_EMAIL" `
@@ -239,18 +237,18 @@ gcloud storage buckets describe "gs://$BUCKET" --format='value(location)'
 # Expected output: NORTHAMERICA-NORTHEAST1
 ```
 
-### 4.2 Apply the 90-day lifecycle rule
+### 4.2 Confirm the bucket ages nothing out
 
-```powershell
-gcloud storage buckets update "gs://$BUCKET" --lifecycle-file='infra\lifecycle.json'
-```
+Captures are kept indefinitely and deleted only on request (ADR 0010), so the
+bucket carries **no** lifecycle rule. Nothing is applied here; this only checks
+that nothing has been applied by hand.
 
 **Verify:**
 
 ```powershell
-$LC = gcloud storage buckets describe "gs://$BUCKET" --format='json(lifecycle)' 2>$null
-if ($LC -match 'lifecycleConfig') { Write-Host '[OK] Lifecycle rule applied' -ForegroundColor Green }
-else                               { Write-Host '[FAIL] No lifecycle rule found' -ForegroundColor Red }
+$LC = gcloud storage buckets describe "gs://$BUCKET" --format='value(lifecycle_config)' 2>$null
+if (($LC -join '') -notmatch 'rule') { Write-Host '[OK] No lifecycle rule' -ForegroundColor Green }
+else                                  { Write-Host '[FAIL] A lifecycle rule is deleting captures' -ForegroundColor Red }
 ```
 
 ---
@@ -344,9 +342,9 @@ The Hammer — Sprint 0 Verification
   [PASS] [0.6b] artifactregistry.googleapis.com enabled
   [PASS] [0.6c] storage.googleapis.com enabled
   [PASS] [0.6d] secretmanager.googleapis.com enabled
-  [PASS] [0.7a] Bucket gs://thehammer-screenshots exists
+  [PASS] [0.7a] Bucket gs://thehammer-storage-2026 exists
   [PASS] [0.7b] Bucket region is NORTHAMERICA-NORTHEAST1
-  [PASS] [0.7c] Bucket has lifecycle rule
+  [PASS] [0.7c] Bucket has no lifecycle rule
   [PASS] [0.8]  SA thehammer-backend@... has objectCreator on bucket
   [PASS] [0.9a] Secret thehammer-api-key exists
   [PASS] [0.9b] SA can access secret via impersonation
@@ -383,10 +381,10 @@ gcloud iam service-accounts describe $SA_EMAIL --project=$PROJECT_ID
 
 ### "Bucket already exists"
 
-GCS bucket names are globally unique. If `thehammer-screenshots` is taken:
+GCS bucket names are globally unique. If `thehammer-storage-2026` is taken:
 ```powershell
 # Choose a unique name, e.g. add your project ID as suffix
-$BUCKET = "thehammer-screenshots-$PROJECT_ID"
+$BUCKET = "thehammer-storage-2026-$PROJECT_ID"
 # Update this variable in setup.ps1 and verify.ps1 too
 ```
 

@@ -19,13 +19,13 @@
  * GET /config
  *   Returns global extension settings stored in Firestore config/global doc.
  *   Auth: Firebase ID token (any authenticated user may read config).
- *   Response: 200 { retentionDays, maxFileSizeBytes, defaultCaptureQuality, ... }
+ *   Response: 200 { maxFileSizeBytes, defaultCaptureQuality, ... }
  *             401 { error: 'unauthenticated: missing Bearer token' }
  *
  * PATCH /config
  *   Updates global extension settings. Admin-only (requireAdmin / IAP).
  *   Accepts a partial body; only known fields are written (no passthrough).
- *   Response: 200 { retentionDays, maxFileSizeBytes, defaultCaptureQuality, backendUrl, schemaVersion }
+ *   Response: 200 { maxFileSizeBytes, defaultCaptureQuality, backendUrl, schemaVersion }
  *             400 { error, field, value } on validation failure
  *             401/403 on auth failure
  *
@@ -138,7 +138,6 @@ router.get('/me/projects', requireAuth('user'), async (req, res, next) => {
 //
 // Firestore path: config/global
 // Fields (with safe defaults if doc is missing individual keys):
-//   retentionDays        number   — how long GCS screenshots are kept
 //   maxFileSizeBytes     number   — upload size ceiling enforced by backend
 //   defaultCaptureQuality string  — 'png' | 'webp'
 //   backendUrl           string   — canonical API base URL
@@ -149,7 +148,6 @@ const VALID_CAPTURE_QUALITY = ['png', 'webp'];
 
 function readConfig(d) {
   return {
-    retentionDays:         d.retentionDays         ?? CONFIG_DEFAULTS.retentionDays,
     maxFileSizeBytes:      d.maxFileSizeBytes       ?? CONFIG_DEFAULTS.maxFileSizeBytes,
     defaultCaptureQuality: d.defaultCaptureQuality  ?? CONFIG_DEFAULTS.defaultCaptureQuality,
     backendUrl:            d.backendUrl             ?? CONFIG_DEFAULTS.backendUrl,
@@ -205,14 +203,9 @@ router.patch('/config', requireAdmin, async (req, res, next) => {
     const body = req.body ?? {};
     const update = {};
 
-    // retentionDays — positive integer
-    if ('retentionDays' in body) {
-      const v = parseInt(body.retentionDays, 10);
-      if (!Number.isFinite(v) || v < 1) {
-        return res.status(400).json({ error: 'retentionDays must be a positive integer', field: 'retentionDays', value: body.retentionDays });
-      }
-      update.retentionDays = v;
-    }
+    // #113: retentionDays is not a field. Captures are kept indefinitely
+    // (ADR 0010), so a body carrying it is ignored rather than stored — only
+    // known fields are written, and it is no longer one.
 
     // maxFileSizeBytes — positive integer, max 100 MB
     if ('maxFileSizeBytes' in body) {

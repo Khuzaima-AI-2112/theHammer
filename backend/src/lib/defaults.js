@@ -8,7 +8,6 @@ const USER_PREFERENCES = {
 };
 
 const CONFIG_DEFAULTS = {
-  retentionDays: 365,
   maxFileSizeBytes: 10 * 1024 * 1024, // 10 MB
   defaultCaptureQuality: 'png',
   backendUrl: 'https://app.thehammer.io/api',

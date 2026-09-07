@@ -390,8 +390,7 @@ thehammer/
 │   ├── deploy.ps1          ← docker build + push + gcloud run deploy
 │   ├── setup.ps1 / .sh     ← GCP + Firebase provisioning scripts
 │   ├── verify.ps1 / .sh    ← Env verification scripts
-│   ├── cors.json           ← GCS CORS settings
-│   └── lifecycle.json      ← GCS object lifecycle settings
+│   └── cors.json           ← GCS CORS settings
 └── docs/
     └── planning/
         └── projectplan.md
