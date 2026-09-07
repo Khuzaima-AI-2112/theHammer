@@ -12,6 +12,52 @@ const REAL_PNG_BYTES = Buffer.from(
 );
 
 /**
+ * The objects the double is holding, by name.
+ *
+ * Module-level rather than per-mock because a `jest.mock` factory may not close
+ * over out-of-scope variables — the test file and the factory both reach the
+ * store through this module, which is the one thing they can share. A test
+ * seeds with `seedObject`, reads back with `listObjects`, and clears between
+ * cases with `resetObjects`.
+ *
+ * Added for #114. Before it the double exposed only `bucket().file(name)`, so
+ * the storage half of a Purge — the half #109 was actually about — could not be
+ * asserted at all: there was no object list for a prefix delete to empty.
+ */
+const objects = new Map();
+
+/** Put an object in the bucket, as an upload would. */
+function seedObject(name, contents = null) {
+  objects.set(String(name), contents);
+  return String(name);
+}
+
+/** Every object name currently in the bucket, sorted. Optionally by prefix. */
+function listObjects(prefix = '') {
+  return [...objects.keys()].filter((n) => n.startsWith(prefix)).sort();
+}
+
+/**
+ * Arm the next prefix delete to fail, once.
+ *
+ * The ordering rule — children first, the Project document last — is only
+ * observable if a step in the middle can be made to fail, so #114 asserts it by
+ * arming this, Purging, and then checking the Project is still there and that a
+ * re-run finishes the job. Without an injectable failure the retry property
+ * could only be reasoned about, not tested.
+ */
+let failNextDelete = null;
+function failNextPrefixDelete(message = 'storage unavailable') {
+  failNextDelete = message;
+}
+
+/** Empty the bucket and disarm any injected failure. Call in `beforeEach`. */
+function resetObjects() {
+  objects.clear();
+  failNextDelete = null;
+}
+
+/**
  * Shared Cloud Storage double.
  *
  * Tests must never make real network calls, and more than one suite needs the
@@ -27,7 +73,12 @@ function createStorageMock(options = {}) {
 
   function MockFile(name) {
     this.name = name;
-    this.save = jest.fn().mockResolvedValue();
+    // A saved object joins the bucket, so a prefix listing afterwards sees what
+    // an upload actually wrote rather than only what a test remembered to seed.
+    this.save = jest.fn().mockImplementation((contents) => {
+      seedObject(name, contents ?? null);
+      return Promise.resolve();
+    });
     this.getSignedUrl = jest.fn().mockImplementation(
       () => Promise.resolve([`${signedUrlPrefix}${name}?X-Goog-Signature=abc`])
     );
@@ -45,9 +96,32 @@ function createStorageMock(options = {}) {
 
   return {
     Storage: jest.fn().mockImplementation(() => ({
-      bucket: () => ({ file: (name) => new MockFile(name) })
+      bucket: () => ({
+        file: (name) => new MockFile(name),
+        // The real client answers `[files]` — a one-element array holding the
+        // matches — and both of these accept a bare prefix string.
+        getFiles: (opts = {}) => Promise.resolve([
+          listObjects(typeof opts === 'string' ? opts : (opts.prefix ?? ''))
+            .map((n) => new MockFile(n))
+        ]),
+        // A prefix that matches nothing is not an error, in the real client and
+        // here: an Abandoned Upload is a record whose object never arrived, and
+        // Purging one must not fail (#114).
+        deleteFiles: (opts = {}) => {
+          if (failNextDelete) {
+            const message = failNextDelete;
+            failNextDelete = null;
+            return Promise.reject(new Error(message));
+          }
+          const prefix = typeof opts === 'string' ? opts : (opts.prefix ?? '');
+          for (const name of listObjects(prefix)) objects.delete(name);
+          return Promise.resolve();
+        }
+      })
     }))
   };
 }
 
-module.exports = { createStorageMock };
+module.exports = {
+  createStorageMock, seedObject, listObjects, resetObjects, failNextPrefixDelete,
+};

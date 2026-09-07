@@ -577,11 +577,65 @@ async function submitCreate() {
 }
 
 // ── Delete Project Modal ───────────────────────────────────────
+// #116: deleting a Project is a Purge — it removes the Captures and their
+// screenshots too (ADR 0015) — so the confirmation counts first and states the
+// number, and the Admin types the Project's name to prove they mean it. Of five
+// Projects in production three hold no Captures at all and two hold 100 and 17
+// objects; the number is the whole difference between a harmless click and a
+// destructive one.
 function openDeleteModal(projectId, name) {
-  pendingDelete = { projectId, name };
+  // `counted` starts false: the Admin confirms a *counted* statement, so until
+  // the number arrives there is nothing to confirm. A modal that is
+  // confirmable while it still reads "its captures" is the criterion — "the
+  // confirmation states the real count before the Admin confirms" — failing
+  // quietly, and it is reachable by typing fast.
+  pendingDelete = { projectId, name, counted: false };
   document.getElementById('deleteProjectName').textContent = `"${name}"`;
-  document.getElementById('deleteConfirmBtn').disabled = false;
+  document.getElementById('deleteCaptureCount').textContent = 'counting…';
+  const input = document.getElementById('deleteConfirmName');
+  input.value = '';
+  input.placeholder = name;
+  syncDeleteConfirmGate();
   openModal('deleteModal');
+  loadDeleteCaptureCount(projectId);
+}
+
+// The count comes from the Project route rather than the list row, so it is
+// current at the moment of the decision rather than as of the last list load.
+async function loadDeleteCaptureCount(projectId) {
+  const label = document.getElementById('deleteCaptureCount');
+  try {
+    const project = await apiFetch(`/admin/projects/${encodeURIComponent(projectId)}`);
+    // The Admin may have cancelled and opened another Project while this was in
+    // flight; a late answer must not label the wrong one.
+    if (!pendingDelete || pendingDelete.projectId !== projectId) return;
+
+    const n = project.captureCount;
+    if (typeof n !== 'number') throw new Error('no captureCount in the response');
+
+    label.textContent = n === 1 ? '1 capture' : `${n} captures`;
+    pendingDelete.counted = true;
+    syncDeleteConfirmGate();
+  } catch (err) {
+    if (!pendingDelete || pendingDelete.projectId !== projectId) return;
+    // Say so rather than leaving a plausible-looking blank (lesson 69). The
+    // gate stays shut: an Admin should not destroy screenshots on a
+    // confirmation that could not tell them how many.
+    console.warn('[portal] capture count failed:', err.message);
+    label.textContent = 'an unknown number of captures';
+    showToast('Could not count this project\'s captures — delete is unavailable.', 'error');
+  }
+}
+
+// The gate opens only when the count is on screen and the typed name matches
+// exactly. Its *behaviour* is not asserted by the portal tests — that needs a
+// DOM harness (#112, Out of Scope) — so the contract test checks that this
+// reads the input and drives the button, which is the half that can drift.
+function syncDeleteConfirmGate() {
+  const typed = document.getElementById('deleteConfirmName').value;
+  const ready = !!pendingDelete && pendingDelete.counted;
+  document.getElementById('deleteConfirmBtn').disabled =
+    !ready || typed !== pendingDelete.name;
 }
 
 async function confirmDelete() {
@@ -601,7 +655,10 @@ async function confirmDelete() {
   } catch (err) {
     showToast(`Delete failed: ${err.message}`, 'error');
   } finally {
-    btn.disabled = false; btn.textContent = 'Delete'; pendingDelete = null;
+    // The gate closes again with the modal: the next Project's name has not
+    // been typed yet, whatever is still in the box.
+    btn.disabled = true; btn.textContent = 'Delete'; pendingDelete = null;
+    document.getElementById('deleteConfirmName').value = '';
   }
 }
 
@@ -1558,6 +1615,7 @@ document.getElementById('createCancelBtn').addEventListener('click',       () =>
 document.getElementById('createSubmitBtn').addEventListener('click',       submitCreate);
 document.getElementById('deleteCancelBtn').addEventListener('click',       () => closeModal('deleteModal'));
 document.getElementById('deleteConfirmBtn').addEventListener('click',      confirmDelete);
+document.getElementById('deleteConfirmName').addEventListener('input',     syncDeleteConfirmGate);
 document.getElementById('addMemberCancelBtn').addEventListener('click',    () => closeModal('addMemberModal'));
 document.getElementById('addMemberSubmitBtn').addEventListener('click',    submitAddMember);
 document.getElementById('removeMemberCancelBtn').addEventListener('click', () => closeModal('removeMemberModal'));

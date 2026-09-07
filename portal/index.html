@@ -71,13 +71,18 @@
   <div class="modal">
     <div class="modal-title" id="deleteModalTitle">Delete project?</div>
     <div class="confirm-text">
-      This will permanently delete <strong id="deleteProjectName"></strong>
-      and all its memberships. Uploads in GCS are not affected.
+      This will permanently delete <strong id="deleteProjectName"></strong>,
+      <strong id="deleteCaptureCount">its captures</strong>, and every
+      screenshot, report and storyboard filed under it.
       This action cannot be undone.
+    </div>
+    <div class="field">
+      <label for="deleteConfirmName">Type the project's name to confirm</label>
+      <input id="deleteConfirmName" type="text" autocomplete="off" placeholder="" />
     </div>
     <div class="modal-actions">
       <button class="btn btn-ghost" id="deleteCancelBtn" type="button">Cancel</button>
-      <button class="btn btn-danger" id="deleteConfirmBtn" type="button">Delete</button>
+      <button class="btn btn-danger" id="deleteConfirmBtn" type="button" disabled>Delete</button>
     </div>
   </div>
 </div>

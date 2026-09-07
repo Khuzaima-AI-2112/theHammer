@@ -36,3 +36,9 @@ process.env.METADATA_SERVER_DETECTION = 'none';
 // the emulator. If that line is ever removed, this one becomes a request to a
 // project that does not exist rather than a silent success.
 process.env.GCLOUD_PROJECT = process.env.GCLOUD_PROJECT || 'demo-hammer';
+
+// The Purge refuses to run without a bucket to empty (#114): a destructive
+// route that falls back to a hardcoded name would delete objects from a bucket
+// nobody named. Production sets this in cloudbuild.yaml; the suite sets it here,
+// and Cloud Storage is the double, so nothing addressable is behind it.
+process.env.GCS_BUCKET = process.env.GCS_BUCKET || 'test-bucket';

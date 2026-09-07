@@ -5,7 +5,7 @@
  * GET    /admin/projects              → 5.3 list projects (paginated, 100/page)
  * GET    /admin/projects/:id          → 5.4 get single project
  * PATCH  /admin/projects/:id          → 5.4 rename project
- * DELETE /admin/projects/:id          → 5.5 delete project + memberships (chunked batch)
+ * DELETE /admin/projects/:id          → 5.5 Purge the Project and everything filed under it (#114)
  *
  * Auth:   requireAdmin (= requireRole('admin'))
  * CORS:   Handled globally in src/index.js
@@ -24,12 +24,23 @@
 
 const express  = require('express');
 const { FieldValue, Timestamp } = require('firebase-admin/firestore');
+const { Storage } = require('@google-cloud/storage');
 const { db }   = require('../../lib/firestore');
 const { requireAdmin } = require('../../middleware/requireAuth');
 const collections = require('../../lib/collections');
 const { loadOwnedProject, callerWorkspace } = require('../../lib/ownership');
+const { purgeProjectContents, recordPurge } = require('../../lib/purge');
 
 const router = express.Router();
+
+const storage = new Storage();
+
+// No `|| 'thehammer-storage-2026'` fallback here, unlike the read paths in
+// exports.js and activity.js. This one deletes: a Purge that cannot be told
+// which bucket it is emptying must not guess at a live bucket name. The upload
+// paths in index.js already treat an unset GCS_BUCKET as a 500-level
+// misconfiguration, and so does the Purge.
+const BUCKET = process.env.GCS_BUCKET;
 
 function nowISO() { return new Date().toISOString(); }
 
@@ -125,11 +136,25 @@ router.get('/projects', requireAdmin, async (req, res, next) => {
 });
 
 // 5.4  GET /admin/projects/:id
+//
+// #116: carries `captureCount`, because the delete confirmation has to state
+// how much is about to be destroyed and can only state a number this sends. The
+// count is of Captures — rows in `uploads` — which is the number an Admin
+// recognises; the object count may differ, because an Abandoned Upload is a row
+// whose image never arrived, and it is not shown.
+//
+// A count() aggregation rather than reading the rows: the Project with the most
+// Captures in production has 100, and this runs on every open of the Project.
+// It is only on the single-Project route; the list route would pay it per row.
 router.get('/projects/:id', requireAdmin, async (req, res, next) => {
   try {
     const snap = await loadOwnedProject(req, res, req.params.id);
     if (!snap) return;
-    return res.json(serializeDoc(snap));
+    const captures = await db.collection(collections.UPLOADS)
+      .where('projectId', '==', snap.id)
+      .count()
+      .get();
+    return res.json({ ...serializeDoc(snap), captureCount: captures.data().count });
   } catch (err) { next(err); }
 });
 
@@ -151,35 +176,44 @@ router.patch('/projects/:id', requireAdmin, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// 5.5  DELETE /admin/projects/:id
-// Deletes project doc + all memberships in chunked batches (Firestore 500-op limit).
+// 5.5  DELETE /admin/projects/:id  —  the Purge (#114, ADR 0015)
+//
+// Deleting a Project removes the Project, every record filed under it, and
+// every object stored under it. This used to remove the Project document and
+// its memberships and nothing else, which left 17 unreachable records and 26
+// objects in production (#109).
+//
+// The Project document goes last, after every child and every object. While it
+// survives, its children are still addressable, so a Purge that dies halfway is
+// a Purge you run again — the route is idempotent, and Purging a
+// partially-Purged Project completes it.
 router.delete('/projects/:id', requireAdmin, async (req, res, next) => {
   try {
     const { id } = req.params;
+    if (!BUCKET) {
+      return res.status(500).json({ error: 'Server misconfiguration: GCS_BUCKET not set' });
+    }
     const snap = await loadOwnedProject(req, res, id);
     if (!snap) return;
-    const projectRef = snap.ref;
 
-    const membersSnap = await db.collection(collections.MEMBERSHIPS)
-      .where('projectId', '==', id)
-      .get();
+    const counts = await purgeProjectContents({
+      db, bucket: storage.bucket(BUCKET), projectId: id,
+    });
 
-    const CHUNK   = 450;
-    const docs    = membersSnap.docs;
+    // #115: written while the facts are still available, and before the Project
+    // document goes. A Purge that fails before this point writes no record and
+    // leaves the Project standing, which is the state a retry is for.
+    //
+    // Known consequence: the record counts what *this* run removed. A Purge
+    // that failed after the children and succeeded on the retry therefore
+    // records zero children, because by then there were none. Carrying counts
+    // across a failed attempt needs state to survive it — a tombstone or a
+    // partial record — and ADR 0015 rejected keeping any. The alternative,
+    // writing the record first, would leave a record for a Purge that never
+    // happened, which is worse: it claims data is gone while it is still there.
+    await recordPurge({ db, projectSnap: snap, actorId: req.hammerUser?.id, counts });
 
-    // All chunks except the last — memberships only
-    for (let i = 0; i < docs.length - CHUNK; i += CHUNK) {
-      const batch = db.batch();
-      docs.slice(i, i + CHUNK).forEach(d => batch.delete(d.ref));
-      await batch.commit();
-    }
-
-    // Final batch includes the remaining memberships AND the project doc — atomic
-    const finalBatch = db.batch();
-    const lastStart  = Math.max(0, docs.length - (docs.length % CHUNK || CHUNK));
-    docs.slice(lastStart).forEach(d => finalBatch.delete(d.ref));
-    finalBatch.delete(projectRef);
-    await finalBatch.commit();
+    await snap.ref.delete();
 
     return res.status(204).send();
   } catch (err) { next(err); }

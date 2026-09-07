@@ -16,11 +16,23 @@
 const assert = require('node:assert');
 
 function lift(source, name) {
-  const start = source.indexOf('function ' + name + '(');
+  return new Function('return (' + functionBody(source, name) + ')')();
+}
+
+/**
+ * The *text* of a top-level function, for the contract tests that read a
+ * function rather than call one — what keys it reads, what path it fetches.
+ *
+ * Shared for the reason `lift` is: this was written a third time in #116's
+ * confirmation contract test, having already been copied into
+ * activity-row-contract.test.js. Same brace assumption as `lift`.
+ */
+function functionBody(source, name) {
+  const start = source.search(new RegExp('(async )?function ' + name + '\\('));
   assert.notStrictEqual(start, -1, name + ' not found in source');
   const end = source.indexOf('\n}', start);
   assert.notStrictEqual(end, -1, 'could not find the end of ' + name);
-  return new Function('return (' + source.slice(start, end + 2) + ')')();
+  return source.slice(start, end + 2);
 }
 
-module.exports = { lift };
+module.exports = { lift, functionBody };

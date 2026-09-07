@@ -9,6 +9,9 @@ module.exports = {
   INACTIVITY_EVENTS: 'inactivity_events',
   REPORTS: 'reports',
   STORYBOARD_DRAFTS: 'storyboard_drafts',
+  // What a Purge left behind (#115). After a Purge there is nothing else to
+  // inspect, so this is the only trace it happened.
+  PURGES: 'purges',
   CONFIG: 'config',
   WORKSPACES: 'workspaces',
   INVITATIONS: 'invitations',
