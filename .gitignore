@@ -2,3 +2,5 @@ node_modules/
 firestore-debug.log
 firebase-debug.log
 backend/firestore-debug.log
+backend/scripts/workspace-stamp-backfill.json
+backend/scripts/workspace-id-audit.json
