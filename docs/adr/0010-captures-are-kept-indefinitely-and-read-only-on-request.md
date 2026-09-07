@@ -1,5 +1,10 @@
 # Captures are kept indefinitely, and AI reads them only when a report is asked for
 
+> **Scope, added 2026-09-07.** "Kept indefinitely" is a rule about *time*:
+> nothing expires on its own. It does not mean a Project's Captures survive the
+> Customer deliberately deleting the Project — that is a **Purge**, and it is
+> decided in ADR 0015. Retention is about time; a Purge is about intent.
+
 theHammer is no longer sold to anyone and is run by two people on their own
 machines (ADR 0008). That removed the audience whose interests most of the
 content rules were written to protect, and left a different question: what

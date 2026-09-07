@@ -12,6 +12,13 @@ A single screenshot that a Monitored User explicitly takes. theHammer never
 records continuously — every image exists because someone pressed the button.
 _Avoid_: recording, screen grab, snapshot, screenshot event
 
+**Abandoned Upload**:
+An attempt at a Capture that never produced an image. The Monitored User's
+intent is recorded, but no screenshot was ever stored, so there is nothing to
+look at, export or report on. It is not a Capture and never becomes one, and
+removing one costs nothing.
+_Avoid_: failed capture, empty capture, partial upload, orphan
+
 **Session**:
 One continuous period of work by one Monitored User against one Project.
 _Avoid_: shift, run, work block
@@ -53,14 +60,17 @@ The state a newly installed extension is in until an Acknowledgement is
 recorded. Captures are unavailable.
 _Avoid_: trial mode, limited mode, unregistered mode
 
-**Configured Retention**:
-The period an Admin sets for how long their Workspace keeps Captures.
-_Avoid_: retention (ambiguous on its own)
-
 **Storage Lifetime**:
-The maximum period the storage bucket keeps any object, regardless of
-Configured Retention. It is a hard ceiling, not a preference.
+The maximum period the storage bucket keeps any object, whatever else the
+system says. It is a hard ceiling, not a preference.
 _Avoid_: retention, TTL, expiry
+
+**Purge**:
+The complete removal of a Project and everything filed under it — its Captures
+and their images, its Sessions, Storyboards and Reports — at an Admin's
+request. Storage Lifetime is about time; a Purge is about intent, and does not
+wait.
+_Avoid_: delete, wipe, cascade, cleanup, archive
 
 **Active Ratio**:
 The proportion of a Session during which the Monitored User's device was
