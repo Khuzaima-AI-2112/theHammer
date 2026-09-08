@@ -10,6 +10,7 @@ const { refreshVideoReportStatus } = require('../../lib/shotstack');
 const collections = require('../../lib/collections');
 const { loadOwnedProject } = require('../../lib/ownership');
 const { resolveInternalSecret } = require('../../lib/internalSecret');
+const { readReportArtifact } = require('../../lib/reportArtifact');
 // Use the Cloud Tasks library if configured, else invoke worker directly (MVP)
 // const { CloudTasksClient } = require('@google-cloud/tasks');
 
@@ -147,6 +148,46 @@ router.get('/reports/:id/status', requireAnalyst, async (req, res, next) => {
       gcsPath: data.gcsPath || null,
       reportType: data.reportType
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /reports/:id/artifact
+//
+// #120. What an artifact is and why reading one is more than a download is in
+// lib/reportArtifact.js; this route is the tenancy check in front of it.
+//
+// Ownership is proven before the object is touched, for #94's reason one route
+// further along: a report id must not be enough to read another Customer's
+// Report, and it must not be enough to make this route mint a signed URL for
+// their bucket object either.
+router.get('/reports/:id/artifact', requireAnalyst, async (req, res, next) => {
+  try {
+    const snap = await db.collection(collections.REPORTS).doc(req.params.id).get();
+    if (!snap.exists) return res.status(404).json({ error: 'report not found' });
+
+    const data = snap.data();
+    if (!await loadOwnedProject(req, res, data.projectId)) return;
+
+    // A Report that is queued, processing or errored has no artifact to read.
+    // Answered as a state rather than a 404 so the viewer can say which one it
+    // is — an empty panel is what this issue exists to stop.
+    if (data.status !== 'done' || !data.gcsPath) {
+      return res.status(409).json({
+        error: data.status === 'error'
+          ? 'This report failed to generate, so there is nothing to show.'
+          : `This report is still ${data.status}. There is no artifact yet.`,
+        status: data.status,
+      });
+    }
+
+    const artifact = await readReportArtifact(data.gcsPath);
+    if (!artifact) {
+      return res.status(404).json({ error: 'The report artifact is no longer in storage' });
+    }
+
+    return res.json({ id: snap.id, reportType: data.reportType, ...artifact });
   } catch (err) {
     next(err);
   }

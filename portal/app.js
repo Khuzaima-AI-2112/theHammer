@@ -1811,7 +1811,7 @@ async function loadReports() {
         <td><span class="role-badge ${r.status === 'done' ? 'admin' : (r.status === 'error' ? 'user' : 'analyst')}">${esc(r.status)}</span></td>
         <td class="muted">${r.createdAt ? fmtDate(r.createdAt) : '—'}</td>
         <td>
-          <button class="btn btn-ghost" ${r.status !== 'done' ? 'disabled' : ''} onclick="viewReport('${r.id}', '${r.gcsPath || ''}')">View</button>
+          <button class="btn btn-ghost" ${r.status !== 'done' ? 'disabled' : ''} onclick="viewReport('${r.id}')">View</button>
         </td>
       </tr>
     `).join('');
@@ -1835,9 +1835,92 @@ function startReportPolling(reportId) {
   }, 2000);
 }
 
-function viewReport(reportId, gcsPath) {
-  document.getElementById('reportViewerContent').textContent = `[Mockup] Viewing Report ${reportId}\nPath: ${gcsPath}\n\nIn a full implementation, the portal will fetch a signed V4 URL from the backend and display the HTML/JSON content here securely.`;
+// ── Report viewer (#120) ───────────────────────────────────────
+// The View button has always been enabled the moment a Report reached `done`,
+// so the affordance was real and the content was not. The history is in
+// backend/src/lib/reportArtifact.js; what matters here is that everything
+// rendered below comes from a model's output or a Monitored User's page, and
+// the panel is filled with innerHTML — so every interpolated value goes
+// through esc(), and portal/tests/report-viewer-contract.test.js fails if one
+// stops doing so.
+
+/** The metrics table, in the order the artifact lists them. */
+function renderReportMetrics(metrics) {
+  const rows = Object.entries(metrics).map(([key, value]) => {
+    // null is what reportMetrics.js returns when there was nothing to divide
+    // by. Showing "0" here would be a claim about work nobody measured.
+    const shown = (value === null || value === undefined) ? 'not measured' : String(value);
+    return `<tr><td class="muted" style="padding-right:var(--space-4)">${esc(key)}</td><td>${esc(shown)}</td></tr>`;
+  }).join('');
+  return `<table style="margin:var(--space-3) 0">${rows}</table>`;
+}
+
+/** A standard Report: its narrative, whether that narrative was trusted, its figures. */
+function renderReportArtifact(reportType, artifact) {
+  const parts = [`<div style="font-weight:600;margin-bottom:var(--space-3)">${esc(reportType)}</div>`];
+
+  if (artifact.summary) {
+    parts.push(`<p style="font-family:var(--font-sans);font-size:var(--text-sm)">${esc(artifact.summary)}</p>`);
+  }
+
+  // #119 replaces a narrative that claimed more than the metrics support, and
+  // keeps the rejected text on the artifact so the substitution is visible
+  // rather than a summary that quietly went missing. Surfacing it is the whole
+  // point of writing it.
+  const guard = artifact.summaryGuard;
+  if (guard && guard.status === 'rejected') {
+    parts.push(`
+      <div style="border-left:3px solid var(--color-warning, #b45309);padding-left:var(--space-3);margin:var(--space-3) 0">
+        <div style="font-weight:600">The generated narrative was not published.</div>
+        <div class="muted">It contained claims the measurements do not support: ${esc((guard.markers || []).join(', '))}.</div>
+        <details style="margin-top:var(--space-2)">
+          <summary>What the model wrote</summary>
+          <div style="margin-top:var(--space-2)">${esc(guard.rejectedSummary || '')}</div>
+        </details>
+      </div>`);
+  }
+
+  if (artifact.llmError) {
+    parts.push(`<div class="muted">The narrative could not be generated: ${esc(artifact.llmError)}</div>`);
+  }
+
+  if (artifact.metrics) parts.push(renderReportMetrics(artifact.metrics));
+
+  parts.push(`
+    <details style="margin-top:var(--space-4)">
+      <summary class="muted">Full artifact</summary>
+      <pre style="margin-top:var(--space-2)">${esc(JSON.stringify(artifact, null, 2))}</pre>
+    </details>`);
+
+  return parts.join('');
+}
+
+/** A PDF or video artifact: a short-lived signed link, not bytes through the API. */
+function renderReportDownload(reportType, contentType, url) {
+  return `
+    <div style="font-weight:600;margin-bottom:var(--space-3)">${esc(reportType)}</div>
+    <p style="font-family:var(--font-sans);font-size:var(--text-sm)">
+      This report is a ${esc(contentType)} file.
+      <a href="${esc(url)}" target="_blank" rel="noopener noreferrer">Open it</a>.
+      The link expires in a few minutes.
+    </p>`;
+}
+
+async function viewReport(reportId) {
+  const panel = document.getElementById('reportViewerContent');
+  panel.textContent = 'Loading report…';
   openModal('reportViewerModal');
+
+  try {
+    const data = await apiFetch(`/admin/reports/${encodeURIComponent(reportId)}/artifact`);
+    panel.innerHTML = data.artifact
+      ? renderReportArtifact(data.reportType, data.artifact)
+      : renderReportDownload(data.reportType, data.contentType, data.url);
+  } catch (err) {
+    // A Report that is queued, errored, or whose object has gone says which —
+    // an empty panel is the thing this replaced.
+    panel.textContent = err.message || 'This report could not be loaded.';
+  }
 }
 
 // ── Boot ───────────────────────────────────────────────────────
