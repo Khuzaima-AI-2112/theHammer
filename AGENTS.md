@@ -79,7 +79,7 @@ screenshot.
 ## 5. Git Is the Only Path to Production
 
 A commit is what deploys. Deployment runs through **Cloud Build**, defined in
-`cloudbuild.yaml` (9 steps: test → build → push → smoke-test → deploy →
+`cloudbuild.yaml` (11 steps: test → build → push → smoke-test → deploy →
 smoke-test), gated behind the project owner's manual approval (ADR-0005).
 
 * **Rule:** Never hand-write or execute ad-hoc `gcloud run deploy` commands

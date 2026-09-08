@@ -509,6 +509,69 @@ which creates their `users` record with the role the invitation named.
 
 ---
 
+## Phase 9 — After the first deploy
+
+Two settings that exist in no script and in no other document, both found the
+hard way on 2026-08-26 while chasing why extension sign-in was impossible (#9).
+Neither is discoverable from the code, and both present as something entirely
+unrelated: a sign-in page that will not load.
+
+### 9.1 Add the portal's hostname to Firebase authorized domains
+
+Firebase Authentication → Settings → **Authorized domains** ships with three
+entries — `localhost`, `thehammer.firebaseapp.com`, `thehammer.web.app`. The
+portal is served from Cloud Run, on a hostname that is in none of them, so every
+Google sign-in from it fails with `auth/unauthorized-domain`.
+
+Add the portal's hostname:
+
+```bash
+# The value to add — the host only, no scheme and no path.
+gcloud run services describe thehammer-portal \
+  --project thehammer --region northamerica-northeast1 \
+  --format='value(status.url)'
+```
+
+Then paste the host into Firebase console → Authentication → Settings →
+Authorized domains → **Add domain**. There is no gcloud equivalent; it is a
+console-only setting.
+
+**This bites again on any redeploy that changes the portal's hostname.** A
+Cloud Run URL is stable for the life of a service, so in practice that means
+deleting and recreating the service, or deploying it under a new name.
+
+### 9.2 Cloud Run defaults to Require authentication
+
+A new Cloud Run service rejects anonymous requests at Google's frontend, before
+the application runs — so the portal answers `403` and nothing in the container
+logs shows a request at all.
+
+`cloudbuild.yaml` asks for `--allow-unauthenticated`, but applying it needs
+`run.services.setIamPolicy`, which the CI service account does not hold (#25,
+#31). So the pipeline cannot always fix this for you, and a build can succeed
+while the service stays unreachable.
+
+Check and fix:
+
+```bash
+# Does anyone unauthenticated have run.invoker?
+gcloud run services get-iam-policy thehammer-portal \
+  --project thehammer --region northamerica-northeast1
+
+# Grant it, as a human with setIamPolicy rather than from CI
+gcloud run services add-iam-policy-binding thehammer-portal \
+  --project thehammer --region northamerica-northeast1 \
+  --member=allUsers --role=roles/run.invoker
+```
+
+`allUsers` is correct here: the portal is a public web page whose own
+Firebase sign-in decides who may do anything. It is **not** correct for
+`thehammer-backend`, which authenticates every route itself and should not be
+given a second, weaker door.
+
+
+---
+
 ## What's Next — Sprint 1
 
 Once `verify.ps1` reports `11 passed, 0 failed`, the infrastructure is complete.

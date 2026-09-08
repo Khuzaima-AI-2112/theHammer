@@ -25,7 +25,7 @@ fi
 # 2. Run local backend emulator tests
 echo "Running backend unit and integration tests..."
 cd backend
-npx -y firebase-tools emulators:exec --only firestore --project demo-hammer "npm test"
+npm run test:emulator
 if [ `$? -ne 0 ]; then
   echo "FAIL: Backend tests failed."
   exit 1

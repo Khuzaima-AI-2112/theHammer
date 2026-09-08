@@ -11,7 +11,22 @@ Welcome to `theHammer` repository! This guide provides step-by-step instructions
 - **npm**: v10+
 - **Git**: Latest version
 - **Google Cloud SDK (`gcloud` CLI)**: [Install gcloud CLI](https://cloud.google.com/sdk/docs/install)
-- **Firebase CLI**: Install globally via `npm install -g firebase-tools`
+- **JDK 21** — required, and specifically 21. The Firestore emulator is a Java
+  program, and `firebase-tools` refuses to start it on anything older:
+  `MIN_SUPPORTED_JAVA_MAJOR_VERSION = 21` in
+  `lib/emulator/commandUtils.js`, with the message *"firebase-tools no longer
+  supports Java version before 21"*. **JDK 17 is not enough.** Check with
+  `java -version`; anything below 21, or no JDK at all, and most of the backend
+  suite fails with a connection-refused error that reads like a broken project
+  rather than a missing tool. [Temurin 21](https://adoptium.net/) is what this
+  project is developed against, and `cloudbuild.yaml` installs `openjdk21-jre`.
+- **Firebase CLI**: do **not** install it globally. It is pinned in
+  `backend/package.json` (`firebase-tools`, exact version) and `npm install`
+  in `backend/` puts it on the path for the scripts below. A global or `npx`
+  copy installed elsewhere resolves whatever is newest that day, which is how
+  local testing breaks with nobody having touched the repository. Inside
+  `backend/`, `npx firebase` finds the pinned copy and is fine; anywhere else
+  it does not.
 
 ### Clone the Repository
 ```bash
@@ -50,7 +65,7 @@ Your Google account (`usmanali07137@gmail.com`) has been granted **Editor** perm
 
 3. **Authenticate Firebase CLI**:
    ```bash
-   firebase login
+   cd backend && npx firebase login    # the pinned CLI; see §1
    ```
 
 ---
@@ -62,8 +77,21 @@ All backend tests execute against an offline local Firestore Emulator (no live c
 
 ```bash
 cd backend
-npx firebase emulators:exec --only firestore --project demo-hammer "npm test"
+npm install        # first time, or after pulling: brings in the pinned CLI
+npm run test:emulator
 ```
+
+That script is the one `cloudbuild.yaml` runs, so a green run here is the same
+run the pipeline makes. It needs port **8085** free — that is where
+`firebase.json` puts the emulator, and the only place it is *authoritatively*
+declared (#57). The test setup carries a matching fallback, which
+`infra/tests/emulator-port-single-source.test.js` asserts agrees with it. An emulator already running on 8085 fails the command with
+*"Could not start Firestore Emulator, port taken"*; stop it, or point the
+command at another port with `--config`.
+
+*Corrected 2026-09-08 (#9): this used to read `npx firebase emulators:exec …`.
+`npx firebase` resolves the `firebase` package — the client SDK — which ships
+no such command; the CLI is `firebase-tools`.*
 
 ### Running Backend Server Locally
 ```bash
@@ -87,7 +115,15 @@ and wired up in `cloudbuild.yaml`.
 3. Click **Load unpacked** and select the `./extension` directory from this repository.
 4. Click **The Hammer** extension icon in Chrome:
    - Go to Options / Settings in the popup.
-   - Set **API Base URL** to `http://localhost:8080/api` for local testing or `https://thehammer-backend-282689937365.northamerica-northeast1.run.app/api` for live cloud testing.
+   - Set **API Base URL** to `http://localhost:8080` for local testing, or
+     `https://thehammer-backend-282689937365.northamerica-northeast1.run.app`
+     for live cloud testing.
+
+     *Corrected 2026-09-08 (#9): both used to carry an `/api` suffix. No route
+     answers that prefix — every call 404'd on a fresh install, which is what
+     #26 was about. `normaliseApiBase()` in `extension/service-worker.js` now
+     strips a trailing `/api`, so a profile that cached the old value still
+     works; the instruction was still teaching people to type it.*
 
 ### The extension ID is fixed, and why that matters
 
@@ -194,16 +230,36 @@ put *that* in `manifest.json`, and redo steps 2–4 with the new ID.
   ```
 
 ### Deploying Revisions to Live Cloud Run
-When your updates are tested locally and ready for production deployment:
 
-```powershell
-# Deploy backend container to Cloud Run (Windows PowerShell)
-powershell -ExecutionPolicy Bypass -File ./infra/deploy.ps1
-```
-Or trigger full Google Cloud Build execution (builds backend + portal and runs smoke tests):
+**You do not deploy. A push does.** Pushing to `main` of the client remote
+fires the `buildme` Cloud Build trigger, which runs the suite, builds both
+images, deploys them and smoke-tests — after the project owner approves it
+(ADR-0005). AGENTS.md rule 5 is the binding statement: *"Never hand-write or
+execute ad-hoc `gcloud run deploy` commands against production, and never
+deploy from a developer machine."*
+
 ```bash
-gcloud builds submit --config=cloudbuild.yaml .
+git push client main     # then approve the build in the Cloud Build console
 ```
+
+To roll back, roll back — do not deploy. `docs/runbook.md` §1 covers Cloud Run
+revision rollback, which needs no build at all.
+
+> *Corrected 2026-09-08 (#9). This section used to offer two ways to deploy by
+> hand, and both were wrong:*
+> 
+> - `infra/deploy.ps1` is retired for production. Its settings have drifted
+>   from the pipeline (`--min-instances 0`, `--memory 256Mi`, `API_KEY` via
+>   `--set-secrets`), so running it would have quietly changed the service's
+>   configuration as well as its image.
+> - `gcloud builds submit` bypasses the trigger, and with it the approval gate
+>   and the record of which commit was deployed. It also stages a copy of the
+>   repository into the project's default bucket — which is how five source
+>   archives from June ended up sitting in the **Captures** bucket, still open
+>   as #110.
+
+So a deploy that git cannot account for is not merely untidy: this document
+was the instruction that produced one.
 
 ---
 
@@ -216,7 +272,7 @@ gcloud builds submit --config=cloudbuild.yaml .
 | `backend/tests/` | Jest integration and unit test suite |
 | `extension/` | Chrome MV3 Extension (Service worker, popup UI, content script) |
 | `portal/` | Admin Web Portal static UI (Nginx container) |
-| `infra/deploy.ps1` | Automated Cloud Run deployment script |
+| `infra/deploy.ps1` | **Retired for production** — present, but its settings have drifted from the pipeline. Do not run it against `thehammer` (AGENTS.md rule 5). |
 | `cloudbuild.yaml` | Multi-service Cloud Build CI/CD pipeline |
 | `docs/megamind.md` | Single-entry OSOT module index |
 | `docs/loop_engineering.md` | Architectural inner/outer feedback loop reference |

@@ -118,7 +118,7 @@ Store `EXTENSION_ID` in Secret Manager. Lock via CRX key — generate once with 
 | `hammer-portal-sa` | `hammer-portal` | `roles/storage.objectViewer` (portal assets bucket only) |
 | `hammer-export-trigger-sa` | `hammer-export-trigger` | `roles/datastore.user`, `roles/run.developer` (to enqueue Jobs), `roles/secretmanager.secretAccessor` |
 | `hammer-export-worker-sa` | `hammer-export-worker` Job | `roles/datastore.user`, `roles/storage.objectAdmin` (exports bucket only) |
-| `hammer-cicd-sa` | GitHub Actions | `roles/run.developer`, `roles/artifactregistry.writer`, `roles/iam.serviceAccountUser` |
+| `hammer-cicd-sa` | Cloud Build (`cloudbuild.yaml`) | `roles/run.developer`, `roles/artifactregistry.writer`, `roles/iam.serviceAccountUser` |
 
 **Q: Workload Identity Federation for CI/CD?**
 **A: Yes — mandatory.** One-time 20-minute setup. No JSON key files.
@@ -312,15 +312,33 @@ Propagate `X-Cloud-Trace-Context` and `traceparent` across all four services.
 
 ## 7. CI/CD & Infrastructure as Code
 
-### 7.1 GitHub Actions Pipeline
+### 7.1 Cloud Build Pipeline
 
-Two workflows replace `deploy.ps1`:
-- `ci.yml` — on PR: lint, unit tests, integration tests against Firestore emulator
-- `deploy.yml` — on merge to `main`: build → push to Artifact Registry → 10% canary → 15 min gate → 100% promote
+*Corrected 2026-09-08 (#9): this section described two GitHub Actions workflows,
+`ci.yml` and `deploy.yml`, and a canary promotion. There is no `.github/`
+directory in this repository and none of that exists. What follows is the
+pipeline that actually runs — AGENTS.md rule 5 is the binding statement of it.*
 
-All four services deployed independently. Tag images with Git SHA. Never `latest` in production.
+`cloudbuild.yaml`, on the `buildme` trigger: push to `main` of
+`cfroszte/thehammer`. Eleven steps — test → build backend → push → local smoke
+test → deploy backend → inject backend URL → inject extension ids → build
+portal → push → deploy portal → smoke test — behind the project owner's manual
+approval (ADR-0005).
 
-### 7.2 Terraform IaC
+Images are tagged with `$COMMIT_SHA`, never `latest`. The test step runs the
+backend suite against the Firestore emulator using the `firebase-tools` pinned
+in `backend/package.json`; the extension and portal suites are local-only and
+the pipeline does not run them.
+
+### 7.2 Terraform IaC — not built, and not the current plan
+
+*Flagged 2026-09-08 (#9). No Terraform exists in this repository: there are no
+`.tf` files, the two projects named below are not the two in use (`thehammer`
+and `hammer-dev`, ADR-0006), and infrastructure is provisioned by the scripts
+in `infra/` — `setup.ps1`/`setup.sh`, verified by `verify.ps1`/`verify.sh`, see
+`docs/gcp-setup.md`. AGENTS.md rule 7 is the binding version. Kept as a sketch
+of what an IaC migration would have to cover, not as a description of anything
+that is there.*
 
 Minimum coverage:
 ```
@@ -380,7 +398,14 @@ AI costs (`gemini-1.5-flash`) are negligible compared to traditional Vision APIs
 
 ## `firestore.indexes.json` location
 
-`infra/firestore.indexes.json` — deployed via `firebase deploy --only firestore:indexes` in GitHub Actions.
+`firestore.indexes.json`, at the repository root — the path
+`infra/tests/firestore-indexes.test.js` audits. *Corrected (#9): this said
+`infra/firestore.indexes.json`, which does not exist.*
+
+Nothing deploys it. `cloudbuild.yaml` has no index step, so an index ships only
+when somebody runs `firebase deploy --only firestore:indexes` against the live
+project by hand, and a deployed index is not a working one until it has finished
+building (lessons_learned.md 68).
 
 ---
 

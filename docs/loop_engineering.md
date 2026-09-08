@@ -11,10 +11,10 @@ AI agents require high-speed, high-fidelity feedback to parse, edit, and verify 
 ### A. Fast Emulator Test Loop (Verification)
 *   **Status:** **Active** (Fully operational)
 *   **The Loop:** Code Modification $\rightarrow$ Run Emulator Suite $\rightarrow$ Observe Failures $\rightarrow$ Adjust Code.
-*   **Benefit:** Rather than deploying to Cloud Build to verify integration success (which takes minutes), agents execute test suites against the local Firestore Emulator in under 11 seconds.
+*   **Benefit:** Rather than deploying to Cloud Build to verify integration success (which takes minutes, plus a manual approval), agents execute the suite against the local Firestore Emulator. It is around two minutes for all 405 backend tests as of 2026-09-08 — this line used to claim "under 11 seconds", which was true of a suite a quarter the size.
 *   **Implementation:** The standard test run command:
     ```bash
-    npx -y firebase-tools emulators:exec --only firestore --project demo-hammer "npm test"
+    cd backend && npm run test:emulator
     ```
 
 ### B. Anchored Knowledge Loop (Reasoning)
