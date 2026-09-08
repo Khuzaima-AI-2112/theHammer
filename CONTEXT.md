@@ -101,6 +101,16 @@ labels work and controls nothing — unlike the portal’s Role, which controls
 what a person may do and labels nothing.
 _Avoid_: role, user type, actor, character, profile
 
+**Tool**:
+The product a Capture is *of* — the software whose screens the Monitored User
+is working in, such as Softomedia or theHammer's own portal. It names what is
+on the screen, not what the Monitored User is doing there or which run of work
+this is. Production rows carry workflow-shaped values
+(`04-Retailer_workflow_captures`, `TEST-verify-1`); that is drift, and a
+workflow is a Storyboard. Nothing may group Captures by Tool as though it
+named a run of work.
+_Avoid_: app, target, workflow, run, batch, stage
+
 **Storyboard**:
 An ordered set of Captures, with a note against each one, that demonstrates
 a single workflow. A Session measures time; a Storyboard tells a story. The
