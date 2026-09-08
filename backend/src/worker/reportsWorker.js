@@ -10,6 +10,7 @@ const { getAIClient } = require('../lib/vertex');
 const collections = require('../lib/collections');
 const { computeReportMetrics } = require('../lib/reportMetrics');
 const { CONFIG_DEFAULTS } = require('../lib/defaults');
+const { DEFAULT_LLM_MODEL, REPORT_MAX_OUTPUT_TOKENS } = require('../lib/models');
 const gcs = new Storage();
 
 // This is a simplified MVP worker logic for generating standard reports
@@ -21,7 +22,7 @@ async function generateStandardReport(reportId, projectId, reportType, dateRange
     // Fetch the project configuration to get the llmModel
     const projectSnap = await db.collection(collections.PROJECTS).doc(projectId).get();
     const projectData = projectSnap.data() || {};
-    const modelId = projectData.llmModel || 'gemini-1.5-flash';
+    const modelId = projectData.llmModel || DEFAULT_LLM_MODEL;
 
     // #8: every figure below is queried from this Project's own Captures and
     // Sessions. It used to be four hardcoded numbers with a narrative written
@@ -57,7 +58,9 @@ async function generateStandardReport(reportId, projectId, reportType, dateRange
           model: modelId,
           contents: prompt,
           config: {
-            maxOutputTokens: 2048,
+            // Shared with the model's own reasoning tokens — see
+            // REPORT_MAX_OUTPUT_TOKENS in lib/models.js for why it is not smaller.
+            maxOutputTokens: REPORT_MAX_OUTPUT_TOKENS,
             temperature: 0.2,
             topP: 0.8,
           },

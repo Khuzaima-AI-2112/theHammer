@@ -61,7 +61,7 @@ test('every other field survives the normalisation', () => {
     adminId: 'u1',
     memberCount: 3,
     webhookUrl: 'https://example.test/hook',
-    llmModel: 'gemini-1.5-flash',
+    llmModel: 'gemini-3.5-flash',
     createdAt: '2026-08-28T07:34:00.000Z',
     schemaVersion: 1,
   });
@@ -70,7 +70,7 @@ test('every other field survives the normalisation', () => {
   assert.strictEqual(decoded.adminId, 'u1');
   assert.strictEqual(decoded.memberCount, 3);
   assert.strictEqual(decoded.webhookUrl, 'https://example.test/hook');
-  assert.strictEqual(decoded.llmModel, 'gemini-1.5-flash');
+  assert.strictEqual(decoded.llmModel, 'gemini-3.5-flash');
   assert.strictEqual(decoded.createdAt, '2026-08-28T07:34:00.000Z');
   assert.strictEqual(decoded.schemaVersion, 1);
 });

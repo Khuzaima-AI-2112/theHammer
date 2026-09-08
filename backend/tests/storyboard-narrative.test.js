@@ -73,7 +73,7 @@ beforeAll(async () => {
   await seedUser('admin-fixture-id', { email: 'admin-fixture@test.com', role: 'admin' });
   await seedUser('analyst-fixture-id', { email: 'analyst-fixture@test.com', role: 'analyst' });
   await seedUser('user-fixture-id', { email: 'user-fixture@test.com', role: 'user' });
-  await seedProject('narrative-proj', { name: 'Narrative Project', llmModel: 'gemini-1.5-flash' });
+  await seedProject('narrative-proj', { name: 'Narrative Project', llmModel: 'gemini-3.5-flash' });
   await seedProject('narrative-proj-foreign', { name: 'Other tenant', workspaceId: 'other-workspace' });
 });
 

@@ -103,8 +103,8 @@ beforeAll(async () => {
   await seedUser('admin-fixture-id', { email: 'admin-fixture@test.com', role: 'admin' });
   await seedUser('analyst-fixture-id', { email: 'analyst-fixture@test.com', role: 'analyst' });
   await seedUser('user-fixture-id', { email: 'user-fixture@test.com', role: 'user' });
-  await seedProject('video-proj', { name: 'Video Project', llmModel: 'gemini-1.5-flash' });
-  await seedProject('video-order-proj', { name: 'Video Order Project', llmModel: 'gemini-1.5-flash' });
+  await seedProject('video-proj', { name: 'Video Project', llmModel: 'gemini-3.5-flash' });
+  await seedProject('video-order-proj', { name: 'Video Order Project', llmModel: 'gemini-3.5-flash' });
 });
 
 afterAll(async () => {

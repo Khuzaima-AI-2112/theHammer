@@ -6,7 +6,7 @@
  * hardcoded findings — "Accept Terms and Conditions" unchecked→checked and
  * "Email Address" →user@example.com — for every report, every Project, every
  * time. It then writes them to GCS in an artifact stamped
- * `vertexAiModel: 'gemini-1.5-flash'`, and sets the report to `done`.
+ * a `vertexAiModel` stamp, and sets the report to `done`.
  *
  * That is worse than the narrative failure in #107, which at least said
  * "LLM generation failed" in the artifact. These findings name specific UI

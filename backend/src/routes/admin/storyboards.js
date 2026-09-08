@@ -103,6 +103,7 @@ const logger = require('../../lib/logger');
 const { db } = require('../../lib/firestore');
 const { requireAnalyst } = require('../../middleware/requireAuth');
 const { getAIClient } = require('../../lib/vertex');
+const { DEFAULT_LLM_MODEL, TTS_MODEL, TTS_VOICE } = require('../../lib/models');
 const { submitRender } = require('../../lib/shotstack');
 const collections = require('../../lib/collections');
 const { loadOwnedProject, belongsToCaller } = require('../../lib/ownership');
@@ -215,12 +216,12 @@ const SIGNED_URL_TTL_MS = 15 * 60 * 1000;
 // thumbnail TTL above, which is sized for a person looking at a screen.
 const VIDEO_ASSET_SIGNED_URL_TTL_MS = 60 * 60 * 1000;
 
-// gemini-2.5-flash-preview-tts is Vertex AI's text-to-speech model — chosen
-// so speech synthesis stays on the same getAIClient() (lib/vertex.js) every
-// other AI call in this file already uses, rather than introducing a
-// dedicated TTS vendor. The AC leaves the provider unspecified.
-const TTS_MODEL = 'gemini-2.5-flash-preview-tts';
-const TTS_VOICE = 'Kore';
+// Speech synthesis runs on Vertex's own text-to-speech model, so it stays on
+// the same getAIClient() (lib/vertex.js) every other AI call in this file
+// already uses, rather than introducing a dedicated TTS vendor. The AC leaves
+// the provider unspecified. TTS_MODEL and TTS_VOICE are owned by
+// lib/models.js — the previous id here was a Gemini API one that 404s on
+// Vertex, so this path had never once succeeded (#108).
 
 // One slide holds the screen this many seconds before the next transition —
 // long enough to read a note aloud without the video dragging.
@@ -481,7 +482,7 @@ async function buildNarrativeRequest(draft, prompt) {
  * audio transcription — both are Gemini calls against the same Project. */
 async function getProjectModelId(projectId) {
   const projSnap = await db.collection(collections.PROJECTS).doc(projectId).get();
-  return projSnap.data()?.llmModel || 'gemini-1.5-flash';
+  return projSnap.data()?.llmModel || DEFAULT_LLM_MODEL;
 }
 
 /**

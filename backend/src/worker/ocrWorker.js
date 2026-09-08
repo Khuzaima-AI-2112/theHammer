@@ -8,6 +8,7 @@ const { GoogleGenAI } = require('@google/genai');
 const { db } = require('../lib/firestore');
 const { getAIClient } = require('../lib/vertex');
 const collections = require('../lib/collections');
+const { DEFAULT_LLM_MODEL } = require('../lib/models');
 const gcs = new Storage();
 
 async function generateOcrReport(reportId, projectId, reportType, dateRange) {
@@ -30,7 +31,11 @@ async function generateOcrReport(reportId, projectId, reportType, dateRange) {
     // eslint-disable-next-line no-unreachable
     const client = getAIClient();
     
-    // We use gemini-1.5-flash for the best balance of speed, cost, and multimodal capability
+    // DEFAULT_LLM_MODEL (lib/models.js), not the Project's own llmModel — this
+    // path has never read one. Flash is the balance of speed, cost and
+    // multimodal capability the diffing this worker will do needs. If #96 ever
+    // implements it for real, take the model from the Project like the Reports
+    // worker does.
     // (Actual call will use client.models.generateContent)
     const responseSchema = {
       type: 'ARRAY',
@@ -105,7 +110,7 @@ async function generateOcrReport(reportId, projectId, reportType, dateRange) {
       projectId,
       reportType,
       generatedAt: new Date().toISOString(),
-      vertexAiModel: 'gemini-1.5-flash',
+      vertexAiModel: DEFAULT_LLM_MODEL,
       changes: resultJson
     };
 

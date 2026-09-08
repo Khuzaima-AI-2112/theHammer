@@ -391,7 +391,7 @@ Two GCP projects: `hammer-dev` and `hammer-prod`. Terraform workspaces per envir
 | Cloud Logging (< 50 GB free) | $0 |
 | **Total** | **~$8–24/month** |
 
-AI costs (`gemini-1.5-flash`) are negligible compared to traditional Vision APIs (fractions of a cent per report). Set a GCP Billing budget alert at 3× the monthly estimate with auto-notify at 80% and 100%.
+AI costs (`gemini-3.5-flash`, non-global rate in `northamerica-northeast1`: USD 1.65 per 1M input tokens, USD 9.90 per 1M output) work out to roughly a cent per report — still small against traditional Vision APIs, but ~20x the retired `gemini-1.5-flash` this replaced (#108). Set a GCP Billing budget alert at 3× the monthly estimate with auto-notify at 80% and 100%.
 
 
 ---
@@ -420,7 +420,8 @@ All AI analysis (executive report generation, OCR UI diffing) is performed secur
 - **Lazy Initialization**: GenAI clients are never instantiated globally. They are wrapped in a singleton getter function (`getAIClient()`) that is only invoked when a background job executes. This prevents missing environment variables from crashing the server on boot (e.g., during CI/CD smoke tests).
 
 ### 11.2 Model Selection
-- **gemini-1.5-flash**: Used for both narrative report generation (`reportsWorker.js`) and screenshot diffing (`ocrWorker.js`). Flash offers the best balance of multimodal processing speed and cost efficiency for non-reasoning tasks.
+- **gemini-3.5-flash**: Used for both narrative report generation (`reportsWorker.js`) and screenshot diffing (`ocrWorker.js`). Flash offers the best balance of multimodal processing speed and cost efficiency. It is a *thinking* model — reasoning tokens are billed at the output rate and count against `maxOutputTokens`. Model ids are owned by `backend/src/lib/models.js`, never written inline (#108).
+- **gemini-2.5-flash-tts**: Storyboard narration audio (`routes/admin/storyboards.js`). The GA Vertex TTS model; the previous `gemini-2.5-flash-preview-tts` was a Gemini API id that never existed on Vertex.
 
 ### 11.3 Security & PII
 - No data leaves the Google Cloud perimeter.

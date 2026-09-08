@@ -28,6 +28,7 @@ const { Storage } = require('@google-cloud/storage');
 const { db }   = require('../../lib/firestore');
 const { requireAdmin } = require('../../middleware/requireAuth');
 const collections = require('../../lib/collections');
+const { DEFAULT_LLM_MODEL, SUPPORTED_LLM_MODELS, isSupportedLlmModel } = require('../../lib/models');
 const { loadOwnedProject, callerWorkspace } = require('../../lib/ownership');
 const { purgeProjectContents, recordPurge } = require('../../lib/purge');
 
@@ -52,7 +53,7 @@ function serializeDoc(snap) {
     adminId:     d.adminId,
     memberCount: d.memberCount ?? 0,
     webhookUrl:  d.webhookUrl ?? '',
-    llmModel:    d.llmModel ?? 'gemini-1.5-flash',
+    llmModel:    d.llmModel ?? DEFAULT_LLM_MODEL,
     // #62. Always an ISO string or null, never absent. The portal reads an
     // absent field and a null one the same way, but a field that is sometimes
     // missing is how this went unnoticed for months — nothing distinguished
@@ -69,15 +70,33 @@ function serializeDoc(snap) {
   };
 }
 
+/**
+ * #108: any string used to be accepted as a model id, and an unsupported one
+ * does not fail — it 404s inside the worker, where #8's graceful degradation
+ * turns it into a finished Report with no narrative. Refuse it at the edge,
+ * loudly, instead.
+ *
+ * Answers the request itself and returns true when it has, the same shape
+ * loadOwnedProject() uses, so a caller reads `if (...) return;`.
+ */
+function refusedUnsupportedModel(res, llmModel) {
+  if (isSupportedLlmModel(llmModel)) return false;
+  res.status(400).json({
+    error: `llmModel must be one of: ${SUPPORTED_LLM_MODELS.join(', ')}`
+  });
+  return true;
+}
+
 // 5.2  POST /admin/projects
 router.post('/projects', requireAdmin, async (req, res, next) => {
   try {
     const name = (req.body?.name ?? '').trim();
     const webhookUrl = (req.body?.webhookUrl ?? '').trim();
-    const llmModel = (req.body?.llmModel ?? 'gemini-1.5-flash').trim();
+    const llmModel = (req.body?.llmModel ?? DEFAULT_LLM_MODEL).trim();
     if (!name || name.length > 128) {
       return res.status(400).json({ error: 'name must be 1–128 characters' });
     }
+    if (refusedUnsupportedModel(res, llmModel)) return;
     const now = nowISO();
 
     // #47: the creator must be a member, not merely the adminId. Every read
@@ -173,10 +192,11 @@ router.patch('/projects/:id', requireAdmin, async (req, res, next) => {
   try {
     const name = (req.body?.name ?? '').trim();
     const webhookUrl = (req.body?.webhookUrl ?? '').trim();
-    const llmModel = (req.body?.llmModel ?? 'gemini-1.5-flash').trim();
+    const llmModel = (req.body?.llmModel ?? DEFAULT_LLM_MODEL).trim();
     if (!name || name.length > 128) {
       return res.status(400).json({ error: 'name must be 1–128 characters' });
     }
+    if (refusedUnsupportedModel(res, llmModel)) return;
     const snap = await loadOwnedProject(req, res, req.params.id);
     if (!snap) return;
     const ref = snap.ref;

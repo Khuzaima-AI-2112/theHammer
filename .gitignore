@@ -5,6 +5,7 @@ backend/firestore-debug.log
 backend/scripts/workspace-stamp-backfill.json
 backend/scripts/workspace-id-audit.json
 backend/scripts/last-capture-backfill.json
+backend/scripts/llm-model-backfill.json
 
 # The extension signing key (#36). manifest.json carries the *public* half and
 # is committed; the private .pem must never be. It lives at

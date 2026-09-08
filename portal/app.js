@@ -3,6 +3,10 @@
 // ── Config ─────────────────────────────────────────────────────
 // HAMMER_API_BASE: set by Cloud Run env injection or leave '' for same-origin.
 // Dev: window.HAMMER_API_BASE = 'https://hammer-api-xxxx-uc.a.run.app'
+// #108: kept in step with backend/src/lib/models.js, which is the allowlist the
+// API enforces — a value not on it is now refused by POST/PATCH /admin/projects.
+const DEFAULT_LLM_MODEL = 'gemini-3.5-flash';
+
 const API_BASE = window.HAMMER_API_BASE
   || '__BACKEND_API_URL__';
 
@@ -515,7 +519,7 @@ function openCreateModal() {
   document.getElementById('createModalTitle').textContent = 'New Project';
   document.getElementById('projectNameInput').value = '';
   document.getElementById('projectWebhookInput').value = '';
-  document.getElementById('projectLlmModelSelect').value = 'gemini-1.5-flash';
+  document.getElementById('projectLlmModelSelect').value = DEFAULT_LLM_MODEL;
   document.getElementById('createError').textContent = '';
   document.getElementById('createSubmitBtn').disabled = false;
   openModal('createModal');
@@ -529,7 +533,7 @@ function openEditProjectModal(id) {
   document.getElementById('createModalTitle').textContent = 'Edit Project';
   document.getElementById('projectNameInput').value = p.name || '';
   document.getElementById('projectWebhookInput').value = p.webhookUrl || '';
-  document.getElementById('projectLlmModelSelect').value = p.llmModel || 'gemini-1.5-flash';
+  document.getElementById('projectLlmModelSelect').value = p.llmModel || DEFAULT_LLM_MODEL;
   document.getElementById('createError').textContent = '';
   document.getElementById('createSubmitBtn').disabled = false;
   openModal('createModal');
