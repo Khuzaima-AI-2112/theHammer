@@ -288,6 +288,7 @@ function rejectOversizedUpload(req, res, next) {
 // ─────────────────────────────────────────────────────────────────
 
 const { db } = require('./lib/firestore');
+const { track: trackPendingWrite } = require('./lib/pendingWrites');
 
 /**
  * Records on the Project when its most recent Capture arrived (#62).
@@ -334,13 +335,16 @@ const { db } = require('./lib/firestore');
  */
 function stampLastCapture(projectId, uploadedAt) {
   if (!db || !projectId || !uploadedAt) return Promise.resolve();
-  return db.collection(collections.PROJECTS).doc(projectId)
+  // Registered as in-flight so the test harness can wait for it. Nothing in
+  // production reads that register; see src/lib/pendingWrites.js for why an
+  // un-awaited write needs one at all.
+  return trackPendingWrite(db.collection(collections.PROJECTS).doc(projectId)
     .update({ lastCaptureAt: uploadedAt })
     .catch((err) => {
       logger.error('[hammer-api] lastCaptureAt stamp failed:', {
         projectId, error: err.message,
       });
-    });
+    }));
 }
 
 // Returns null on success, error message string on failure

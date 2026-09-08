@@ -10,5 +10,10 @@
  */
 module.exports = {
   testTimeout: 30000,
-  setupFiles: ['<rootDir>/tests/setup/env.js']
+  setupFiles: ['<rootDir>/tests/setup/env.js'],
+  // Drains fire-and-forget writes before each suite's environment is
+  // destroyed. setupFilesAfterEnv rather than setupFiles because it registers
+  // an afterAll, which needs the test framework to exist. See
+  // src/lib/pendingWrites.js.
+  setupFilesAfterEnv: ['<rootDir>/tests/setup/drain-pending-writes.js']
 };

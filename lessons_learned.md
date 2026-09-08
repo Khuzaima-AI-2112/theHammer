@@ -962,3 +962,31 @@ There is no such OAuth client. The extension calls `chrome.identity.launchWebAut
 - **On Windows, override `USERPROFILE`, not `HOME`** — or better, give the script an explicit output path argument and pass a temp directory. Do not trust an env var to sandbox a filesystem write.
 - **A command that writes a key must refuse to overwrite one.** Check for the file and stop; make replacing it a deliberate flag. `DEVELOPER_GUIDE.md` carries the warning, which is the weaker half of the fix.
 - **Verifying a documented command is a write, not a read.** Run it somewhere disposable, and work out what it touches before running it rather than after.
+
+### 80. A fire-and-forget write outlives the test that started it, and fails the next one
+
+**What happened:** #62 added `stampLastCapture`, deliberately never awaited — AGENTS.md rule 4 says nothing may block the capture loop, and the Capture is already recorded by the time it runs. The full suite was green locally, twice, including a run through `firebase emulators:exec` against a cold emulator, which is exactly what Cloud Build does. It was pushed and the build failed:
+
+```
+FAIL tests/capture-visible-loop.test.js
+  ● Test suite failed to run
+    Cannot read properties of undefined (reading 'options')
+```
+
+with, further up the log and against a *different* file:
+
+```
+ReferenceError: You are trying to `require` a file after the Jest environment
+has been torn down. From tests/signed-url.test.js.
+    at new GoogleErrorDecoder (google-gax/src/googleError.ts:169:28)
+```
+
+Every one of the 397 tests passed. One suite failed to *run*. The un-awaited Firestore write from `signed-url.test.js` was still waiting on gRPC when Jest destroyed that file's environment; the response arrived afterwards, google-gax tried to load a module to decode it, and the wreckage was reported against `capture-visible-loop.test.js` — the suite that happened to run next and had done nothing wrong. A retry failed identically, because retrying re-runs the same code.
+
+**Root cause:** two things that only bite together. Jest gives each test file its own module registry and tears it down the instant the last test resolves, so anything still in flight is running against a dead environment; and a fire-and-forget write is by definition something nothing waits for. The suite that *leaks* is not the suite that *fails*, so the stack trace names an innocent file, and the timing depends on how quickly the emulator answers — which is why a slower CI container failed where a developer machine did not. The local run had no diagnostic power against this defect at all, and looked like it did.
+
+**Rule going forward:**
+- **An un-awaited write needs somewhere to be waited for.** `src/lib/pendingWrites.js` registers each one and `tests/setup/drain-pending-writes.js` drains them in a global `afterAll`, wired through `setupFilesAfterEnv` so every suite gets it — including suites written later by someone who has never heard of this. A per-suite hook is one somebody forgets, and the failure lands on a file they were not editing.
+- **Read the whole log, not the failing suite.** The named suite was innocent. The evidence was forty lines earlier, attributed to a different file, and the fix belonged to neither — it belonged to the code both of them call.
+- **A green local run is not evidence about teardown races.** Reproducing the container is not enough when the variable is timing. This one survived `emulators:exec` against a cold emulator locally and still failed in Cloud Build.
+- **Retrying a build tests nothing.** Same commit, same code, same result — a retry is only ever informative about genuine flakes, and treating it as a fix costs an approval and a deploy slot.
