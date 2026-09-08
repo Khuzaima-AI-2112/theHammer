@@ -53,6 +53,16 @@ function serializeDoc(snap) {
     memberCount: d.memberCount ?? 0,
     webhookUrl:  d.webhookUrl ?? '',
     llmModel:    d.llmModel ?? 'gemini-1.5-flash',
+    // #62. Always an ISO string or null, never absent. The portal reads an
+    // absent field and a null one the same way, but a field that is sometimes
+    // missing is how this went unnoticed for months — nothing distinguished
+    // "not sent" from "none yet".
+    //
+    // No Timestamp branch, unlike createdAt above: stampLastCapture writes the
+    // Capture's own `uploadedAt`, which both upload paths produce with
+    // toISOString(). Accepting a shape nothing writes would only make a future
+    // writer that gets it wrong look correct here.
+    lastCaptureAt: d.lastCaptureAt ?? null,
     createdAt:   d.createdAt instanceof Timestamp ? d.createdAt.toDate().toISOString() : d.createdAt,
     updatedAt:   d.updatedAt instanceof Timestamp ? d.updatedAt.toDate().toISOString() : d.updatedAt,
     schemaVersion: d.schemaVersion,

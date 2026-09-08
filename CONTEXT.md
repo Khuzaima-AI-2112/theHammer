@@ -19,6 +19,17 @@ look at, export or report on. It is not a Capture and never becomes one, and
 removing one costs nothing.
 _Avoid_: failed capture, empty capture, partial upload, orphan
 
+**Last capture**:
+When a Project was last worked in — the time of the most recent row in
+`uploads` filed under it, denormalised onto the Project as `lastCaptureAt`
+(#62). It times the *record*, not the image: `/upload-url` writes the row
+before the bytes are PUT and nothing reports back when they land, so an
+Abandoned Upload dates a Project just as a Capture does. This is the same
+population `captureCount` reports (#116), and for the same reason — only the
+presence of the object in Cloud Storage tells the two apart, and neither the
+column nor the count pays a bucket read to find out.
+_Avoid_: last activity, last seen, last upload
+
 **Session**:
 One continuous period of work by one Monitored User against one Project.
 _Avoid_: shift, run, work block

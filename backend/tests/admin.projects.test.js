@@ -101,10 +101,12 @@ describe('GET /admin/projects', () => {
       name: 'GET Test Project',
       adminId: 'test-admin-id-projects'
     });
+    await seedProject('no-captures-project', { name: 'Never Captured' });
   });
 
   afterAll(async () => {
     await db.collection('projects').doc(pid).delete().catch(() => {});
+    await db.collection('projects').doc('no-captures-project').delete().catch(() => {});
   });
 
   test('200 — returns projects array', async () => {
@@ -112,6 +114,32 @@ describe('GET /admin/projects', () => {
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body.projects)).toBe(true);
     expect(res.body.total).toBeGreaterThanOrEqual(1);
+  });
+
+  // #62: the portal renders a "Last capture" column and a stat tile from
+  // `lastCaptureAt`, and read `—` for every Project always, because the
+  // serialiser never sent the field. `undefined` is falsy, so the column could
+  // not be wrong loudly — it just said "no Captures" about Projects that had
+  // them, which is the #45 family.
+  test('serialises lastCaptureAt, the column the portal reads', async () => {
+    const when = '2026-09-04T11:22:33.000Z';
+    await db.collection(collections.PROJECTS).doc(pid).update({ lastCaptureAt: when });
+
+    const res = await request(app).get('/admin/projects').set(H);
+    const row = res.body.projects.find((r) => r.id === pid);
+    expect(row).toBeDefined();
+    expect(row.lastCaptureAt).toBe(when);
+  });
+
+  // A Project that genuinely has no Captures must still serialise the field,
+  // as null rather than absent. The portal's `p.lastCaptureAt ? … : '—'` reads
+  // both the same way, but a field that is sometimes missing is how the
+  // original defect hid: nothing distinguishes "not sent" from "none yet".
+  test('serialises null for a Project with no Captures', async () => {
+    const res = await request(app).get('/admin/projects').set(H);
+    const row = res.body.projects.find((r) => r.id === 'no-captures-project');
+    expect(row).toBeDefined();
+    expect(row.lastCaptureAt).toBeNull();
   });
 });
 

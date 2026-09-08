@@ -289,6 +289,60 @@ function rejectOversizedUpload(req, res, next) {
 
 const { db } = require('./lib/firestore');
 
+/**
+ * Records on the Project when its most recent Capture arrived (#62).
+ *
+ * The Projects table has a "Last capture" column and a stat tile above it, and
+ * both read `lastCaptureAt` off the Project. Nothing ever wrote it, so both read
+ * `—` for every Project forever — telling an Admin choosing where to export from
+ * that a Project holds no Captures when it holds four (#45's family: the portal
+ * reads a property the backend does not send, and `undefined` is falsy rather
+ * than an error).
+ *
+ * Denormalised onto the Project rather than derived at read time. Deriving it
+ * means a per-Project query against `uploads` on every list request, and
+ * GET /admin/projects returns up to 100 rows — up to 100 extra reads a page, for
+ * one column. Same trade ADR 0014 made for `workspaceId`, and the same one
+ * `memberCount` already makes.
+ *
+ * **Never awaited.** AGENTS.md rule 4: nothing may block the capture loop. The
+ * `uploads` row is already written by the time this runs, so a failure here
+ * costs a stale column, not a lost screenshot; it is logged and dropped.
+ *
+ * **What it actually times.** The row, not the image. `/upload-url` writes the
+ * row before the bytes exist — the extension PUTs them straight to the signed
+ * URL and this process never sees them, and nothing reports back when it
+ * succeeds. So a Project whose only upload attempts failed carries a stamp,
+ * and by CONTEXT.md's language those are Abandoned Uploads, not Captures.
+ *
+ * That is deliberate, and it is the population `captureCount` already reports:
+ * GET /admin/projects/:id counts rows in `uploads` too (#116), for the same
+ * reason — nothing distinguishes the two in Firestore, only the presence of the
+ * object in GCS does. Stamping only the `/capture` fallback would be narrower
+ * and worse: that path is the exception, so most Projects would never be
+ * stamped at all and the column would still read `—`. Checking GCS per capture
+ * would put a network round trip on the loop rule 4 protects.
+ *
+ * The honest reading of the column is therefore "when this Project was last
+ * worked in", which is what an Admin choosing where to export from wants, and
+ * it is stated that way in CONTEXT.md rather than left to the field name
+ * (lesson 69).
+ *
+ * Last write wins, deliberately. Two Captures landing within the same moment
+ * can settle out of order and leave the column a few seconds behind; a
+ * transaction to prevent that would buy nothing a relative timestamp can show.
+ */
+function stampLastCapture(projectId, uploadedAt) {
+  if (!db || !projectId || !uploadedAt) return Promise.resolve();
+  return db.collection(collections.PROJECTS).doc(projectId)
+    .update({ lastCaptureAt: uploadedAt })
+    .catch((err) => {
+      logger.error('[hammer-api] lastCaptureAt stamp failed:', {
+        projectId, error: err.message,
+      });
+    });
+}
+
 // Returns null on success, error message string on failure
 async function firestoreWrite(objectPath, fields) {
   if (!db) return 'Firestore not initialized';
@@ -325,6 +379,12 @@ async function firestoreWrite(objectPath, fields) {
       { merge: false }
     );
     logger.info('[hammer-api] Firestore write ✓', { doc: docId });
+
+    // Both capture paths write through here, so the Project is stamped once,
+    // in one place, whichever route carried the Capture (#62). Not awaited:
+    // see stampLastCapture.
+    stampLastCapture(fields.projectId, fields.uploadedAt);
+
     return null;
   } catch (err) {
     logger.error('[hammer-api] Firestore write error:', err);
@@ -814,4 +874,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { app, sanitize, buildObjectPath, resumableObjectPath, sha256, rejectOversizedUpload, isClientDisconnect, analystReportLimiter, exportLimiter };
+module.exports = { app, sanitize, buildObjectPath, resumableObjectPath, sha256, rejectOversizedUpload, isClientDisconnect, analystReportLimiter, exportLimiter, stampLastCapture };

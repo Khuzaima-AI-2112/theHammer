@@ -40,6 +40,11 @@ const H = { 'x-dev-user-email': 'parity@test.com' };
 // fixture default would prove nothing.
 const PARITY_WORKSPACE = 'ws-parity';
 
+/** The Project the parity fixtures file Captures under. */
+function parityProject() {
+  return db.collection(collections.PROJECTS).doc('parity-project');
+}
+
 /** The uploads document id is the object path, percent-encoded. */
 function uploadDoc(objectPath) {
   return db.collection(collections.UPLOADS).doc(encodeURIComponent(objectPath));
@@ -92,6 +97,25 @@ describe('POST /upload-url', () => {
     expect(snap.data().workspaceId).toBe(PARITY_WORKSPACE);
   });
 
+  // #62: the Capture also stamps its Project, so the Projects table's "Last
+  // capture" column has something to read. Denormalised rather than counted
+  // per request — GET /admin/projects returns up to 100 rows, and computing
+  // this per row is up to 100 extra reads a page.
+  test('stamps the Project with the time of the Capture', async () => {
+    const before = (await parityProject().get()).data().lastCaptureAt ?? null;
+
+    const res = await request(app)
+      .post('/upload-url')
+      .set(H)
+      .send({ project: 'parity-project', tool: 'Softomedia' });
+
+    const uploadedAt = (await uploadDoc(res.body.path).get()).data().uploadedAt;
+    const stamped = (await parityProject().get()).data().lastCaptureAt;
+
+    expect(stamped).toBe(uploadedAt);
+    expect(stamped).not.toBe(before);
+  });
+
   test('does not demand a tool, since /capture does not', async () => {
     // The two routes disagree today: /upload-url answers 400 without a tool and
     // /capture treats it as optional. That disagreement decides which path a
@@ -135,5 +159,21 @@ describe('POST /capture', () => {
 
     const snap = await uploadDoc(res.body.path).get();
     expect(snap.data().workspaceId).toBe(PARITY_WORKSPACE);
+  });
+
+  // #62, and the same parity argument: a Capture must not stamp its Project
+  // according to which route carried it. The fallback path is the one taken
+  // when the signed-URL PUT fails, so a Project whose Captures all arrived
+  // that way would otherwise read as having none.
+  test('stamps the Project with the time of the Capture', async () => {
+    const res = await request(app)
+      .post('/capture')
+      .set(H)
+      .field('projectId', 'parity-project')
+      .field('tool', 'Softomedia')
+      .attach('file', Buffer.from('not-really-a-png'), 'shot.png');
+
+    const uploadedAt = (await uploadDoc(res.body.path).get()).data().uploadedAt;
+    expect((await parityProject().get()).data().lastCaptureAt).toBe(uploadedAt);
   });
 });
