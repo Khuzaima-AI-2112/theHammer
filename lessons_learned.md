@@ -990,3 +990,24 @@ Every one of the 397 tests passed. One suite failed to *run*. The un-awaited Fir
 - **Read the whole log, not the failing suite.** The named suite was innocent. The evidence was forty lines earlier, attributed to a different file, and the fix belonged to neither — it belonged to the code both of them call.
 - **A green local run is not evidence about teardown races.** Reproducing the container is not enough when the variable is timing. This one survived `emulators:exec` against a cold emulator locally and still failed in Cloud Build.
 - **Retrying a build tests nothing.** Same commit, same code, same result — a retry is only ever informative about genuine flakes, and treating it as a fix costs an approval and a deploy slot.
+
+### 81. A lockfile generated on Windows is not a lockfile for Linux
+
+**What happened:** #9 pinned `firebase-tools` as an exact devDependency and switched the Cloud Build test step from `npm install` to `npm ci`, on the argument that install merely *honours* a lockfile while ci *enforces* it — so only ci makes "the version that built this image is recorded" true. `npm ci` was run locally first and succeeded. The build then failed in sixteen seconds:
+
+```
+npm error `npm ci` can only install packages when your package.json and
+package-lock.json are in sync.
+npm error Missing: @emnapi/core@1.11.3 from lock file
+npm error Missing: @emnapi/runtime@1.11.3 from lock file
+```
+
+`package-lock.json` was generated on Windows. npm resolves *optional* dependencies for the platform it is running on, so the lockfile carried no `linux-x64` entries — and the container needs them. `npm install` had always tolerated this by resolving what it needed at install time. `npm ci` will not, by design. `npm install --package-lock-only` on Windows does not add them either: it resolves for the same platform.
+
+**Root cause:** the local check and the remote failure did not test the same property. Running `npm ci` on Windows proves the lockfile matches `package.json` *for Windows*; the pipeline needs it to match for Linux, and nothing on a Windows machine can answer that. The verification looked exact — a real command, the real lockfile, the real exit code — and was silent on the only variable that mattered. The same shape as lesson 80 one step out: there the untested variable was timing, here it is platform.
+
+**Rule going forward:**
+- **A lockfile is per-platform for optional dependencies.** If CI runs `npm ci` on Linux, the lockfile has to be generated on Linux — in the same image, ideally. Otherwise use `npm install` and know that you have given up the enforcement, rather than believing you have it.
+- **Ask what your check could not have seen.** "It worked locally" is a statement about one machine's platform, timing and filesystem. Before pushing a pipeline change, name the variable the local run held constant, because that is where the failure will come from.
+- **`set -euo pipefail` in every multi-command build step.** This one had none, so the failed install did not stop it; the step ran on and died at `firebase: not found`, which names neither the failure nor its cause. Three other steps in the same file already do this.
+- **A reverted improvement needs its reason recorded next to the code.** `npm ci` is still the better primitive and the next reader will want to switch back. The comment in `cloudbuild.yaml` says what happened and what would have to change first, so the attempt is not repeated blind (lesson 76's shape: leave the assertion where the decision lives).

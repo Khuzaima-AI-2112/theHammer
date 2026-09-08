@@ -28,6 +28,10 @@ steps:
     args:
       - '-c'
       - |
+        # Fail on the first bad command. Without this the step ran on after a
+        # failed install and reported `firebase: not found`, which named
+        # neither the failure nor its cause (build 75c1a140).
+        set -euo pipefail
         # openjdk21-jre, not 17: the Firestore emulator is a Java program and
         # firebase-tools refuses to start it below Java 21
         # (MIN_SUPPORTED_JAVA_MAJOR_VERSION in lib/emulator/commandUtils.js).
@@ -38,11 +42,22 @@ steps:
         # touched the repo, and the version that built an image was not
         # recorded anywhere.
         #
-        # `npm ci`, not `npm install`: install honours the lockfile, ci enforces
-        # it and fails when it has drifted from package.json. The claim above is
-        # only true of ci — with install, a dependency resolved outside the lock
-        # would still build an image nothing records.
-        npm ci
+        # `npm install`, not `npm ci`, and not for want of trying. ci is the
+        # right primitive — it enforces the lockfile rather than merely
+        # honouring it — but build 75c1a140 failed on it:
+        #
+        #   npm error `npm ci` can only install packages when your package.json
+        #   and package-lock.json are in sync.
+        #   npm error Missing: @emnapi/core@1.11.3 from lock file
+        #
+        # package-lock.json is generated on Windows, where npm resolves only
+        # this platform's optional dependencies, so it does not carry the
+        # linux-x64 ones this container needs. `npm install --package-lock-only`
+        # on Windows does not add them either. Making ci work means generating
+        # the lockfile on Linux; until somebody does that, ci fails every build
+        # and install succeeds. Do not swap this back without fixing the
+        # lockfile first (#9).
+        npm install
         npm run test:emulator
     env:
       # No FIRESTORE_EMULATOR_HOST here, deliberately: emulators:exec exports it
