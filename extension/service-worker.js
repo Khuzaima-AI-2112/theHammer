@@ -134,9 +134,10 @@ async function sessionOnCapture(projectId, capturePath) {
     if (!written) {
       // Unlike 'suspend' and 'window_removed' there is no second trigger to
       // retry from: the state a retry would read is about to be overwritten.
-      // Rule 4 — the capture loop is never blocked, so this is loud and lost.
-      console.error('[Hammer SW] outgoing session could not be written at a project boundary; its time is lost',
-                    '| id:', s.sessionId, '| project:', s.projectId);
+      // Since #22 the body is queued instead of lost, and the drain replays it
+      // at the next startup — so this is a delay to report, not a hole.
+      console.warn('[Hammer SW] outgoing session could not be written at a project boundary; queued for retry',
+                   '| id:', s.sessionId, '| project:', s.projectId);
     }
     s = null;
   }
@@ -190,6 +191,18 @@ async function sessionIndicate(s, boundaryCommitted) {
 // 6.2 / 6.3: Write session_events doc to backend. Idempotent via flushed flag.
 // Returns true only when a session_events document reached the backend, so a
 // caller that is about to discard the Session can tell that it was recorded.
+// The one place that knows how to send a session_events body, so the live
+// flush and the drain cannot drift apart — `keepalive` is the difference, and
+// it belongs only to the flush, which may be racing service-worker suspension.
+function postSessionEvents(cloudRunUrl, body, extra = {}) {
+  return authedFetch(`${cloudRunUrl}/session-events`, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify(body),
+    ...extra
+  });
+}
+
 async function sessionFlush(reason) {
   const s = await sessionGet();
   if (!s || s.flushed) return false;
@@ -226,19 +239,24 @@ async function sessionFlush(reason) {
   await sessionSet(s);
 
   try {
-    const res = await authedFetch(`${cloudRunUrl}/session-events`, {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify(body),
-      // keepalive: true allows the fetch to outlive the SW suspension window
-      keepalive: true
-    });
+    // keepalive: true allows the fetch to outlive the SW suspension window
+    const res = await postSessionEvents(cloudRunUrl, body, { keepalive: true });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     console.log('[Hammer SW] session_events written ✓ | id:', s.sessionId, '| reason:', reason);
+    // This Session is recorded, so drop any earlier queued attempt at it (#22).
+    // The backend merges on sessionId, so replaying a stale body afterwards
+    // would push sessionEnd backwards over the document just written.
+    await sessionQueueRemove(s.sessionId);
     return true;
   } catch (err) {
     console.error('[Hammer SW] session_events write failed:', err.message,
                   '| session:', s.sessionId);
+    // #22: keep the body. Un-marking `flushed` below only helps the triggers
+    // that get a second shot at the same state; at a project boundary the
+    // Session is discarded immediately after this returns, and before this its
+    // time was simply lost. The queue is local, so this does not hold up the
+    // capture that crossed the boundary (rule 4).
+    await sessionQueueAdd(body);
     // Un-mark flushed so the other flush trigger can retry
     s.flushed = false;
     await sessionSet(s);
@@ -283,6 +301,57 @@ async function queueAdd(blobBase64, session, tabUrl, semanticData = null) {
   queue.push({ blobBase64, session, tabUrl, semanticData, ts: Date.now(), attempts: 0 });
   await queueSave(queue, failed);
   console.log('[Hammer SW] queued offline item; queue length:', queue.length);
+}
+
+// ─────────────────────────────────────────────────────────────────
+// 4.1b — Offline queue for Session events (#22)
+//
+// sessionFlush() un-marks `flushed` on failure so the other trigger can retry.
+// That covers 'suspend' and 'window_removed', which are two shots at the same
+// state. It cannot cover 'project_changed': the state a retry would read is
+// replaced by the new Session microseconds later, so a project switch made
+// offline used to lose the outgoing Session's time outright.
+//
+// The body is kept here instead, and replayed by the drain at startup — the
+// same shape as the Capture queue above, on the same trigger. Replay is safe
+// because the backend writes session_events with set(doc(sessionId), { merge:
+// true }): the same body sent twice is one document, not two.
+// ─────────────────────────────────────────────────────────────────
+const SESSION_QUEUE_KEY = 'sessionQueue';
+
+// A Session document is small, but a person offline for a week should not fill
+// their profile with them. Oldest are dropped first: the newest Session is the
+// one most likely to still matter to whoever is looking.
+const SESSION_QUEUE_MAX = 50;
+
+async function sessionQueueGet() {
+  const { [SESSION_QUEUE_KEY]: q = [] } = await chrome.storage.local.get(SESSION_QUEUE_KEY);
+  return q;
+}
+
+// The only writer, so the cap is enforced in one place rather than at each
+// call site — including the drain, which writes back what it could not send.
+async function sessionQueueSave(q) {
+  await chrome.storage.local.set({ [SESSION_QUEUE_KEY]: q.slice(-SESSION_QUEUE_MAX) });
+}
+
+// Keyed by sessionId: a Session that fails twice is one queued body, not two,
+// and the newer attempt wins because it carries the later sessionEnd.
+async function sessionQueueAdd(body) {
+  const q = (await sessionQueueGet()).filter((e) => e.body?.sessionId !== body.sessionId);
+  q.push({ body, queuedAt: Date.now() });
+  await sessionQueueSave(q);
+  console.log('[Hammer SW] session_events queued for retry | id:', body.sessionId,
+              '| queue length:', Math.min(q.length, SESSION_QUEUE_MAX));
+}
+
+// Called when a flush succeeds, so a stale queued copy cannot be replayed over
+// a newer document. The backend merges on sessionId, so replaying an older
+// body would push sessionEnd backwards.
+async function sessionQueueRemove(sessionId) {
+  const q = await sessionQueueGet();
+  const remaining = q.filter((e) => e.body?.sessionId !== sessionId);
+  if (remaining.length !== q.length) await sessionQueueSave(remaining);
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -417,6 +486,83 @@ async function putBlob(url, blob) {
   }
 
   await queueSave(remaining, newFailed);
+})();
+
+// ─────────────────────────────────────────────────────────────────
+// Drain queued Session events on every SW startup (#22)
+// ─────────────────────────────────────────────────────────────────
+//
+// Its own block rather than part of the Capture drain above, which returns
+// early when there are no Captures waiting — a Session queued at a project
+// boundary usually has no Capture queued beside it, so sharing that early
+// return would mean the Session never replayed.
+//
+// Nothing here is retried in-process: a startup is the retry. withRetry's
+// backoff exists to get a screenshot through before the worker is suspended,
+// and a Session document that waited an hour can wait for the next startup.
+(async () => {
+  const pending = await sessionQueueGet();
+  if (pending.length === 0) return;
+
+  const { settings } = await chrome.storage.local.get('settings');
+  const cloudRunUrl = apiBase(settings);
+  const token       = settings?.firebaseToken?.trim() || '';
+  // Signed out: keep them. Sending unauthenticated would fail anyway, and
+  // dropping them here would lose exactly what this queue exists to hold.
+  if (!cloudRunUrl || !token) return;
+
+  console.log('[Hammer SW] draining queued session events:', pending.length, 'item(s)');
+
+  for (const entry of pending) {
+    const id = entry.body?.sessionId;
+
+    // Re-read rather than trusting the snapshot taken above. A live flush can
+    // succeed while this loop is awaiting, and it removes its own Session from
+    // the queue; sending the copy held in memory afterwards would merge an
+    // older body over the newer document and walk sessionEnd backwards.
+    const current = await sessionQueueGet();
+    if (!current.some((e) => e.body?.sessionId === id)) continue;
+
+    try {
+      const res = await postSessionEvents(cloudRunUrl, entry.body);
+
+      // #39: authedFetch has already spent the refresh token, so a 401 here
+      // means revoked or expired. Nothing queued can be sent until somebody
+      // signs in, and trying the rest only repeats the same answer. Stop, and
+      // keep everything: signing back in recovers it at the next startup.
+      if (res.status === 401) {
+        console.warn('[Hammer SW] sign-in required before queued sessions can be written;',
+                     current.length, 'still waiting');
+        break;
+      }
+
+      // A permanent refusal will be refused again forever — a Project purged
+      // out from under the Session (403) is the realistic case. Retrying it
+      // every startup would keep a poisoned entry alive until the cap evicted
+      // it, and hide the entries behind it. Drop it, loudly. 408 and 429 are
+      // the retryable exceptions and fall through to the throw below.
+      if (!res.ok && res.status >= 400 && res.status < 500
+          && res.status !== 408 && res.status !== 429) {
+        console.error('[Hammer SW] queued session refused permanently, discarding | id:', id,
+                      '| status:', res.status, '| project:', entry.body?.projectId);
+        await sessionQueueRemove(id);
+        continue;
+      }
+
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      // Removed one at a time, re-reading each time, so a Session queued by a
+      // project boundary happening *during* this drain is not erased by a
+      // write-back of the stale snapshot.
+      await sessionQueueRemove(id);
+      const waited = entry.queuedAt ? `${Math.round((Date.now() - entry.queuedAt) / 1000)}s` : 'unknown';
+      console.log('[Hammer SW] drained queued session ✓ | id:', id, '| waited:', waited);
+    } catch (err) {
+      // Still unreachable. It stays queued for the next startup — a startup is
+      // the retry, so there is no backoff here to get wrong.
+      console.warn('[Hammer SW] queued session still cannot be written:', err.message, '| id:', id);
+    }
+  }
 })();
 
 // ── Install: inject content.js into already-open tabs & setup context menus ──

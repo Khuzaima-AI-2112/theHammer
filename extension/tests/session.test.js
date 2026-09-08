@@ -100,7 +100,7 @@ test('a Session already flushed by suspend still rotates on the next capture', a
   assert.strictEqual(sessionEvents(sw.requests).length, 1, 'and it is not written a second time');
 });
 
-test('a failed flush at a boundary is loud, and never blocks the capture', async () => {
+test('a failed flush at a boundary is reported, and never blocks the capture', async () => {
   const sw = boot({ fetch: async () => { throw new Error('offline'); } });
 
   await sw.sessionOnCapture('proj-a', 'a/1.png');
@@ -109,9 +109,14 @@ test('a failed flush at a boundary is loud, and never blocks the capture', async
   assert.strictEqual(b.isFirstInSession, true, 'the capture against proj-b proceeds regardless');
   const current = await sw.sessionGet();
   assert.strictEqual(current.projectId, 'proj-b');
+
+  // Until #22 this read "its time is lost", and it was: there is no second
+  // trigger to retry a project boundary from. The body is now queued and
+  // replayed at the next startup, so the report is a delay, not a loss — the
+  // queue itself is covered in session-queue.test.js.
   assert.ok(
-    sw.logs.error.some((line) => line.includes('its time is lost')),
-    'the lost Session is reported rather than swallowed'
+    sw.logs.warn.some((line) => line.includes('queued for retry')),
+    'the Session that could not be written is reported rather than swallowed'
   );
 });
 

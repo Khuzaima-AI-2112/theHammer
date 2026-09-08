@@ -46,12 +46,34 @@ The Session being replaced must be flushed before the new one starts — today i
 is discarded, so an hour of work vanishes from the reports whenever someone
 switches project (#17). That is the first piece of this work.
 
-A flush that fails at a project boundary loses the outgoing Session for good:
-unlike the `suspend` and `window_removed` flushes it has no second trigger to
-retry from, because the state it would retry against is about to be overwritten.
-The capture loop must not be blocked waiting on it (AGENTS.md rule 4), so the
-failure is logged loudly and the capture proceeds. Queuing `session_events` for
-retry the way uploads already are is a separate piece of work (#22).
+A flush that fails at a project boundary used to lose the outgoing Session for
+good: unlike the `suspend` and `window_removed` flushes it has no second trigger
+to retry from, because the state it would retry against is about to be
+overwritten. *Changed by #22:* the body is now persisted to
+`chrome.storage.local` and replayed by the drain at the next service-worker
+startup, the same way a queued Capture is. The boundary flush was already
+awaited on the capture path before this, and what #22 adds to it is a local
+storage write in the failure branch; the new Session still starts, and the
+capture still proceeds, whether or not the outgoing Session could be sent.
+
+Replaying cannot create a second Session, because `POST /session-events` writes
+`doc(sessionId).set(..., { merge: true })` — the same body arriving twice is one
+document, not two Sessions' worth of time.
+
+It could, however, understate one. `merge: true` is last-write-wins per field,
+so a *stale* queued body arriving after a fresher live write would walk
+`sessionEnd` and `totalCaptures` backwards. The route does not defend against
+that and is not asked to: `sessionFlush` drops the queued copy as soon as a live
+write succeeds, and the drain re-reads the queue before sending each entry, so
+the stale body is dropped rather than sent. Both halves are asserted —
+`backend/tests/session-events-replay.test.js` for the route's behaviour,
+including the hazard, and `extension/tests/session-queue.test.js` for the
+extension's part.
+
+The queue is capped at 50 and drops oldest first, so a long spell offline cannot
+fill a profile. A Session refused permanently — a 403 because its Project was
+purged — is discarded with a loud log rather than retried forever; a 401 stops
+the drain and keeps everything, because signing back in must recover the time.
 
 Reports that were read before this ships were low wherever a project switch
 occurred, with nothing on the page to say so.
