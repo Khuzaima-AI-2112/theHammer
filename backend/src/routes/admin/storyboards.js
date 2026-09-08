@@ -316,7 +316,12 @@ router.post('/projects/:id/storyboards', requireAnalyst, async (req, res, next) 
   try {
     const projectId = req.params.id;
 
-    if (!await loadOwnedProject(req, res, projectId)) return;
+    // The snapshot is kept rather than discarded (#111): it carries the
+    // Workspace a new draft is stamped with below, and the ownership check has
+    // already read it. Same shape as the two upload paths in src/index.js
+    // (#102) — the value is the Project's, never the caller's (lesson 67).
+    const projectSnap = await loadOwnedProject(req, res, projectId);
+    if (!projectSnap) return;
 
     // Resuming an open draft, not starting over — this is what makes
     // "Build Storyboard" safe to click again after leaving mid-curation.
@@ -352,7 +357,7 @@ router.post('/projects/:id/storyboards', requireAnalyst, async (req, res, next) 
     const ref = db.collection(collections.STORYBOARD_DRAFTS).doc();
     await ref.set({
       projectId,
-      workspaceId: req.hammerUser.workspaceId,
+      workspaceId: projectSnap.data().workspaceId,
       status: 'draft',
       captures,
       createdBy: req.hammerUser.id,

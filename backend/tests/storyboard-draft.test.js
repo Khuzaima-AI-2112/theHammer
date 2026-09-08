@@ -149,6 +149,30 @@ describe('POST /admin/projects/:id/storyboards', () => {
       expect(draft.captures.every(c => typeof c.signedUrl === 'string' && c.signedUrl.length > 0)).toBe(true);
     });
 
+    // #111, ADR 0014 — the draft is stamped with the *Project's* Workspace, and
+    // never with the caller's own. Read back from Firestore because the field
+    // does not reach the response, and compared against the Project's stored
+    // value rather than a literal, in the same shape as the #103 assertion in
+    // storyboard-finalize.test.js — so the fixture default cannot make it pass
+    // by coincidence.
+    //
+    // Note what this test can and cannot catch. `loadOwnedProject` admits the
+    // request only when the two Workspaces are already equal, so no request
+    // this suite can send makes the wrong source produce a wrong value: the bug
+    // #111 fixes is latent, not live, and this assertion passes either side of
+    // the fix. It locks the property, over the real route, for the day a caller
+    // can reach a Project in a Workspace that is not their own. The test that
+    // actually goes red without the fix stands at the seam instead, in
+    // storyboard-draft-workspace-source.test.js — the two are a pair, and
+    // neither is worth much alone.
+    test("stamps the draft with the Project's Workspace, not the caller's", async () => {
+      const projectSnap = await db.collection(collections.PROJECTS).doc('draft-proj').get();
+      expect(projectSnap.data().workspaceId).toBeTruthy();
+
+      const draftSnap = await db.collection(collections.STORYBOARD_DRAFTS).doc(draft.id).get();
+      expect(draftSnap.data().workspaceId).toBe(projectSnap.data().workspaceId);
+    });
+
     test('re-opening the same Project returns the same draft, not a new one', async () => {
       const res = await request(app)
         .post('/admin/projects/draft-proj/storyboards')
