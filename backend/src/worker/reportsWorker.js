@@ -11,6 +11,7 @@ const collections = require('../lib/collections');
 const { computeReportMetrics } = require('../lib/reportMetrics');
 const { CONFIG_DEFAULTS } = require('../lib/defaults');
 const { DEFAULT_LLM_MODEL, REPORT_MAX_OUTPUT_TOKENS } = require('../lib/models');
+const { buildReportNarrativePrompt, guardNarrative } = require('../lib/narrativeGuard');
 const gcs = new Storage();
 
 // This is a simplified MVP worker logic for generating standard reports
@@ -50,8 +51,10 @@ async function generateStandardReport(reportId, projectId, reportType, dateRange
     } else {
       // Call Vertex AI LLM Router to generate narrative summary based on metrics
       try {
-        const prompt = `You are an executive assistant. Generate a short narrative summary (max 3 sentences) for a report of type ${reportType}.
-      The metrics are: ${JSON.stringify(resultData.metrics)}`;
+        // #119: the prompt asks for a description, not for an executive
+        // assistant's voice — that register is what produced a Report
+        // committing the Customer to "onboarding additional team members".
+        const prompt = buildReportNarrativePrompt(reportType, resultData.metrics);
 
         const client = getAIClient();
         const resp = await client.models.generateContent({
@@ -66,8 +69,16 @@ async function generateStandardReport(reportId, projectId, reportType, dateRange
           },
         });
 
-        const summaryText = resp.text;
-        resultData.summary = summaryText;
+        // A prompt constraint cannot be observed to have worked, so what came
+        // back is checked before it is published (ADR 0016).
+        const { summary, guard } = guardNarrative(resp.text, resultData.metrics);
+        resultData.summary = summary;
+        resultData.summaryGuard = guard;
+        if (guard.status === 'rejected') {
+          logger.warn(
+            `[Reports Worker] Narrative rejected for ${reportId} (${guard.markers.join(', ')})`
+          );
+        }
       } catch (llmError) {
         logger.error(`[Reports Worker] LLM Error for ${reportId} using ${modelId}:`, llmError);
         resultData.summary = "LLM generation failed. Showing raw metrics only.";

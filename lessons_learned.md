@@ -1011,3 +1011,52 @@ npm error Missing: @emnapi/runtime@1.11.3 from lock file
 - **Ask what your check could not have seen.** "It worked locally" is a statement about one machine's platform, timing and filesystem. Before pushing a pipeline change, name the variable the local run held constant, because that is where the failure will come from.
 - **`set -euo pipefail` in every multi-command build step.** This one had none, so the failed install did not stop it; the step ran on and died at `firebase: not found`, which names neither the failure nor its cause. Three other steps in the same file already do this.
 - **A reverted improvement needs its reason recorded next to the code.** `npm ci` is still the better primitive and the next reader will want to switch back. The comment in `cloudbuild.yaml` says what happened and what would have to change first, so the attempt is not repeated blind (lesson 76's shape: leave the assertion where the decision lives).
+
+### 82. Fixing the model made the prose visible, and the prose was inventing commitments
+
+**What happened:** #107 and #108 got the narrative chain working, and the first
+real Report this product has ever produced said: *"We are focused on onboarding
+additional team members in the coming days to accelerate momentum."* The metrics
+handed to the model were `{"totalCaptures":8,"activeUsers":1}`. Nobody is focused
+on that, no such plan exists in any collection, and there is no field the sentence
+could have come from. The two sentences before it were a faithful restatement of
+the same two integers.
+
+**Root cause:** the prompt asked for a *voice* — "You are an executive assistant"
+— and forward-looking filler is what that register is made of. It then asked for
+three sentences about two numbers, so the third had to be invented to exist. And
+nothing in the prompt forbade going beyond the data.
+
+This was latent for the entire life of the product and could not surface while
+every Vertex call 404d (#108). Repairing the chain is what exposed it: the defect
+was created by the same commit family that made anything appear at all. Same
+family as lesson 74 — a fallback that hides causes one at a time, and each fix
+reveals the next.
+
+It is also #8 and #96's defect class one layer up. #8 removed hardcoded metrics
+because invented numbers read as measurement; #96 made OCR Reports refuse rather
+than return fabricated findings; this one left the numbers honest and let the
+prose around them commit the Customer to something.
+
+**Rule going forward:**
+- **Ask a model for a description, never for a persona.** "You are an executive
+  assistant / analyst / consultant" is a request for a register, and every
+  business register carries forward-looking filler as a convention. Name the task
+  and the constraints instead. `lib/narrativeGuard.js` owns the Reports prompt for
+  this reason.
+- **A sentence budget is a ceiling, not a quota.** A model told to write three
+  sentences about two integers will manufacture a third. Say "write less if there
+  is little to describe" out loud.
+- **Check the output, do not just instruct the input.** A prompt constraint cannot
+  be asserted to have worked — the only available test is that the prompt contains
+  certain words, which tests the string and not the product. ADR 0016 records why
+  both mechanisms are present and why the detector wins where they disagree.
+- **Generated prose about a Customer is a claim made in their name.** The
+  asymmetry settles the false-positive argument: a rejected-but-faithful sentence
+  costs a blander summary, while a missed one puts an intention into a document
+  the Customer may forward. Reject and say so in the artifact
+  (`summaryGuard`), rather than publishing and hoping.
+- **A repaired path needs re-reading, not re-running.** `status: done` was true
+  throughout (lesson 73). The only thing that found this was reading the artifact
+  body — and the first read after a fix is the one most likely to show a defect
+  that fix uncovered.

@@ -450,6 +450,11 @@ router.patch('/storyboards/:id', requireAnalyst, async (req, res, next) => {
  * Exported so tests can assert on the request shape directly, without a
  * mocked AI client or the timing of an async generation run.
  */
+// #119 reviewed this path for the embellishment the Reports narrative had, and
+// cleared it: the instruction below is the Analyst's own typed or transcribed
+// words, not a product-authored persona, and the result is a draft they read in
+// the editor rather than a figure shown to a Customer as measurement. The
+// clearance lapses if a product-authored prompt is ever added here. ADR 0016.
 async function buildNarrativeRequest(draft, prompt) {
   const included = [...draft.captures]
     .filter((c) => c.included)
