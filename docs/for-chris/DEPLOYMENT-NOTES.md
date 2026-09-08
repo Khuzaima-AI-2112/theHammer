@@ -119,22 +119,37 @@ Two consequences:
 safe. This cost us two days of confusion in a fortnight, both times a fix
 appearing not to work when it had simply never loaded.
 
-**Your copy will have a different identity from ours.** Chrome derives an
-unpacked extension's ID from its folder path, and the backend only accepts
-Captures from IDs it has been told about. Loading this repo's `extension/`
-folder on your machine produces a third ID, which is not in the list.
+**Your copy has the same identity as ours.** Since #36, `extension/manifest.json`
+declares the public key Chrome derives an extension's ID from, so every unpacked
+copy on every machine gets the same one:
 
-The failure is quiet: sign-in works, Captures appear to send, and nothing
-arrives. To fix it:
+```
+bnlcomhbnaecjjifmlpfilpohejhckmh
+```
 
-1. Load the extension, and copy the **ID** shown on its card.
-2. Add it to the space-separated `EXTENSION_ID` list in `cloudbuild.yaml`.
-3. Push, and approve the build.
+Loading this repo's `extension/` folder gives you that ID wherever the folder
+sits, and you can move it. **If you loaded the extension before this change,
+remove it and load it again once** — your old per-machine ID stops being
+accepted the moment this deploys.
 
-Then do not move the folder, or the ID changes and you repeat this. That
-fragility is tracked as **#36**; the fix is deferred because it also changes the
-sign-in redirect address and would break portal sign-in until the OAuth client
-is updated in the same window.
+Check the ID on the card at `chrome://extensions` matches the string above. If
+it does not, you are loading a folder whose `manifest.json` has no `key` — pull,
+and make sure you loaded `./extension` rather than a copy of it.
+
+> **What this replaced.** Chrome used to derive the ID from the folder path, so
+> every machine had its own and each one had to be added to a space-separated
+> `EXTENSION_ID` list in `cloudbuild.yaml` and deployed before that machine
+> could send anything. The failure was quiet: sign-in worked, Captures appeared
+> to send, and nothing arrived.
+>
+> This document previously said the fix was deferred "because it also changes
+> the sign-in redirect address and would break portal sign-in until the OAuth
+> client is updated in the same window." **That was wrong, and it is worth
+> saying so plainly, because it is why the fix waited.** There is no external
+> OAuth client. The extension's sign-in opens our own `portal/auth-ext.html`,
+> which checks the redirect against the same `_EXTENSION_IDS` value that feeds
+> the backend — one substitution, two consumers, both updated by the same
+> deploy. There was never a window to coordinate. Recorded as lesson 78.
 
 ---
 

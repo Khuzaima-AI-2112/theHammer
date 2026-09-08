@@ -44,12 +44,15 @@ const PORT = process.env.PORT || 8080;
 app.set('trust proxy', 1);
 
 // ── CORS ──────────────────────────────────────────────────────────
-// EXTENSION_ID names one or more extensions. manifest.json declares no "key",
-// so Chrome derives an extension's id from the folder it is loaded from and each
-// unpacked copy carries its own; every id that has to reach this API needs an
-// origin here (#54). Split on whitespace as well as commas: gcloud's
-// --set-env-vars separates KEY=VALUE pairs with commas, so a comma inside a
-// value truncates it silently, which is why cloudbuild.yaml uses a space.
+// EXTENSION_ID names one or more extensions, and every id that has to reach
+// this API needs an origin here. Since #36 that is normally a single id:
+// manifest.json declares the public "key" the id is derived from, so every
+// unpacked copy on every machine shares one. Before that Chrome derived the id
+// from the folder it was loaded from, a list grew one entry per developer
+// (#54), and the parsing below is what that list left behind — kept, because
+// the reason for it outlives the list: gcloud's --set-env-vars separates
+// KEY=VALUE pairs with commas, so a comma inside a value truncates it silently,
+// which is why cloudbuild.yaml separates with a space (lesson 63).
 // Never '*' — each id stays named.
 const EXTENSION_IDS = (process.env.EXTENSION_ID || '')
   .split(/[\s,]+/)

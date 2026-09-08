@@ -1,8 +1,23 @@
 substitutions:
   # Extension ids allowed to reach the backend (CORS, backend/src/index.js) and
   # to receive tokens from the portal's sign-in redirect (portal/auth-ext.html,
-  # #80). One value, two consumers — see #36.
-  _EXTENSION_IDS: 'effbpmnbheohelnnpgpjdknofinhnagc ndmbjlbmcdlmijglkfcelbiejmghiikm'
+  # #80). One value, two consumers.
+  #
+  # One id, not a list, since #36: extension/manifest.json declares the public
+  # key the id is derived from, so every unpacked copy on every machine gets
+  # this same id. The list this replaced held one entry per developer folder
+  # (#54) and could only ever grow. The manifest key and this value must move
+  # together; extension/tests/manifest-key.test.js checks them against each
+  # other — but nothing runs that check automatically. The test step below runs
+  # only the backend suite (dir: backend, npm test), and the pre-commit hook
+  # (scripts/install-git-hook.ps1) runs the same one. The extension and portal
+  # suites are local and manual, so this pairing is guarded by a test somebody
+  # has to remember to run: npm run test:extension, after touching either half.
+  #
+  # Still space-separated if a second id is ever genuinely needed: gcloud's
+  # --set-env-vars splits pairs on commas, so a comma here truncates the value
+  # silently (lesson 63).
+  _EXTENSION_IDS: 'bnlcomhbnaecjjifmlpfilpohejhckmh'
 
 steps:
   # ── 1. Run backend tests with Firestore emulator ────────────────────────────

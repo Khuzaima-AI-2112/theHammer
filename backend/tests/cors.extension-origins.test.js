@@ -1,10 +1,15 @@
 /**
  * #54 — EXTENSION_ID names more than one extension.
  *
- * manifest.json declares no "key", so Chrome derives the extension's id from
- * the folder it is loaded from and every unpacked copy has a different one. It
- * declares no host_permissions either, so extension calls are subject to CORS.
- * The allowlist therefore has to name each id it trusts.
+ * manifest.json declares no host_permissions, so extension calls are subject
+ * to CORS and the allowlist has to name each id it trusts.
+ *
+ * The ids below were two developers' unpacked loads, back when Chrome derived
+ * an id from the folder path. #36 has since fixed the id by declaring the
+ * public key, so production names one. They stay here as fixtures: this file
+ * tests the *parsing* — that a list splits, trims and drops empties — which is
+ * still what src/index.js does, and which is what a second id would need if one
+ * were ever added back. Nothing here reads the deployed value.
  *
  * ALLOWED_ORIGINS is built once, at module load, from process.env. These
  * assignments must run before src/index is required. Jest gives each test file

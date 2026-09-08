@@ -1,5 +1,6 @@
 {
   "manifest_version": 3,
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAyJqR0b6Io9pwmlL+tWfI16CTZ4lx40a0qbi8vIcltUC9Kjbg/oLOvLhtqxNDLfjsNoENQlQT44vLKpUF6He95aREktDT3rx5KAQHNX2xEqWuvVAJKaarvHy3UZuoRMZHOeCy0K0+DQUPsDUUVRE1EwnYYlxT/NN3bSpzJprmh5EkYBzNPkXVebx/GlXzY59Kqr/QH0DBxrmS8jPn64AWSY+3CmAl3XOLH4IEyT1v/BLNKjLl61I9ykb329mU1WxI5BbRspysMA8rnDeVYTL0P1ZsWPcHr7j1mMJfmZW94PAHiKMagr5QQgKsNP7kROgL/0/GTjzz9X8B2qEvyHA4rwIDAQAB",
   "name": "The Hammer",
   "version": "0.1.0",
   "description": "One-click screenshot capture with project/user metadata.",
