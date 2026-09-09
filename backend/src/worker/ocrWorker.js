@@ -65,16 +65,34 @@ const FINDINGS_SCHEMA = {
   },
 };
 
+/**
+ * The rule about visibility is the delicate one.
+ *
+ * It first read "report only elements you can see in **both** screenshots",
+ * which was meant to keep findings grounded and instead made the Report blind
+ * to the commonest change in a workflow. Verified against real Softomedia
+ * Captures: between two steps an "Add New Retailer" modal opens carrying three
+ * text fields, one of them already filled — and the comparison reported
+ * nothing, because those fields appear in only one of the two screenshots. The
+ * model was reading them; the prompt was discarding them.
+ *
+ * The grounding that matters is that the element is *visible somewhere*, not
+ * that it is visible twice. Appearing and disappearing are states, and saying
+ * so explicitly is what keeps "not present" from being dressed up as a value
+ * the model invented.
+ */
 const COMPARISON_PROMPT = [
   'These are two consecutive screenshots of the same workflow.',
   '',
-  'List the checkboxes, radio buttons and text fields whose state differs between them.',
+  'List the checkboxes, radio buttons and text fields that differ between them.',
   '',
   'Rules:',
-  '- Report only elements you can see in both screenshots.',
+  '- Report only elements you can actually see in at least one of the two screenshots.',
   '- Quote the label exactly as it appears on screen. Do not infer a label you cannot read.',
+  '- If an element appears in only one screenshot, report it, and write exactly',
+  '  "not present" for the screenshot it is missing from.',
   '- Report no element whose state is the same in both.',
-  '- If nothing changed, return an empty list. An empty list is a correct answer.',
+  '- If nothing differs, return an empty list. An empty list is a correct answer.',
   '- Do not describe what the user was trying to do, or what happens next.',
 ].join('\n');
 

@@ -166,3 +166,14 @@ test("the Analyst's note is shown beside the finding", () => {
   assert.match(body, /from\.note/);
   assert.match(body, /to\.note/);
 });
+
+test('a text field that exists but is empty reads as empty, not as blank', () => {
+  // Verified against real Captures: the model returns "" for a field that is
+  // present and unfilled, which rendered as "not present → " with nothing
+  // after the arrow. Handled at render time rather than in the prompt, so the
+  // wording can change without a live Vertex run to re-verify it.
+  const body = functionSource(APP_JS, 'fieldState');
+  assert.match(body, /\(empty\)/);
+  assert.match(functionSource(APP_JS, 'renderComparison'), /fieldState\(f\.oldState\)/);
+  assert.match(functionSource(APP_JS, 'renderComparison'), /fieldState\(f\.newState\)/);
+});

@@ -135,8 +135,19 @@ describe('the request that reaches Vertex', () => {
 
   test('the prompt allows an empty answer and forbids narrating intent', async () => {
     expect(COMPARISON_PROMPT).toMatch(/empty list is a correct answer/i);
-    expect(COMPARISON_PROMPT).toMatch(/see in both/i);
     expect(COMPARISON_PROMPT).toMatch(/what happens next/i);
+  });
+
+  test('an element appearing in only one screenshot is still a change', () => {
+    // The first version of this prompt asked for elements visible in *both*,
+    // which is grounded and useless: verified against real Captures, a modal
+    // opening with three new text fields reported nothing at all, because the
+    // fields appear in only one of the two images. Visible *somewhere* is the
+    // grounding that matters; "not present" is the honest word for the other
+    // side, and saying so explicitly keeps it from being invented as a value.
+    expect(COMPARISON_PROMPT).toMatch(/at least one of the two screenshots/i);
+    expect(COMPARISON_PROMPT).toMatch(/"not present"/);
+    expect(COMPARISON_PROMPT).not.toMatch(/see in both/i);
   });
 
   test("the Project's own model is used, with room for a thinking model to think", async () => {

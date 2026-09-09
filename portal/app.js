@@ -1955,6 +1955,20 @@ function renderReportMetrics(metrics) {
   return `<table style="margin:var(--space-3) 0">${rows}</table>`;
 }
 
+/**
+ * A field's state, made readable.
+ *
+ * The model returns `""` for a text field that exists but holds no value —
+ * accurate, and it renders as "not present → " with nothing after the arrow.
+ * Named here rather than asked for in the prompt, so the wording can change
+ * without a live Vertex run to re-verify it.
+ */
+function fieldState(state) {
+  return (state === null || state === undefined || String(state).trim() === '')
+    ? '(empty)'
+    : String(state);
+}
+
 /** What one OCR comparison found between two consecutive Captures (#96). */
 function renderComparison(comparison) {
   const heading = `Step ${esc(String(comparison.from.order))} → ${esc(String(comparison.to.order))}`;
@@ -1977,7 +1991,7 @@ function renderComparison(comparison) {
       <tr>
         <td class="muted" style="padding-right:var(--space-3)">${esc(f.elementType)}</td>
         <td style="padding-right:var(--space-3)">${esc(f.label)}</td>
-        <td class="muted">${esc(f.oldState)} → ${esc(f.newState)}</td>
+        <td class="muted">${esc(fieldState(f.oldState))} → ${esc(fieldState(f.newState))}</td>
       </tr>`).join('')}</table>`;
   }
 
