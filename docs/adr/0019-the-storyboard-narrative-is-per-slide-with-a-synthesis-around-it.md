@@ -12,9 +12,11 @@ of the three options as written.
 ## Decision
 
 Narrative generation returns **two things in one call**: a short free-form
-synthesis, and one entry per included Capture — `{ captureId, label, caption }`.
-The PDF draws each caption with its slide. Section headers come from **Capture
-metadata** (`stage`, the Persona; `tool`), never from parsing the model's prose.
+synthesis, and one caption per included Capture — `{ captureId, caption }`. The
+PDF draws each caption with its slide. Section headers come from **Capture
+metadata** (`stage`, the Persona; `tool`), never from parsing the model's prose,
+and the per-frame label is derived from the Capture's `tabUrl` when the PDF is
+drawn rather than asked of the model.
 
 ## Why
 
