@@ -168,7 +168,12 @@
       <span>Report Viewer</span>
       <button class="btn btn-ghost" onclick="closeModal('reportViewerModal')">Close</button>
     </div>
-    <div id="reportViewerContent" style="flex: 1; overflow-y: auto; background: var(--color-bg); padding: var(--space-4); border-radius: var(--radius-md); border: 1px solid var(--color-border); font-family: var(--font-mono); font-size: var(--text-xs); white-space: pre-wrap;">
+    <!-- #120: this held `font-family: var(--font-mono); white-space: pre-wrap`
+         while its only content was the mockup's plain text. Now that the panel
+         is filled with markup, pre-wrap turned every newline in that markup
+         into a blank line, and the mono default made a narrative read as code.
+         The <pre> holding the raw artifact sets both back for itself. -->
+    <div id="reportViewerContent" style="flex: 1; overflow-y: auto; background: var(--color-bg); padding: var(--space-4); border-radius: var(--radius-md); border: 1px solid var(--color-border); font-size: var(--text-sm);">
       Loading report data...
     </div>
   </div>

@@ -741,7 +741,12 @@
       border-radius: var(--radius-lg);
       background: var(--color-surface);
     }
-    .storyboard-narrative h2 { font-size: var(--text-md); margin: 0 0 var(--space-1); }
+    /* Was var(--text-md), which this file has never defined — the scale is
+       xs/sm/base/lg/xl — so the declaration was dropped and the heading fell
+       back to the browser default. --text-lg is the step whose ceiling matches
+       that default, so this makes the rule real without restyling the page.
+       Found by tests/css-custom-properties.test.js (#120). */
+    .storyboard-narrative h2 { font-size: var(--text-lg); margin: 0 0 var(--space-1); }
     .storyboard-narrative p.muted,
     .storyboard-narrative-actions span.muted { color: var(--color-text-muted); font-size: var(--text-xs); }
     .storyboard-narrative textarea { width: 100%; margin: var(--space-3) 0; resize: vertical; }

@@ -1860,7 +1860,9 @@ function renderReportArtifact(reportType, artifact) {
   const parts = [`<div style="font-weight:600;margin-bottom:var(--space-3)">${esc(reportType)}</div>`];
 
   if (artifact.summary) {
-    parts.push(`<p style="font-family:var(--font-sans);font-size:var(--text-sm)">${esc(artifact.summary)}</p>`);
+    // No font-family here: styles.css defines --font-mono and no --font-sans,
+    // so naming one would resolve to nothing and inherit whatever the panel has.
+    parts.push(`<p style="line-height:1.5">${esc(artifact.summary)}</p>`);
   }
 
   // #119 replaces a narrative that claimed more than the metrics support, and
@@ -1889,7 +1891,7 @@ function renderReportArtifact(reportType, artifact) {
   parts.push(`
     <details style="margin-top:var(--space-4)">
       <summary class="muted">Full artifact</summary>
-      <pre style="margin-top:var(--space-2)">${esc(JSON.stringify(artifact, null, 2))}</pre>
+      <pre style="margin-top:var(--space-2);font-family:var(--font-mono);font-size:var(--text-xs);white-space:pre-wrap;word-break:break-word">${esc(JSON.stringify(artifact, null, 2))}</pre>
     </details>`);
 
   return parts.join('');
@@ -1899,7 +1901,7 @@ function renderReportArtifact(reportType, artifact) {
 function renderReportDownload(reportType, contentType, url) {
   return `
     <div style="font-weight:600;margin-bottom:var(--space-3)">${esc(reportType)}</div>
-    <p style="font-family:var(--font-sans);font-size:var(--text-sm)">
+    <p style="line-height:1.5">
       This report is a ${esc(contentType)} file.
       <a href="${esc(url)}" target="_blank" rel="noopener noreferrer">Open it</a>.
       The link expires in a few minutes.
