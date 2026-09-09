@@ -135,23 +135,36 @@
     <div class="modal-desc">Select a project and report type. Vertex AI reports extract structured UI state and user inputs.</div>
     <div class="form-group">
       <label class="form-label" for="reportProjectSelect">Project</label>
-      <select class="form-input filter-select" id="reportProjectSelect" style="width:100%">
+      <select class="form-input filter-select" id="reportProjectSelect" style="width:100%" onchange="onReportTypeChange()">
         <!-- Populated via JS -->
       </select>
     </div>
     <div class="form-group">
       <label class="form-label" for="reportTypeSelect">Report Type</label>
-      <select class="form-input filter-select" id="reportTypeSelect" style="width:100%">
+      <select class="form-input filter-select" id="reportTypeSelect" style="width:100%" onchange="onReportTypeChange()">
         <optgroup label="Standard Reports">
           <option value="user_efficiency">User Efficiency (Aggregated)</option>
           <option value="project_progress">Project Progress</option>
           <option value="executive_summary">Executive Summary</option>
         </optgroup>
         <optgroup label="Vertex AI OCR">
-          <option value="ui_state_changes">UI State Changes (Checkboxes/Radios)</option>
-          <option value="text_entry_tracking">Text Entry Tracking</option>
+          <!-- #96/ADR 0017: one entry, not two. "UI State Changes" and "Text
+               Entry Tracking" were never two analyses — a single pass over a
+               pair of screenshots produces both. -->
+          <option value="storyboard_changes">Storyboard Changes (UI state and text entry)</option>
         </optgroup>
       </select>
+    </div>
+
+    <!-- Revealed only for the OCR type. Toggled with the `hidden` property,
+         never by clearing an inline style — that is the pattern lesson 59
+         forbids and #50 exists to remove from five other sites. -->
+    <div class="form-group" id="reportStoryboardGroup" hidden>
+      <label class="form-label" for="reportStoryboardSelect">Storyboard</label>
+      <select class="form-input filter-select" id="reportStoryboardSelect" style="width:100%" onchange="updateStoryboardCoverage()">
+        <!-- Populated via JS -->
+      </select>
+      <div class="muted" id="reportStoryboardCoverage" style="margin-top:var(--space-2)"></div>
     </div>
     <div class="form-error" id="generateReportError" aria-live="polite"></div>
     <div class="modal-actions">

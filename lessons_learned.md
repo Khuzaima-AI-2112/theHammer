@@ -1060,3 +1060,52 @@ prose around them commit the Customer to something.
   throughout (lesson 73). The only thing that found this was reading the artifact
   body — and the first read after a fix is the one most likely to show a defect
   that fix uncovered.
+
+### 83. A guard that scans source has to scan code, not prose — and four of them did not
+
+**What happened:** closing #119, #120 and #96 in one session tripped the same
+trap four times. Each guard reads source files looking for a forbidden string,
+and each one flagged the comment that explained the very defect it exists to
+prevent:
+
+- `backend/tests/model-ids.test.js` failed on `lib/retry.js`, whose header
+  explains which model returns `RESOURCE_EXHAUSTED`. The id was in a JSDoc
+  block with backticks around it, and a backtick is indistinguishable from a
+  template literal to a regex.
+- `portal/tests/report-viewer-contract.test.js`, written that same hour to
+  assert the viewer no longer writes `[Mockup]` into the panel, failed on the
+  comment recording that it used to.
+- `portal/tests/css-custom-properties.test.js` flagged `var(--text-md)` inside
+  the comment explaining why `--text-md` had been replaced.
+- The same file's first run had already found a real, pre-existing defect —
+  which is the point: these guards earn their keep.
+
+The irony is that `model-ids.test.js` **predicted this in its own comment**. It
+says the guard is scoped to string literals because an earlier version matched
+bare words, "and a guard that makes prose illegal does not get satisfied, it
+gets worked around: two comments were reworded into inaccuracy just to pass
+it." The scoping was right and the implementation did not deliver it.
+
+**Root cause:** "scan the file for a forbidden string" and "scan the code for a
+forbidden string" look like the same task and are not. Quoting conventions do
+not separate them — this codebase writes `` `gemini-3.5-flash` `` in prose
+constantly, and that is a good habit, not a defect. Narrowing the *pattern*
+(quotes, word boundaries) only ever approximates the thing actually wanted,
+which is a distinction about **where in the file** the match sits.
+
+**Rule going forward:**
+- **Strip comments before scanning.** Block comments and whole-line `//`
+  comments cover every case seen here, and it is four lines. Do this in the
+  guard rather than narrowing the pattern; a narrower pattern is a guess about
+  quoting, and the next accurate sentence will be quoted differently.
+- **A guard that fails on documentation is a broken guard, not a strict one.**
+  The tempting fix — reword the comment — trades a true sentence for a passing
+  test, and the comment is usually the only record of why the rule exists.
+- **Test both directions when you fix one.** Each guard here gained a case
+  proving a comment is ignored *and* a case proving real code is still caught.
+  Stripping comments could otherwise blind the guard entirely and nothing would
+  say so (lesson 80's shape: a guard nobody has seen fail is a guard nobody
+  knows works).
+- **The comment explaining a rename names the old value.** That is not
+  optional — it is what stops the next reader reintroducing it — so any guard
+  over that value must tolerate it by construction.

@@ -26,15 +26,23 @@ function nowISO() { return new Date().toISOString(); }
 
 const { analystReportLimiter } = require('../../middleware/rateLimiters');
 
-// The two report types served by the OCR worker. Named once so the guard below
-// and the dispatch further down cannot drift apart — they used to be two
-// separate inline lists of the same two strings.
-const OCR_REPORT_TYPES = new Set(['ui_state_changes', 'text_entry_tracking']);
+// The report type served by the OCR worker (#96, ADR 0017).
+//
+// There used to be two — `ui_state_changes` and `text_entry_tracking` — and
+// they were never two analyses. One pass over a pair of screenshots produces
+// both kinds of finding, and the scaffolded prompt already asked for both, so
+// offering them separately billed twice for the same reading of the same two
+// images. They collapse into one.
+const OCR_REPORT_TYPE = 'storyboard_changes';
+
+// Refused by name rather than falling through to "unknown report type", so a
+// caller still asking for one is told what replaced it.
+const RETIRED_OCR_REPORT_TYPES = new Set(['ui_state_changes', 'text_entry_tracking']);
 
 // POST /reports/generate
 router.post('/reports/generate', requireAnalyst, analystReportLimiter, async (req, res, next) => {
   try {
-    const { projectId, reportType, dateRange } = req.body;
+    const { projectId, reportType, dateRange, storyboardId } = req.body;
     if (!projectId || !reportType) {
       return res.status(400).json({ error: 'Missing projectId or reportType' });
     }
@@ -49,20 +57,39 @@ router.post('/reports/generate', requireAnalyst, analystReportLimiter, async (re
     const projectSnap = await loadOwnedProject(req, res, projectId);
     if (!projectSnap) return;
 
-    // #96: generateOcrReport has never read a Capture. It builds a Gemini
-    // request with both image parts commented out, never sends it, and returns
-    // two hardcoded findings naming specific UI elements and specific state
-    // transitions — then writes them to GCS stamped with a model that did not
-    // produce them, and marks the report `done`. Invented observations that
-    // read as real ones are worse than a visible gap, so until the real
-    // implementation lands this refuses instead.
-    //
-    // Before the row is written, for #105's reason: a refused report must not
-    // leave a row behind describing work that will never happen.
-    if (OCR_REPORT_TYPES.has(reportType)) {
-      return res.status(501).json({
-        error: 'This report type is not yet implemented. It is being built; see issue #96.'
+    if (RETIRED_OCR_REPORT_TYPES.has(reportType)) {
+      return res.status(410).json({
+        error: `'${reportType}' has been replaced by '${OCR_REPORT_TYPE}', which reports both `
+          + 'UI state changes and text entry from a single pass over a Storyboard.'
       });
+    }
+
+    // An OCR Report is generated for a Storyboard, not for a Project (ADR 0017):
+    // the Analyst has already decided which Captures belong together and in
+    // what order, and pairing a Project's Captures by time compares unrelated
+    // pages. All of this is checked before the row is written, for #105's
+    // reason — a refused report must not leave a row behind describing work
+    // that is never going to happen.
+    if (reportType === OCR_REPORT_TYPE) {
+      if (!storyboardId) {
+        return res.status(400).json({ error: `${OCR_REPORT_TYPE} requires a storyboardId` });
+      }
+      // Two selections, silently disagreeing, is worse than neither: the
+      // Storyboard's membership *is* the selection (#95).
+      if (dateRange) {
+        return res.status(400).json({
+          error: 'A storyboardId and a dateRange cannot both be given: the Storyboard is the selection.'
+        });
+      }
+      const draftSnap = await db.collection(collections.STORYBOARD_DRAFTS).doc(storyboardId).get();
+      if (!draftSnap.exists || draftSnap.data().projectId !== projectId) {
+        // One answer for unreachable, as lib/ownership.js argues: a Storyboard
+        // that does not exist and one belonging elsewhere are refused alike, so
+        // the status code cannot be used to sort real ids from imaginary ones.
+        return res.status(403).json({
+          error: 'Forbidden: Storyboard not found or belongs to another project'
+        });
+      }
     }
 
     // #105: this route is the only caller of the worker endpoints, and it
@@ -86,6 +113,9 @@ router.post('/reports/generate', requireAnalyst, analystReportLimiter, async (re
       workspaceId: projectSnap.data().workspaceId,
       reportType,
       dateRange: dateRange || null,
+      // Which Storyboard's curated order this Report walks (#96). Null for
+      // every other report type, which are scoped to the Project itself.
+      storyboardId: storyboardId || null,
       status: 'queued',
       gcsPath: null,
       requestedBy: req.hammerUser?.id || null,
@@ -105,9 +135,7 @@ router.post('/reports/generate', requireAnalyst, analystReportLimiter, async (re
     
     // We will fire and forget an HTTP request to our internal worker endpoint
     const backendUrl = process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 8080}`;
-    const workerEndpoint = OCR_REPORT_TYPES.has(reportType)
-      ? '/worker/ocr'
-      : '/worker/reports';
+    const workerEndpoint = reportType === OCR_REPORT_TYPE ? '/worker/ocr' : '/worker/reports';
 
     fetch(`${backendUrl}${workerEndpoint}`, {
       method: 'POST',
@@ -115,7 +143,7 @@ router.post('/reports/generate', requireAnalyst, analystReportLimiter, async (re
         'Content-Type': 'application/json',
         'X-Internal-Secret': internalSecret
       },
-      body: JSON.stringify({ reportId, projectId, reportType, dateRange })
+      body: JSON.stringify({ reportId, projectId, reportType, dateRange, storyboardId })
     }).catch(err => logger.error('[Reports] Failed to trigger worker:', err));
 
     return res.status(202).json({ reportId, status: 'queued' });
@@ -175,8 +203,11 @@ router.get('/reports/:id/artifact', requireAnalyst, async (req, res, next) => {
     // is — an empty panel is what this issue exists to stop.
     if (data.status !== 'done' || !data.gcsPath) {
       return res.status(409).json({
+        // A failed Report carries its own reason where the worker had one worth
+        // acting on — "fewer than two included Captures" is something the
+        // Analyst can fix, and burying it in a generic sentence would waste it.
         error: data.status === 'error'
-          ? 'This report failed to generate, so there is nothing to show.'
+          ? (data.error || 'This report failed to generate, so there is nothing to show.')
           : `This report is still ${data.status}. There is no artifact yet.`,
         status: data.status,
       });

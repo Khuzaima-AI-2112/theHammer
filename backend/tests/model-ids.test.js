@@ -115,15 +115,55 @@ describe('lib/models.js is the only place a model id is written', () => {
     });
   }
 
+  /**
+   * The file with its comments removed.
+   *
+   * The scoping above says a comment naming a model is documentation, and the
+   * regex delivered that only for a *bare* mention. This codebase writes
+   * `gemini-3.5-flash` in prose with backticks around it constantly, and a
+   * backtick is indistinguishable from a template literal to a regex — so
+   * lib/retry.js was flagged for a sentence in its own header explaining which
+   * model returns RESOURCE_EXHAUSTED (#96).
+   *
+   * That is the failure this guard's own comment predicts: it does not get
+   * satisfied, it gets worked around, by rewording an accurate sentence into a
+   * vaguer one. Removing comments before scanning makes the stated intent true
+   * for every way a comment can be written.
+   */
+  function codeOf(text) {
+    return text
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .split('\n')
+      .filter((line) => !/^\s*\/\//.test(line))
+      .join('\n');
+  }
+
   test('no source file outside lib/models.js contains a literal model id', () => {
     const offenders = [];
     for (const file of jsFilesUnder(SRC)) {
       if (file === OWNER) continue;
-      const text = fs.readFileSync(file, 'utf8');
-      const hits = text.match(/['"`]gemini-[0-9][^'"`]*['"`]/g);
+      const hits = codeOf(fs.readFileSync(file, 'utf8')).match(/['"`]gemini-[0-9][^'"`]*['"`]/g);
       if (hits) offenders.push(`${path.relative(SRC, file)}: ${[...new Set(hits)].join(', ')}`);
     }
     expect(offenders).toEqual([]);
+  });
+
+  test('a model named in a comment is documentation, however it is quoted', () => {
+    // Both forms a comment actually takes in this codebase. The bare `//` case
+    // the original regex already handled; the block-comment case is the one
+    // that flagged lib/retry.js, because a backtick reads as a template
+    // literal.
+    const block = '/**\n * `gemini-3.5-flash` returned RESOURCE_EXHAUSTED under load.\n */';
+    const line = '// Was `gemini-1.5-flash`, retired 2025-09-24.';
+
+    expect(codeOf(block).match(/['"`]gemini-[0-9][^'"`]*['"`]/g)).toBeNull();
+    expect(codeOf(line).match(/['"`]gemini-[0-9][^'"`]*['"`]/g)).toBeNull();
+  });
+
+  test('stripping comments does not blind the guard to real code', () => {
+    // The other half: a guard that stopped catching anything would also pass.
+    const sample = "const m = 'gemini-1.5-flash'; // see lib/models.js";
+    expect(codeOf(sample).match(/['"`]gemini-[0-9][^'"`]*['"`]/g)).toEqual(["'gemini-1.5-flash'"]);
   });
 
   test('the guard would catch a literal reintroduced in a source file', () => {

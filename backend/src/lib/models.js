@@ -83,6 +83,27 @@ const RETIRED_MODEL_IDS = Object.freeze([
 const REPORT_MAX_OUTPUT_TOKENS = 2048;
 
 /**
+ * How many consecutive Capture pairs one OCR Report compares (#96, ADR 0017).
+ *
+ * The Customer chose a capped build over an uncapped one after being shown
+ * measured figures: a real two-screenshot comparison cost 2,239 input and ~870
+ * output tokens, about USD 0.012, so a Storyboard of 66 Captures — 65 pairs —
+ * would be roughly USD 0.80 and would grow with the Project. Twenty pairs
+ * holds a Report near USD 0.25 whatever size the Storyboard reaches.
+ *
+ * It is a *ceiling on the comparison*, not a sample: the first twenty
+ * consecutive pairs are compared and the rest are not looked at. Sampling
+ * evenly across a longer Storyboard was rejected in ADR 0017 — non-adjacent
+ * frames report as one change what may have taken several steps, which is
+ * fabrication with a real screenshot attached.
+ *
+ * The artifact and the portal both state the coverage this produces, because a
+ * Report that quietly examined a third of a workflow is the kind of omission
+ * this issue's family is made of.
+ */
+const OCR_MAX_PAIRS = 20;
+
+/**
  * True only for an exact allowlisted id.
  *
  * Deliberately does not trim: callers trim before validating, and a predicate
@@ -101,5 +122,6 @@ module.exports = {
   SUPPORTED_LLM_MODELS,
   RETIRED_MODEL_IDS,
   REPORT_MAX_OUTPUT_TOKENS,
+  OCR_MAX_PAIRS,
   isSupportedLlmModel,
 };

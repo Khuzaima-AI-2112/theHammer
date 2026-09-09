@@ -1748,10 +1748,101 @@ loadProjects = async function() {
   populateReportProjectSelect();
 };
 
+// ── Storyboard picker for OCR Reports (#96, ADR 0017) ──────────
+// An OCR Report is generated for a Storyboard, not for a Project: the Analyst
+// has already decided which Captures belong together and in what order.
+
+const OCR_REPORT_TYPE = 'storyboard_changes';
+
+/**
+ * The cap the backend applies, sent with the Storyboard list.
+ *
+ * Deliberately not a constant here. ADR 0017 puts this number in
+ * lib/models.js, and a hardcoded copy would keep telling Analysts "the first
+ * 20" after the backend began enforcing something else — a wrong statement
+ * about what the Report examined, which is the class of defect this whole
+ * ticket is about. Null until the list has been fetched.
+ */
+let ocrMaxPairs = null;
+
+/**
+ * Reveal or hide the picker.
+ *
+ * `el.hidden`, not `el.style.display` — clearing an inline style to reveal is
+ * the pattern lesson 59 forbids and #50 exists to remove from five sites.
+ */
+function setHidden(el, hidden) {
+  el.hidden = hidden;
+}
+
+/** How much of this Storyboard a Report would actually examine. */
+function storyboardCoverageText(storyboard) {
+  const included = storyboard.includedCaptures;
+  if (included < 2) {
+    return 'This Storyboard has fewer than two included Captures, so there is nothing to compare.';
+  }
+  const pairs = included - 1;
+  const plural = pairs === 1 ? '' : 's';
+  // Without a cap from the server, say what is certain and claim nothing about
+  // how much will be examined.
+  if (!ocrMaxPairs) return `This Storyboard has ${pairs} step${plural}.`;
+  return pairs > ocrMaxPairs
+    ? `Compares the first ${ocrMaxPairs} of ${pairs} steps in this Storyboard.`
+    : `Compares all ${pairs} step${plural} in this Storyboard.`;
+}
+
+function updateStoryboardCoverage() {
+  const select = document.getElementById('reportStoryboardSelect');
+  const coverage = document.getElementById('reportStoryboardCoverage');
+  const chosen = reportStoryboards.find((s) => s.id === select.value);
+  coverage.textContent = chosen ? storyboardCoverageText(chosen) : '';
+}
+
+let reportStoryboards = [];
+
+/** Loads the Project's Storyboards into the picker, or explains why it cannot. */
+async function loadReportStoryboards() {
+  const projectId = document.getElementById('reportProjectSelect').value;
+  const select = document.getElementById('reportStoryboardSelect');
+  const coverage = document.getElementById('reportStoryboardCoverage');
+
+  reportStoryboards = [];
+  select.innerHTML = '';
+  coverage.textContent = '';
+  if (!projectId) return;
+
+  try {
+    const data = await apiFetch(`/admin/projects/${encodeURIComponent(projectId)}/storyboards`);
+    reportStoryboards = data.storyboards;
+    ocrMaxPairs = data.maxPairs ?? null;
+  } catch (err) {
+    coverage.textContent = err.message || 'Could not load Storyboards for this project.';
+    return;
+  }
+
+  if (reportStoryboards.length === 0) {
+    coverage.textContent = 'This project has no Storyboards yet. Build one from the Projects tab first.';
+    return;
+  }
+
+  select.innerHTML = reportStoryboards.map((s) => `
+    <option value="${esc(s.id)}">${esc(s.createdAt ? fmtDate(s.createdAt) : s.id)} — ${esc(String(s.includedCaptures))} of ${esc(String(s.totalCaptures))} Captures</option>
+  `).join('');
+  updateStoryboardCoverage();
+}
+
+/** The picker belongs to the OCR type alone; every other report is Project-scoped. */
+async function onReportTypeChange() {
+  const isOcr = document.getElementById('reportTypeSelect').value === OCR_REPORT_TYPE;
+  setHidden(document.getElementById('reportStoryboardGroup'), !isOcr);
+  if (isOcr) await loadReportStoryboards();
+}
+
 function openGenerateReportModal() {
   document.getElementById('generateReportError').textContent = '';
   document.getElementById('generateReportSubmitBtn').disabled = false;
   openModal('generateReportModal');
+  onReportTypeChange();
 }
 
 async function submitGenerateReport() {
@@ -1762,11 +1853,20 @@ async function submitGenerateReport() {
 
   if (!projectId) { errorEl.textContent = 'Please select a project.'; return; }
 
+  const isOcr = reportType === OCR_REPORT_TYPE;
+  const storyboardId = document.getElementById('reportStoryboardSelect').value;
+  if (isOcr && !storyboardId) {
+    errorEl.textContent = 'Please select a Storyboard for this report type.';
+    return;
+  }
+
   errorEl.textContent = ''; btn.disabled = true; btn.textContent = 'Generating...';
   try {
     const res = await apiFetch('/admin/reports/generate', {
       method: 'POST',
-      body: JSON.stringify({ projectId, reportType })
+      // No dateRange alongside a storyboardId: the backend refuses the pair
+      // rather than resolving it, because the Storyboard is the selection.
+      body: JSON.stringify(isOcr ? { projectId, reportType, storyboardId } : { projectId, reportType })
     });
     closeModal('generateReportModal');
     showToast('Report generation queued.', 'success');
@@ -1855,8 +1955,71 @@ function renderReportMetrics(metrics) {
   return `<table style="margin:var(--space-3) 0">${rows}</table>`;
 }
 
+/** What one OCR comparison found between two consecutive Captures (#96). */
+function renderComparison(comparison) {
+  const heading = `Step ${esc(String(comparison.from.order))} → ${esc(String(comparison.to.order))}`;
+
+  // The Analyst's note sits beside the finding, never inside the prompt that
+  // produced it (ADR 0017). Showing both is what lets a reader see whether the
+  // note and the finding agree.
+  const notes = [comparison.from.note, comparison.to.note].filter(Boolean)
+    .map((n) => `<div class="muted">“${esc(n)}”</div>`).join('');
+
+  let body;
+  if (comparison.error) {
+    body = `<div class="muted">This comparison could not be made: ${esc(comparison.error)}</div>`;
+  } else if (comparison.findings.length === 0) {
+    // Not omitted: "nothing changed here" is a real observation, and an absent
+    // finding must not look like a pair that was never examined.
+    body = '<div class="muted">No changes detected.</div>';
+  } else {
+    body = `<table style="margin-top:var(--space-2)">${comparison.findings.map((f) => `
+      <tr>
+        <td class="muted" style="padding-right:var(--space-3)">${esc(f.elementType)}</td>
+        <td style="padding-right:var(--space-3)">${esc(f.label)}</td>
+        <td class="muted">${esc(f.oldState)} → ${esc(f.newState)}</td>
+      </tr>`).join('')}</table>`;
+  }
+
+  return `
+    <div style="border-left:2px solid var(--color-border);padding-left:var(--space-3);margin:var(--space-3) 0">
+      <div style="font-weight:600">${heading}</div>
+      ${notes}
+      ${body}
+      <div class="muted" style="font-size:var(--text-xs);margin-top:var(--space-2)">
+        ${esc(comparison.from.captureId)} → ${esc(comparison.to.captureId)}
+      </div>
+    </div>`;
+}
+
+/** An OCR Report: what changed at each step of a Storyboard, and how much was examined. */
+function renderOcrArtifact(reportType, artifact) {
+  const c = artifact.coverage;
+  const notLookedAt = c.availablePairs - c.comparedPairs;
+
+  const coverage = [
+    `Compared ${esc(String(c.comparedPairs))} of ${esc(String(c.availablePairs))} steps`,
+    notLookedAt > 0 ? `${esc(String(notLookedAt))} later steps were not examined` : null,
+    c.droppedCaptures > 0
+      ? `${esc(String(c.droppedCaptures))} Capture(s) had no stored image, so no comparison spans them`
+      : null,
+  ].filter(Boolean).join('. ');
+
+  return `
+    <div style="font-weight:600;margin-bottom:var(--space-2)">${esc(reportType)}</div>
+    <div class="muted" style="margin-bottom:var(--space-3)">${coverage}.</div>
+    ${artifact.comparisons.map(renderComparison).join('')}
+    <details style="margin-top:var(--space-4)">
+      <summary class="muted">Full artifact</summary>
+      <pre style="margin-top:var(--space-2);font-family:var(--font-mono);font-size:var(--text-xs);white-space:pre-wrap;word-break:break-word">${esc(JSON.stringify(artifact, null, 2))}</pre>
+    </details>`;
+}
+
 /** A standard Report: its narrative, whether that narrative was trusted, its figures. */
 function renderReportArtifact(reportType, artifact) {
+  // An OCR Report is a different shape: comparisons, not metrics and a summary.
+  if (Array.isArray(artifact.comparisons)) return renderOcrArtifact(reportType, artifact);
+
   const parts = [`<div style="font-weight:600;margin-bottom:var(--space-3)">${esc(reportType)}</div>`];
 
   if (artifact.summary) {

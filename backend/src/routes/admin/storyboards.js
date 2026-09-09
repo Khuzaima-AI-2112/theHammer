@@ -103,7 +103,7 @@ const logger = require('../../lib/logger');
 const { db } = require('../../lib/firestore');
 const { requireAnalyst } = require('../../middleware/requireAuth');
 const { getAIClient } = require('../../lib/vertex');
-const { DEFAULT_LLM_MODEL, TTS_MODEL, TTS_VOICE } = require('../../lib/models');
+const { DEFAULT_LLM_MODEL, TTS_MODEL, TTS_VOICE, OCR_MAX_PAIRS } = require('../../lib/models');
 const { submitRender } = require('../../lib/shotstack');
 const collections = require('../../lib/collections');
 const { loadOwnedProject, belongsToCaller } = require('../../lib/ownership');
@@ -370,6 +370,52 @@ router.post('/projects/:id/storyboards', requireAnalyst, async (req, res, next) 
     const snap = await ref.get();
     const draft = await enrichWithSignedUrls(serializeDraft(snap));
     return res.status(201).json(draft);
+  } catch (err) { next(err); }
+});
+
+/**
+ * The Project's Storyboards, as a list to choose from (#96).
+ *
+ * Added for the OCR Report picker: an OCR Report is generated for a Storyboard
+ * (ADR 0017), and nothing could enumerate them — the portal held exactly one
+ * draft in memory, and the only reads were "create or resume" and "fetch by
+ * id".
+ *
+ * Deliberately not `enrichWithSignedUrls`: a picker needs names and sizes, and
+ * minting a signed URL per Capture across every Storyboard in a Project would
+ * be dozens of pointless round trips. `includedCaptures` is here because it is
+ * what decides whether a Report can be generated at all and how much of the
+ * workflow it will cover.
+ */
+router.get('/projects/:id/storyboards', requireAnalyst, async (req, res, next) => {
+  try {
+    if (!await loadOwnedProject(req, res, req.params.id)) return;
+
+    const snap = await db.collection(collections.STORYBOARD_DRAFTS)
+      .where('projectId', '==', req.params.id)
+      .get();
+
+    const storyboards = snap.docs.map((d) => {
+      const data = d.data();
+      const captures = data.captures ?? [];
+      return {
+        id: d.id,
+        status: data.status ?? null,
+        createdAt: data.createdAt ?? null,
+        totalCaptures: captures.length,
+        includedCaptures: captures.filter((c) => c.included).length,
+      };
+    // Newest first, sorted in memory: the collection has no
+    // (projectId, createdAt) composite index deployed, and this is a handful
+    // of rows per Project — the same reasoning as the export query above.
+    }).sort((a, b) => String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? '')));
+
+    // The cap travels with the list so the portal can state coverage without
+    // holding its own copy of the number. ADR 0017 puts this value in
+    // lib/models.js and means it: a portal that hardcoded 20 would keep
+    // promising "the first 20" after the backend started enforcing something
+    // else, which is a wrong statement about what the Report examined.
+    return res.json({ storyboards, total: storyboards.length, maxPairs: OCR_MAX_PAIRS });
   } catch (err) { next(err); }
 });
 

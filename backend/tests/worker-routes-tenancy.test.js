@@ -177,7 +177,7 @@ describe('#104 SEC-15 — POST /worker/reports refuses a report in another Works
 describe('#104 SEC-16 — POST /worker/ocr refuses a Project in another Workspace', () => {
   test('the requireAdmin path: 403, and nothing is written for Beta', async () => {
     const res = await request(app).post('/worker/ocr').set(ADMIN)
-      .send({ reportId: ALPHA_REPORT, projectId: BETA_PROJECT, reportType: 'ui_state_changes' });
+      .send({ reportId: ALPHA_REPORT, projectId: BETA_PROJECT, reportType: 'storyboard_changes' });
 
     expect(res.status).toBe(403);
     await expectNoReportWasProduced(ALPHA_REPORT);
@@ -187,7 +187,7 @@ describe('#104 SEC-16 — POST /worker/ocr refuses a Project in another Workspac
 describe('#104 SEC-17 — POST /worker/ocr refuses a report in another Workspace', () => {
   test("the requireAdmin path: 403, and Beta's report gains no result", async () => {
     const res = await request(app).post('/worker/ocr').set(ADMIN)
-      .send({ reportId: BETA_REPORT, projectId: ALPHA_PROJECT, reportType: 'ui_state_changes' });
+      .send({ reportId: BETA_REPORT, projectId: ALPHA_PROJECT, reportType: 'storyboard_changes' });
 
     expect(res.status).toBe(403);
     await expectNoReportWasProduced(BETA_REPORT);
@@ -236,21 +236,28 @@ describe('#104 SEC-19 — the internal secret is unaffected', () => {
   //
   // It used to assert the report reached `done` with an artifact — but that
   // only ever passed because generateOcrReport fabricated its findings, so the
-  // assertion was measuring the mock rather than the feature (#96). The worker
-  // now refuses instead of inventing, and `error` is the honest outcome until
-  // the real implementation lands. The secret path is no less exercised.
+  // assertion was measuring the mock rather than the feature (#96).
+  //
+  // Since #96 landed it errors for a different reason, and the distinction is
+  // the point of the assertion below: no `storyboardId` is sent, so the
+  // request gets past auth and fails inside the worker's own validation. An
+  // OCR Report is generated for a Storyboard (ADR 0017), and this test is
+  // about the auth path rather than the generation — the 202 and the recorded
+  // reason together prove the secret was admitted and reached the worker.
   test('the secret path: /worker/ocr still runs', async () => {
     const ocrReport = 'alpha-ocr-report';
     await seedReport(ocrReport, ALPHA_PROJECT, 'alpha');
 
     const res = await request(app).post('/worker/ocr').set(SECRET)
-      .send({ reportId: ocrReport, projectId: ALPHA_PROJECT, reportType: 'ui_state_changes' });
+      .send({ reportId: ocrReport, projectId: ALPHA_PROJECT, reportType: 'storyboard_changes' });
 
     expect(res.status).toBe(202);
 
     const settled = await waitForReport(ocrReport, (d) => d.status === 'done' || d.status === 'error');
     expect(settled.status).toBe('error');
     expect(settled.gcsPath).toBeNull();
+    // Reached the worker, rather than being refused at the door.
+    expect(settled.error).toBeTruthy();
   });
 });
 
