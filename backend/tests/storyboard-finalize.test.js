@@ -150,6 +150,41 @@ describe('buildStoryboardPdf', () => {
     expect(slide1Idx).toBeLessThan(slide3Idx);
     expect(text).not.toContain('Slide 2'); // pdf-cap-b's slide number, excluded
   });
+
+  // #121. The narrative arrives from Gemini as Markdown, and pdfkit's .text()
+  // draws whatever characters it is handed — so the first real Storyboard PDF
+  // carried 60 `#` headings and 380 `**` markers as visible text. The unit
+  // tests in narrative-markdown.test.js cover the parsing; this one is the
+  // claim that matters to a Customer, made against the actual artifact.
+  test('renders the narrative\'s Markdown rather than printing its syntax', async () => {
+    const getRes = await request(app).get(`/admin/storyboards/${draft.id}`).set(HEADERS.analyst);
+    const curated = {
+      ...getRes.body,
+      narrativeText: [
+        '### **Phase 1: Retailer Onboarding**',
+        '',
+        '* **Operator Action:** Creates `FreshMart`.',
+        '',
+        '---',
+        '',
+        'Closing line.',
+      ].join('\n'),
+    };
+
+    const pdfBuffer = await storyboardsRouter.buildStoryboardPdf(curated);
+    const text = extractPdfText(pdfBuffer);
+
+    // Every word survives.
+    expect(text).toContain('Phase 1: Retailer Onboarding');
+    expect(text).toContain('Operator Action:');
+    expect(text).toContain('FreshMart');
+    expect(text).toContain('Closing line.');
+
+    // None of the syntax does.
+    expect(text).not.toContain('**');
+    expect(text).not.toContain('###');
+    expect(text).not.toContain('`');
+  });
 });
 
 describe('POST /admin/storyboards/:id/finalize', () => {

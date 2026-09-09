@@ -105,6 +105,7 @@ const { requireAnalyst } = require('../../middleware/requireAuth');
 const { getAIClient } = require('../../lib/vertex');
 const { DEFAULT_LLM_MODEL, TTS_MODEL, TTS_VOICE, OCR_MAX_PAIRS } = require('../../lib/models');
 const { submitRender } = require('../../lib/shotstack');
+const { renderMarkdown } = require('../../lib/narrativeMarkdown');
 const collections = require('../../lib/collections');
 const { loadOwnedProject, belongsToCaller } = require('../../lib/ownership');
 
@@ -769,9 +770,11 @@ async function buildStoryboardPdf(draft) {
   });
 
   doc.addPage();
-  doc.fontSize(20).text('Storyboard Narrative');
+  doc.font('Helvetica-Bold').fontSize(20).text('Storyboard Narrative');
   doc.moveDown();
-  doc.fontSize(12).text(draft.narrativeText || '');
+  // Rendered, not printed: the model returns Markdown and `.text()` would
+  // draw the `#` and `**` characters onto a client-facing page (#121).
+  renderMarkdown(doc, draft.narrativeText || '');
 
   for (const c of included) {
     doc.addPage();
