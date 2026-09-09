@@ -23,6 +23,8 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
 
+const { stripComments } = require('./lift');
+
 const PORTAL = path.join(__dirname, '..');
 
 /**
@@ -33,15 +35,11 @@ const PORTAL = path.join(__dirname, '..');
  * The comment explaining *why* a property was renamed necessarily names the
  * old one, and flagging that would mean either deleting the explanation or
  * rewording it into something less true.
+ *
+ * The stripping itself moved to lift.js in #50, which needed the same thing.
  */
 function read(file) {
-  const source = fs.readFileSync(path.join(PORTAL, file), 'utf8');
-  return source
-    .replace(/\/\*[\s\S]*?\*\//g, '')   // CSS and JS block comments
-    .replace(/<!--[\s\S]*?-->/g, '')    // HTML comments
-    .split('\n')
-    .filter((line) => !/^\s*\/\//.test(line))
-    .join('\n');
+  return stripComments(fs.readFileSync(path.join(PORTAL, file), 'utf8'));
 }
 
 /** Every `--name:` declaration in the stylesheet. */

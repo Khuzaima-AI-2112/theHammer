@@ -429,7 +429,7 @@ function renderSkeleton() {
   const empty = document.getElementById('emptyState');
   const table = document.getElementById('projectsTable');
   empty.style.display = 'none';
-  table.style.display = '';
+  table.style.display = 'table';
   tbody.innerHTML = Array.from({ length: 5 }, () => `
     <tr class="skeleton-row">
       <td><div class="skel-block skeleton" style="width:60%"></div></td>
@@ -456,7 +456,7 @@ function renderProjects(list) {
   if (rows.length === 0 && allProjects.length === 0) {
     table.style.display = 'none'; empty.style.display = 'flex'; return;
   }
-  table.style.display = ''; empty.style.display = 'none';
+  table.style.display = 'table'; empty.style.display = 'none';
 
   if (rows.length === 0) {
     tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:var(--space-8);color:var(--color-text-muted)">No projects match your search.</td></tr>`;
@@ -771,7 +771,7 @@ async function loadUsers() {
   const table     = document.getElementById('usersTable');
 
   empty.style.display = 'none';
-  table.style.display = '';
+  table.style.display = 'table';
   tbody.innerHTML = Array.from({ length: 5 }, () => `
     <tr class="skeleton-row">
       <td><div class="skel-block skeleton" style="width:65%"></div></td>
@@ -825,7 +825,7 @@ function renderUsers(list, activeProjectId) {
     empty.style.display = 'flex';
     return;
   }
-  table.style.display = ''; empty.style.display = 'none';
+  table.style.display = 'table'; empty.style.display = 'none';
 
   // Find project name for action buttons
   const proj = allProjects.find(p => p.projectId === activeProjectId);
@@ -1055,7 +1055,7 @@ async function loadActivity() {
   }
 
   empty.style.display = 'none';
-  table.style.display = '';
+  table.style.display = 'table';
   tbody.innerHTML = Array.from({ length: 6 }, () => `
     <tr class="skeleton-row">
       <td><div class="skel-block skeleton" style="width:80px"></div></td>
@@ -1108,7 +1108,7 @@ function renderActivity(list) {
     document.getElementById('activityEmptyDesc').textContent  = 'Uploads will appear here once users start capturing.';
     return;
   }
-  table.style.display = ''; empty.style.display = 'none';
+  table.style.display = 'table'; empty.style.display = 'none';
 
   // Calculate per-user gaps > 45s (45000 ms)
   const sorted = [...list].sort((a, b) => new Date(a.uploadedAt) - new Date(b.uploadedAt));
@@ -1233,7 +1233,7 @@ function renderStoryboardDraft() {
     empty.style.display = 'flex';
     return;
   }
-  grid.style.display = '';
+  grid.style.display = 'grid';
   empty.style.display = 'none';
 
   const sorted = [...storyboardDraft.captures].sort((a, b) => a.order - b.order);
@@ -1304,7 +1304,7 @@ function renderStoryboardNarrative() {
 
   if (narrativeStatus === 'error' && storyboardDraft.narrativeError) {
     errorEl.textContent = storyboardDraft.narrativeError;
-    errorEl.style.display = '';
+    errorEl.style.display = 'block';
   } else {
     errorEl.style.display = 'none';
   }
@@ -1314,7 +1314,7 @@ function renderStoryboardNarrative() {
       textEl.value = storyboardDraft.narrativeText;
       textEl.dataset.loadedText = storyboardDraft.narrativeText;
     }
-    textWrap.style.display = '';
+    textWrap.style.display = 'block';
   } else {
     textWrap.style.display = 'none';
   }
@@ -1486,7 +1486,7 @@ async function finalizeStoryboardDraft() {
     showToast('Storyboard finalized — find it in the Reports tab.', 'success');
     // "Generate video" (#90) requires a finalized PDF to already exist —
     // this session just created one, so the action is now offered.
-    document.getElementById('storyboardVideoSection').style.display = '';
+    document.getElementById('storyboardVideoSection').style.display = 'block';
   } catch (err) {
     showToast(`Failed to finalize Storyboard: ${err.message}`, 'error');
   } finally {
@@ -1513,7 +1513,7 @@ async function revealVideoSectionIfAlreadyFinalized(draftId, projectId) {
       r.storyboardDraftId === draftId && r.reportType === 'storyboard' && r.status === 'done'
     );
     if (alreadyFinalized) {
-      document.getElementById('storyboardVideoSection').style.display = '';
+      document.getElementById('storyboardVideoSection').style.display = 'block';
     }
   } catch (_) {
     // Non-fatal: the button just stays hidden until the Analyst finalizes
@@ -1769,7 +1769,14 @@ let ocrMaxPairs = null;
  * Reveal or hide the picker.
  *
  * `el.hidden`, not `el.style.display` — clearing an inline style to reveal is
- * the pattern lesson 59 forbids and #50 exists to remove from five sites.
+ * the pattern lesson 59 forbids, and #50 has now removed it from the twelve
+ * sites that carried it.
+ *
+ * `hidden` is the better tool only where no author rule sets a `display` on the
+ * element: the attribute's `display: none` comes from the user agent
+ * stylesheet, so any class rule beats it. That holds for this picker and not
+ * for, say, `.storyboard-grid`, which is why the sites #50 fixed assign an
+ * explicit value rather than all moving here.
  */
 function setHidden(el, hidden) {
   el.hidden = hidden;
@@ -1894,7 +1901,7 @@ async function loadReports() {
     return;
   }
 
-  table.style.display = '';
+  table.style.display = 'table';
   empty.style.display = 'none';
   tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:var(--space-8);color:var(--color-text-muted)">Loading...</td></tr>';
 

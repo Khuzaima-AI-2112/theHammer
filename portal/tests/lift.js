@@ -35,4 +35,30 @@ function functionBody(source, name) {
   return source.slice(start, end + 2);
 }
 
-module.exports = { lift, functionBody };
+/**
+ * A file's source with its comments removed, for the guards that scan text for
+ * a forbidden pattern.
+ *
+ * Lesson 83: "scan the file" and "scan the code" look like the same task and
+ * are not. Four guards in one session flagged the comment explaining the very
+ * defect they exist to prevent, and the tempting fix — rewording the comment —
+ * trades a true sentence for a passing test. Narrowing the pattern is a guess
+ * about quoting; the distinction actually wanted is about where in the file the
+ * match sits.
+ *
+ * Whole-line `//` only: a trailing comment after real code is left alone, since
+ * the code before it is exactly what a guard wants to see.
+ *
+ * Shared rather than copied for the reason `lift` is — this is its second
+ * caller, which is where two byte-identical copies start to drift.
+ */
+function stripComments(source) {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, '')   // CSS and JS block comments
+    .replace(/<!--[\s\S]*?-->/g, '')    // HTML comments
+    .split('\n')
+    .filter((line) => !/^\s*\/\//.test(line))
+    .join('\n');
+}
+
+module.exports = { lift, functionBody, stripComments };

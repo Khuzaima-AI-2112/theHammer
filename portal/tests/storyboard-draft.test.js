@@ -245,7 +245,10 @@ test('the Storyboard view has a finalize action wired to finalizeStoryboardDraft
 test('finalizeStoryboardDraft reveals the video section only after a successful finalize', () => {
   const body = functionBody(APP_JS, 'finalizeStoryboardDraft');
 
-  assert.match(body, /storyboardVideoSection['"]\)\.style\.display\s*=\s*''/,
+  // The value was `''` until #50; it is now the explicit `block` lesson 59
+  // asks for. What matters here is only that the reveal happens on the success
+  // path — display-reveal-contract.test.js is what pins the value.
+  assert.match(body, /storyboardVideoSection['"]\)\.style\.display\s*=\s*'(?!none')[^']+'/,
     'generating a video requires a finalized PDF to already exist — the action must not be offered before one does');
 });
 
