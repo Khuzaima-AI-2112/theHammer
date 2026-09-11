@@ -321,19 +321,25 @@ describe('buildStoryboardPdf — the grid', () => {
       'which is the first sign that this session is not being treated as a',
       'superadmin; everything below the fold renders correctly, so the gate is on',
       'the tile list itself rather than on the whole page, leaving the operator',
-      'entirely unwarned.',
+      'entirely unwarned about any of it.',
     ].join(' ');
     const words = sentence.split(/\s+/);
     expect(words.length).toBeGreaterThanOrEqual(STORYBOARD_CAPTION_MAX_WORDS);
-    const caption = words.slice(0, STORYBOARD_CAPTION_MAX_WORDS).join(' ');
+    // The budget's last word is a token that appears nowhere else in the
+    // document. Ending on whatever word the sentence happens to reach — "the",
+    // as it was first written — makes the survival check pass on a caption
+    // that was cut, since the page is full of that word already.
+    const caption = [
+      ...words.slice(0, STORYBOARD_CAPTION_MAX_WORDS - 1),
+      'zzlastword',
+    ].join(' ');
 
     const draft = draftOf(['grid-1']);
     draft.narrativeCaptions = [{ captureId: 'grid-1', caption }];
     const text = extractPdfText(await build(draft));
 
     // The last word survives — pdfkit drops the tail when it ellipsises.
-    const lastWord = caption.split(/\s+/).pop().replace(/[.,;]/g, '');
-    expect(text).toContain(lastWord);
+    expect(text).toContain('zzlastword');
     // 0x85 is WinAnsi's ellipsis, which is what an overflowing band would draw.
     expect(text).not.toContain(String.fromCharCode(0x85));
   });
