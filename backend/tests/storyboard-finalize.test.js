@@ -35,6 +35,9 @@ const storyboardsRouter = require('../src/routes/admin/storyboards');
 const collections = require('../src/lib/collections');
 const { extractPdfText, countPdfPages } = require('./helpers/pdfText');
 const { clearDatabase, seedUser, seedProject, HEADERS } = require('./helpers/fixtures');
+const { downloadStats, resetDownloadStats, delayDownloads } = require('./helpers/gcsMock');
+
+const { IMAGE_PREFETCH_AHEAD } = storyboardsRouter;
 
 async function seedUpload(id, projectId, data = {}) {
   await db.collection(collections.UPLOADS).doc(id).set({
@@ -351,6 +354,58 @@ describe('buildStoryboardPdf — the grid', () => {
     expect(text).toContain('1 · /admin/grid-1');
     expect(text).toContain('2 · /admin/grid-2');
   });
+
+  // #122. Every other test here asks what the page says; this one asks what it
+  // cost to get there, because the two are indistinguishable in the artifact.
+  // Assembly downloaded each Capture inside the page loop — 66 sequential
+  // round trips for the real Storyboard, 89.7s from a developer machine — and
+  // no test could tell that from the same PDF assembled in a tenth of the
+  // time.
+  describe('fetching the frames', () => {
+    beforeEach(() => { resetDownloadStats(); });
+    afterEach(() => { resetDownloadStats(); });
+
+    test('the downloads overlap, up to the prefetch bound', async () => {
+      // More frames than the bound, so the pool is what limits them.
+      expect(ALL.length).toBeGreaterThan(IMAGE_PREFETCH_AHEAD);
+      await build(draftOf(ALL));
+
+      const { started, maxInFlight } = downloadStats();
+      expect(started).toBe(ALL.length);
+      expect(maxInFlight).toBe(IMAGE_PREFETCH_AHEAD);
+    });
+
+    // The bound is the half that is easy to lose. Unbounded is a one-line
+    // change from here, and on the real draft it means 66 simultaneous
+    // connections and all 66 images resident in a 512Mi container beside an
+    // uncompressed PDF buffer.
+    test('and never more than that at once', async () => {
+      // Held open, so the count is of downloads genuinely running together
+      // rather than of calls issued in one synchronous burst.
+      delayDownloads(4);
+      await build(draftOf(ALL));
+
+      expect(downloadStats().maxInFlight).toBeLessThanOrEqual(IMAGE_PREFETCH_AHEAD);
+    });
+
+    test('a Capture whose bytes never landed is not fetched, and does not stop the rest', async () => {
+      // An Abandoned Upload: the row exists, the object does not, so there is
+      // no gcsPath to download. It draws a labelled frame with no image.
+      await seedUpload('grid-abandoned', 'finalize-proj', {
+        stage: 'super-admin', tabUrl: 'https://app.example/admin/gone',
+        path: null, gcsPath: null,
+      });
+      try {
+        const text = extractPdfText(await build(draftOf(['grid-1', 'grid-abandoned', 'grid-2'])));
+
+        expect(downloadStats().started).toBe(2);
+        expect(text).toContain('2 · /admin/gone');
+        expect(text).toContain('3 · /admin/grid-2');
+      } finally {
+        await db.collection(collections.UPLOADS).doc('grid-abandoned').delete();
+      }
+    });
+  });
 });
 
 describe('POST /admin/storyboards/:id/finalize', () => {
@@ -362,9 +417,27 @@ describe('POST /admin/storyboards/:id/finalize', () => {
   });
 
   afterEach(async () => {
+    resetDownloadStats();
     await db.collection(collections.UPLOADS).doc('fin-cap-a').delete();
     await db.collection(collections.STORYBOARD_DRAFTS).doc(draft.id).delete();
   });
+
+  /**
+   * The `reports` row this draft's finalize is writing into, once it exists.
+   *
+   * Polled rather than awaited because the point is to catch the row *during*
+   * the request. 40 × 25ms is the same budget `pollUntilSettled` above uses,
+   * and is comfortably inside the window `delayDownloads` holds open.
+   */
+  async function pollForReportRow(draftId, tries = 40) {
+    for (let i = 0; i < tries; i += 1) {
+      const snap = await db.collection(collections.REPORTS)
+        .where('storyboardDraftId', '==', draftId).get();
+      if (!snap.empty) return snap.docs[0].data();
+      await new Promise((resolve) => { setTimeout(resolve, 25); });
+    }
+    throw new Error(`no reports row for draft ${draftId}`);
+  }
 
   test('404 — no such draft', async () => {
     const res = await request(app)
@@ -459,6 +532,36 @@ describe('POST /admin/storyboards/:id/finalize', () => {
     const projectSnap = await db.collection(collections.PROJECTS).doc('finalize-proj').get();
     expect(projectSnap.data().workspaceId).toBeTruthy();
     expect(reportSnap.data().workspaceId).toBe(projectSnap.data().workspaceId);
+  });
+
+  // #122. Cloud Run kills a request that outruns `--timeout 300s` without
+  // running anything's `catch`, so whatever the row said when assembly began
+  // is what the Analyst is left looking at in the Reports tab. It has said
+  // `processing` since #89 — untested until now, and a one-line move into the
+  // `try` away from saying nothing at all, which is the failure #122 was
+  // filed describing.
+  test('the `reports` row is written, marked processing, before assembly starts', async () => {
+    await generateNarrativeFor(draft.id);
+    // The double answers instantly, so without a delay the whole finalize is
+    // over before the row can be read: this holds assembly open long enough
+    // for "before" to be observable at all.
+    delayDownloads(300);
+
+    // `.then()` is what dispatches a supertest request — without it the POST
+    // would not have been sent by the time we poll.
+    const finalizing = request(app)
+      .post(`/admin/storyboards/${draft.id}/finalize`)
+      .set(HEADERS.analyst)
+      .then((res) => res);
+
+    const inFlight = await pollForReportRow(draft.id);
+    expect(inFlight.status).toBe('processing');
+    expect(inFlight.reportType).toBe('storyboard');
+    expect(inFlight.gcsPath).toBeNull();
+
+    const res = await finalizing;
+    expect(res.status).toBe(201);
+    expect(res.body.status).toBe('done');
   });
 
   test('a finalized Storyboard appears in the existing Reports list, viewable the same way any other report is', async () => {

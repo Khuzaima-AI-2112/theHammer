@@ -111,6 +111,7 @@ const {
 } = require('../../lib/models');
 const { submitRender } = require('../../lib/shotstack');
 const { renderMarkdown } = require('../../lib/narrativeMarkdown');
+const { prefetchInOrder } = require('../../lib/prefetch');
 const collections = require('../../lib/collections');
 const { loadOwnedProject, belongsToCaller } = require('../../lib/ownership');
 
@@ -928,6 +929,23 @@ const FRAME_BAND_GAP = 4;
 const PERSONA_HEADER_HEIGHT = 30;
 
 /**
+ * How many Capture images assembly keeps in the air at once (#122).
+ *
+ * Drawing a frame is instant; fetching its image is a round trip to Cloud
+ * Storage, and doing 66 of those one after another cost 89.7s from a
+ * developer machine — 5.2s in Cloud Run, which shares a region with the
+ * bucket (ADR 0013's 2026-09-11 amendment has both numbers and why they
+ * differ by so much).
+ *
+ * Eight is the number #122 proposed, and it is chosen for the second bound as
+ * much as the first: this is also the most images held in memory at one time,
+ * in a container with 512Mi and a growing uncompressed PDF buffer beside it.
+ * Raising it buys progressively less — the first few overlaps remove most of
+ * the waiting — and costs memory linearly.
+ */
+const IMAGE_PREFETCH_AHEAD = 8;
+
+/**
  * What a frame is labelled with: its slide number and where the screenshot was
  * taken — `3 · /admin/retailers`, not `Slide 3`.
  *
@@ -1092,7 +1110,23 @@ async function buildStoryboardPdf(draft) {
     slot = 0;
   }
 
-  for (const c of included) {
+  // The image work is the slow half and the only half that waits on anything,
+  // so it runs ahead of the drawing rather than inside it (#122). Order is
+  // preserved by prefetchInOrder — the frames are drawn in curated order
+  // whatever order Cloud Storage answers in.
+  const fetchFrameImage = async (c) => {
+    const upload = uploadById[c.captureId];
+    const gcsPath = upload?.gcsPath ?? upload?.path ?? null;
+    // An Abandoned Upload has a row and no object. Nothing to fetch, and the
+    // frame is drawn labelled but empty, exactly as before.
+    if (!gcsPath) return null;
+    const [bytes] = await storage.bucket(BUCKET).file(gcsPath).download();
+    return bytes;
+  };
+
+  const frames = prefetchInOrder(included, fetchFrameImage, { ahead: IMAGE_PREFETCH_AHEAD });
+
+  for await (const { item: c, value: imageBytes } of frames) {
     const upload = uploadById[c.captureId];
     const persona = upload?.stage ?? '';
 
@@ -1115,10 +1149,8 @@ async function buildStoryboardPdf(draft) {
         width: grid.cellWidth, height: FRAME_LABEL_HEIGHT, lineBreak: false, ellipsis: true,
       });
 
-    const gcsPath = upload?.gcsPath ?? upload?.path ?? null;
-    if (gcsPath) {
-      const [bytes] = await storage.bucket(BUCKET).file(gcsPath).download();
-      doc.image(bytes, x, y + FRAME_LABEL_HEIGHT, { fit: [grid.cellWidth, FRAME_IMAGE_HEIGHT] });
+    if (imageBytes) {
+      doc.image(imageBytes, x, y + FRAME_LABEL_HEIGHT, { fit: [grid.cellWidth, FRAME_IMAGE_HEIGHT] });
     }
 
     const captionY = y + FRAME_LABEL_HEIGHT + FRAME_IMAGE_HEIGHT + FRAME_BAND_GAP;
@@ -1402,5 +1434,8 @@ router.synthesizeNarration = synthesizeNarration;
 router.buildNarrationText = buildNarrationText;
 router.buildShotstackTimeline = buildShotstackTimeline;
 router.generateNarrative = generateNarrative;
+// Exported so the suite asserts against the bound assembly actually uses,
+// rather than against a second copy of the number (#122).
+router.IMAGE_PREFETCH_AHEAD = IMAGE_PREFETCH_AHEAD;
 
 module.exports = router;

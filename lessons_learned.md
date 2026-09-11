@@ -1109,3 +1109,55 @@ which is a distinction about **where in the file** the match sits.
 - **The comment explaining a rename names the old value.** That is not
   optional — it is what stops the next reader reintroducing it — so any guard
   over that value must tolerate it by construction.
+
+### 84. A test filter that matched nothing, and the run still exited 0
+
+**What happened:** While working #122, one new test was run on its own to watch
+it fail first — the red step of TDD. The documented command is
+`npm run test:emulator` (DEVELOPER_GUIDE §3), which runs the whole suite, so to
+filter down to one test the exec form was typed out by hand from `backend/`,
+where §1 says the pinned CLI resolves:
+
+```
+npx firebase emulators:exec --only firestore --project demo-hammer \
+  "node --experimental-vm-modules node_modules/jest/bin/jest.js \
+   tests/storyboard-finalize.test.js --runInBand -t 'fetching the frames'"
+```
+
+It reported:
+
+```
+Test Suites: 47 skipped, 0 of 47 total
+Tests:       571 skipped, 571 total
++  Script exited successfully (code 0)
+```
+
+Green, and nothing ran. The line above the counts said what had happened:
+
+```
+Ran all test suites matching tests/storyboard-finalize.test.js|the|frames'
+with tests matching "'fetching"
+```
+
+**Root cause:** the string handed to `emulators:exec` is executed by the
+platform shell, which on Windows is `cmd.exe`, and `cmd.exe` does not treat
+`'` as a quote character. Bash passed the single quotes through untouched, so
+the three words of the filter arrived as three arguments: `-t` took
+`'fetching`, while `the` and `frames'` became extra *path* patterns. No test is
+named `'fetching`, so Jest matched none, skipped all 571, and exited 0 —
+because a filter that matches nothing is not a failure, it is an empty run.
+
+**Rule going forward:**
+- **Never single-quote inside a command string handed to another process on
+  Windows.** `-t \"fetching the frames\"` from Bash survives both shells;
+  `'…'` survives Bash and dies at `cmd.exe`. This is not specific to Jest —
+  anything nested inside `emulators:exec`, `gcloud --command`, or an npm
+  script has the same seam.
+- **Read the counts, not the colour.** `0 of 47 total` with everything skipped
+  looks identical to success at the exit code. `Tests: N passed` is the only
+  line that says work was done.
+- **A red step has to be seen to be red.** The whole point of that run was to
+  watch a new assertion fail; an empty run answers with silence and reads like
+  an answer. If a filtered run reports zero failures *and* zero passes, the
+  filter is the bug — and this is the same family as lesson 83's vacuous
+  assertion and #125's caption test that passed while asserting nothing.

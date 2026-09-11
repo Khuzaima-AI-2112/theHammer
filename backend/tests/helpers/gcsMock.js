@@ -51,10 +51,45 @@ function failNextPrefixDelete(message = 'storage unavailable') {
   failNextDelete = message;
 }
 
+/**
+ * What the double has been asked to download, and how much of it at once.
+ *
+ * `maxInFlight` is the point of it (#122): whether PDF assembly overlaps its
+ * Capture downloads or does them one round trip at a time is not visible in
+ * the artifact — both produce the same PDF — and cannot be timed here, because
+ * a double answers instantly. Counting what is outstanding is what makes the
+ * difference assertable at all.
+ */
+const downloads = { started: 0, inFlight: 0, maxInFlight: 0 };
+let downloadDelayMs = 0;
+
+function downloadStats() {
+  return { ...downloads };
+}
+
+/**
+ * Hold each download open for `ms` before it answers.
+ *
+ * Off by default: with no delay the promises settle on the microtask queue,
+ * which is enough to count a pool that issues its calls together, and every
+ * other suite gets the instant answer it was written against.
+ */
+function delayDownloads(ms) {
+  downloadDelayMs = ms;
+}
+
+function resetDownloadStats() {
+  downloads.started = 0;
+  downloads.inFlight = 0;
+  downloads.maxInFlight = 0;
+  downloadDelayMs = 0;
+}
+
 /** Empty the bucket and disarm any injected failure. Call in `beforeEach`. */
 function resetObjects() {
   objects.clear();
   failNextDelete = null;
+  resetDownloadStats();
 }
 
 /**
@@ -89,9 +124,19 @@ function createStorageMock(options = {}) {
     // present. `realPngBytes: true` swaps in an actually-decodable PNG for a
     // caller (e.g. PDF assembly) that parses the image rather than just
     // moving the bytes around.
-    this.download = jest.fn().mockImplementation(
-      () => Promise.resolve([options.realPngBytes ? REAL_PNG_BYTES : Buffer.from(`PNGBYTES:${name}`)])
-    );
+    this.download = jest.fn().mockImplementation(() => {
+      downloads.started += 1;
+      downloads.inFlight += 1;
+      downloads.maxInFlight = Math.max(downloads.maxInFlight, downloads.inFlight);
+      const bytes = options.realPngBytes ? REAL_PNG_BYTES : Buffer.from(`PNGBYTES:${name}`);
+      const answered = downloadDelayMs > 0
+        ? new Promise((resolve) => { setTimeout(resolve, downloadDelayMs); })
+        : Promise.resolve();
+      return answered.then(() => {
+        downloads.inFlight -= 1;
+        return [bytes];
+      });
+    });
   }
 
   return {
@@ -124,4 +169,5 @@ function createStorageMock(options = {}) {
 
 module.exports = {
   createStorageMock, seedObject, listObjects, resetObjects, failNextPrefixDelete,
+  downloadStats, resetDownloadStats, delayDownloads,
 };

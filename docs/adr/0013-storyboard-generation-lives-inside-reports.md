@@ -70,3 +70,72 @@ If the dispatch hop is ever made real (a genuine Cloud Tasks queue, an
 authenticated internal call), finalize should move onto it then — this
 amendment is a statement of current fact, not a case against ever building
 that hop.
+
+## Amendment (2026-09-11, during #122's implementation): "bounded and fast" holds, and the measurement that seemed to refute it was taken in the wrong place
+
+The amendment above rests on one sentence — *"PDF assembly is bounded and fast,
+unlike Vertex AI generation"* — which was written without a measurement. #122
+was filed to say that sentence is false at real sizes, having timed the real
+66-Capture Softomedia draft at **2m49s** (2026-09-09, the 73-page layout) and,
+re-timed after #125, at **75s, 76s, 75s and 120s**, against a backend that
+deploys with `--timeout 300s`. On those numbers one Storyboard was eating
+between a quarter and over half the request budget, and a draft twice the size
+would not finish.
+
+**Every one of those numbers was measured from a developer machine**, through
+`backend/scripts/storyboard-grid-preview.js`, over the public internet — and
+#122's own comment says so. Production disagrees by a factor of thirty. The
+only real finalize this product has ever run, of that same 66-Capture draft,
+is report `L8iuk0ux2HUgYvhCIVbg`, 2026-09-11T11:31:08Z, and its own row dates
+it: `createdAt` is written before assembly starts and `updatedAt` when the PDF
+is uploaded and the row goes `done`. The gap is **5.2 seconds** — assembly,
+a 9.2MB upload and the Firestore writes included. **1.7% of the budget, not
+56%.** Cloud Run shares a region with the bucket; a developer machine does
+not, and 66 sequential round trips is where the whole difference lives.
+
+So the original claim survives, for a reason it never stated: assembly is fast
+*in the place it runs*. What it was missing is that the cost is 66 sequential
+round trips, so it is linear in Captures and entirely at the mercy of the
+distance to the bucket.
+
+**What #122 changed anyway, and why it was still worth doing.** The frames are
+now fetched through `lib/prefetch.js`, eight in the air at a time, yielded in
+curated order. Measured on the same developer machine: **89.7s before**, and
+**15.3s, 15.4s and 13.3s after**, producing the same 12 pages, the same 9.2MB,
+and the same text in the same order. (12 pages where #122's own comment
+recorded 17: the draft's synthesis has been edited since, which moves the page
+count and is not what this amendment is about. Both runs on the day were 12.)
+Three things justify it even at 5.2s in production:
+
+- `storyboard-grid-preview.js` is the tool every defect in this feature has
+  been found with (#121, #124, #125, #126, #128), and it runs on a developer
+  machine. A minute and a half per look is a tax on the only inspection loop
+  that works.
+- The round trips are linear in Captures wherever it runs. The margin is
+  enormous today; the shape of the cost was not bounded, and now is.
+- It removes a risk without adding infrastructure, which is the one thing this
+  ADR's amendment above says in-process assembly must not do.
+
+**The size at which this is worth revisiting**, stated so a later reader can
+check it rather than inherit it: in production, 66 Captures cost 5.2s
+end-to-end with the sequential loop. Since the loop was the linear part, the
+same draft should now be a second or two, and even ten times the Captures
+leaves the request budget untroubled. If that is ever not true, the number to
+look at is a real `reports` row's `createdAt`→`updatedAt` gap, not a developer
+machine's.
+
+**What is not fixed here.** If a finalize ever does outrun the timeout, Cloud
+Run kills the request without running the `catch`, and the `reports` row stays
+at `processing` — visible, which is what #122's third bullet asked for and
+what #89 had already built (this ADR's implementer had it right; #122's
+premise that there was "no `reports` doc" was wrong, and there is now a test
+holding the ordering in place). But `processing` is indistinguishable from a
+row that is about to succeed. That is the same defect the video path has at
+`queued`, and #127 is where it is argued, because it wants one answer rather
+than two.
+
+**The alternative #122 offered and this did not take**: capping the Captures a
+single Storyboard may finalize, the way ADR 0017 caps OCR pairs. Declined,
+not deferred — a cap is a product limit imposed to dodge an engineering cost,
+and the engineering cost turns out to be 5.2 seconds. Nothing about the real
+numbers justifies telling an Analyst their Storyboard is too long.
