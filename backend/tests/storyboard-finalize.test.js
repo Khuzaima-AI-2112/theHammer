@@ -33,7 +33,7 @@ const { db } = require('../src/lib/firestore');
 const { app } = require('../src/index');
 const storyboardsRouter = require('../src/routes/admin/storyboards');
 const collections = require('../src/lib/collections');
-const { extractPdfText } = require('./helpers/pdfText');
+const { extractPdfText, countPdfPages } = require('./helpers/pdfText');
 const { clearDatabase, seedUser, seedProject, HEADERS } = require('./helpers/fixtures');
 
 async function seedUpload(id, projectId, data = {}) {
@@ -142,13 +142,14 @@ describe('buildStoryboardPdf', () => {
     // Narrative page precedes every slide.
     expect(text.indexOf('Wrapping narrative text.')).toBeLessThan(firstIdx);
 
-    // Slide labels follow curated order, not upload order.
-    const slide1Idx = text.indexOf('Slide 1');
-    const slide3Idx = text.indexOf('Slide 3');
+    // Frame labels follow curated order, not upload order. Since #125 a frame
+    // is labelled by its slide number and the Capture's tabUrl, not `Slide N`.
+    const slide1Idx = text.indexOf('1 · /campaigns');
+    const slide3Idx = text.indexOf('3 · /campaigns');
     expect(slide1Idx).toBeGreaterThan(-1);
     expect(slide3Idx).toBeGreaterThan(-1);
     expect(slide1Idx).toBeLessThan(slide3Idx);
-    expect(text).not.toContain('Slide 2'); // pdf-cap-b's slide number, excluded
+    expect(text).not.toContain('2 · /campaigns'); // pdf-cap-b's slide, excluded
   });
 
   // #121. The narrative arrives from Gemini as Markdown, and pdfkit's .text()
@@ -184,6 +185,165 @@ describe('buildStoryboardPdf', () => {
     expect(text).not.toContain('**');
     expect(text).not.toContain('###');
     expect(text).not.toContain('`');
+  });
+});
+
+/**
+ * The Storyboard grid (#125, ADR 0019)
+ *
+ * Six frames to a page, each carrying its own caption, grouped under a header
+ * derived from the Capture's `stage`. The layout this replaced put one Capture
+ * on a page and no prose on any of them, which made the real 66-Capture draft
+ * 73 pages of which 66 were a heading and a screenshot.
+ *
+ * Asserted against the generated artifact via `helpers/pdfText`, the way #121
+ * was — every defect this feature has had was found by opening the PDF and
+ * none by a green suite. The drafts here are built by hand rather than through
+ * the routes because what is under test is the layout, and a hand-built draft
+ * is the only way to put a *missing* caption in front of it: #124 will not let
+ * a generation finish without one per slide.
+ */
+describe('buildStoryboardPdf — the grid', () => {
+  const PERSONAS = {
+    'grid-1': 'super-admin', 'grid-2': 'super-admin', 'grid-3': 'super-admin',
+    'grid-4': 'super-admin', 'grid-5': 'super-admin', 'grid-6': 'super-admin',
+    'grid-7': 'super-admin',
+    'grid-8': 'media-buyer', 'grid-9': 'media-buyer',
+    'grid-10': '',
+  };
+  const ALL = Object.keys(PERSONAS);
+
+  beforeAll(async () => {
+    for (const id of ALL) {
+      await seedUpload(id, 'finalize-proj', {
+        stage: PERSONAS[id],
+        tabUrl: `https://app.example/admin/${id}`,
+        uploadedAt: '2026-09-01T09:00:00.000Z',
+      });
+    }
+  });
+
+  afterAll(async () => {
+    for (const id of ALL) {
+      await db.collection(collections.UPLOADS).doc(id).delete();
+    }
+  });
+
+  /** A draft `buildStoryboardPdf` can read, without going through the routes. */
+  function draftOf(ids, { captions = true, notes = {} } = {}) {
+    return {
+      id: 'grid-draft',
+      projectId: 'finalize-proj',
+      status: 'draft',
+      narrativeStatus: 'done',
+      narrativeText: 'The synthesis.',
+      narrativeCaptions: captions
+        ? ids.map((id) => ({ captureId: id, caption: `What ${id} shows.` }))
+        : null,
+      captures: ids.map((id, i) => ({
+        captureId: id, order: i + 1, included: true, note: notes[id] ?? null,
+      })),
+    };
+  }
+
+  const build = (draft) => storyboardsRouter.buildStoryboardPdf(draft);
+
+  /** Pages the slides occupy: the total, less whatever the synthesis takes. */
+  async function gridPages(ids, opts) {
+    const [withSlides, synthesisOnly] = await Promise.all([
+      build(draftOf(ids, opts)),
+      build(draftOf([])),
+    ]);
+    return countPdfPages(withSlides) - countPdfPages(synthesisOnly);
+  }
+
+  test('a slide carries its own prose — the caption #124 generated for it', async () => {
+    const ids = ALL.slice(0, 6);
+    const text = extractPdfText(await build(draftOf(ids)));
+
+    for (const id of ids) {
+      expect(text).toContain(`What ${id} shows.`);
+    }
+    // The synthesis keeps its own pages, in front of the slides (ADR 0019).
+    expect(text.indexOf('The synthesis.')).toBeLessThan(text.indexOf('What grid-1 shows.'));
+  });
+
+  test('six frames to a page — the seventh starts a second one', async () => {
+    expect(await gridPages(ALL.slice(0, 6))).toBe(1);
+    expect(await gridPages(ALL.slice(0, 7))).toBe(2);
+  });
+
+  test('a frame is labelled by slide number and tabUrl, not "Slide N"', async () => {
+    const text = extractPdfText(await build(draftOf(ALL.slice(0, 2))));
+
+    expect(text).toContain('1 · /admin/grid-1');
+    expect(text).toContain('2 · /admin/grid-2');
+    expect(text).not.toContain('Slide 1');
+  });
+
+  test('a section header on each Persona change, derived from the Capture stage', async () => {
+    // Seven Super Admin frames (a page and a continuation), then two Media
+    // Buyer ones: the change starts its own page rather than landing mid-grid.
+    const ids = ALL.slice(0, 9);
+    const text = extractPdfText(await build(draftOf(ids)));
+
+    expect(text).toContain('Super Admin');
+    expect(text).toContain('Super Admin (continued)');
+    expect(text).toContain('Media Buyer');
+    expect(text.indexOf('Super Admin')).toBeLessThan(text.indexOf('Media Buyer'));
+    expect(await gridPages(ids)).toBe(3);
+  });
+
+  test('an absent Persona is stored as the empty string, and gets a named section anyway', async () => {
+    const text = extractPdfText(await build(draftOf(['grid-10'])));
+    expect(text).toContain('Unassigned Persona');
+  });
+
+  test('a Capture with no note draws nothing; one with a note draws it', async () => {
+    const plain = extractPdfText(await build(draftOf(ALL.slice(0, 3))));
+    expect(plain).not.toContain('Note:');
+
+    const annotated = extractPdfText(await build(
+      draftOf(ALL.slice(0, 3), { notes: { 'grid-2': 'the tiles are missing' } })
+    ));
+    expect(annotated).toContain('Note: the tiles are missing');
+  });
+
+  // ADR 0019 makes density a constraint on the prose — six frames to a page
+  // gives each caption a length budget, and #124 set it at
+  // STORYBOARD_CAPTION_MAX_WORDS. A caption at exactly that budget has to fit
+  // in the band this layout gives it, or the budget and the layout disagree
+  // and the client deliverable is where anyone finds out.
+  test('a caption at #124\'s full word budget is drawn whole, not ellipsised', async () => {
+    const { STORYBOARD_CAPTION_MAX_WORDS } = require('../src/lib/models');
+    const sentence = [
+      'The Screens and Users tiles are missing from the administrator dashboard,',
+      'which is the first sign that this session is not being treated as a',
+      'superadmin; everything below the fold renders correctly, so the gate is on',
+      'the tile list itself rather than on the whole page, leaving the operator',
+      'entirely unwarned.',
+    ].join(' ');
+    const words = sentence.split(/\s+/);
+    expect(words.length).toBeGreaterThanOrEqual(STORYBOARD_CAPTION_MAX_WORDS);
+    const caption = words.slice(0, STORYBOARD_CAPTION_MAX_WORDS).join(' ');
+
+    const draft = draftOf(['grid-1']);
+    draft.narrativeCaptions = [{ captureId: 'grid-1', caption }];
+    const text = extractPdfText(await build(draft));
+
+    // The last word survives — pdfkit drops the tail when it ellipsises.
+    const lastWord = caption.split(/\s+/).pop().replace(/[.,;]/g, '');
+    expect(text).toContain(lastWord);
+    // 0x85 is WinAnsi's ellipsis, which is what an overflowing band would draw.
+    expect(text).not.toContain(String.fromCharCode(0x85));
+  });
+
+  test('a Capture with no caption says so rather than leaving the frame wordless', async () => {
+    const text = extractPdfText(await build(draftOf(ALL.slice(0, 2), { captions: false })));
+    expect(text).toContain('(no caption)');
+    // The frame is still drawn, labelled, and in order.
+    expect(text).toContain('1 · /admin/grid-1');
+    expect(text).toContain('2 · /admin/grid-2');
   });
 });
 

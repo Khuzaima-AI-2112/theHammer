@@ -52,9 +52,11 @@
  * Finalizing into a PDF (#89)  —  POST /admin/storyboards/:id/finalize
  * requires narrativeStatus === 'done' (edited via #87 or not — both are
  * valid; an edit never changes the status) and is refused otherwise. It
- * assembles a PDF — a narrative page, then one page per *included* Capture
- * in curated order with its note — writes it to GCS, and creates a `reports`
- * Firestore doc with `reportType: 'storyboard'`. ADR 0013 put Storyboard
+ * assembles a PDF — the synthesis, then the *included* Captures in curated
+ * order as a grid of six frames to a page, each with its own caption, grouped
+ * under a header per Persona (#125, ADR 0019; until then it was a page per
+ * Capture) — writes it to GCS, and creates a `reports` Firestore doc with
+ * `reportType: 'storyboard'`. ADR 0013 put Storyboard
  * generation's *eventual* artifact in the `reports` collection precisely so
  * it shows up in the existing Reports list (view/download) the same way any
  * other report does — this route is that landing point, so it writes
@@ -899,16 +901,153 @@ router.post(
 );
 
 /**
- * Assembles the Storyboard PDF: a narrative page, then one page per
- * *included* Capture in curated (slide-number) order, each with its note.
- * Excluded Captures are not in the PDF — the same curation the narrative
- * itself was built from (#86).
+ * The Storyboard grid (#125, ADR 0019).
+ *
+ * Six frames to a page, two across and three down, which is the layout the
+ * one hand-built Storyboard that exists uses. The alternative — the page per
+ * Capture this file drew until #125 — turned the real 66-Capture draft into
+ * 73 pages, 66 of them a heading, a screenshot and nothing else.
+ */
+const FRAME_COLUMNS = 2;
+const FRAME_ROWS = 3;
+const FRAMES_PER_PAGE = FRAME_COLUMNS * FRAME_ROWS;
+const FRAME_GUTTER = 18;   // between columns
+const FRAME_ROW_GAP = 14;  // between rows
+
+// A cell's bands, top to bottom. The label and the image are fixed so that
+// every frame on a page lines up; the caption is capped, not fixed, and the
+// note takes whatever the caption left plus whatever the cell has spare. A
+// caption that hits its cap is what #124's 45-word budget exists to prevent —
+// at 8.5pt in a 247pt cell, 45 words comes to about five lines of the six the
+// cap allows.
+const FRAME_LABEL_HEIGHT = 12;
+const FRAME_IMAGE_HEIGHT = 112;
+const FRAME_CAPTION_MAX_HEIGHT = 56;
+const FRAME_BAND_GAP = 4;
+
+const PERSONA_HEADER_HEIGHT = 30;
+
+/**
+ * What a frame is labelled with: its slide number and where the screenshot was
+ * taken — `3 · /admin/retailers`, not `Slide 3`.
+ *
+ * The path is the part that identifies a screen to somebody reading the
+ * document; the host repeats on every frame of a walk and the query string is
+ * usually a session id. A root URL has no path worth printing, so it falls
+ * back to the host, and anything that is not a URL at all is printed as it was
+ * stored rather than dropped — a Capture whose `tabUrl` is odd is worth seeing.
+ */
+function frameLabel(order, tabUrl) {
+  const raw = (tabUrl ?? '').trim();
+  let where;
+  if (!raw) {
+    where = '(no URL)';
+  } else {
+    try {
+      const url = new URL(raw);
+      where = url.pathname && url.pathname !== '/' ? url.pathname : url.host;
+    } catch (_) {
+      where = raw;
+    }
+  }
+  return `${order} · ${where}`;
+}
+
+/**
+ * The section header for a run of frames: the Persona they were captured in.
+ *
+ * The Persona is stored on the Capture as `stage` — the field name CONTEXT.md
+ * puts on the *Avoid* list, kept here only where it names the Firestore field.
+ * It has been stamped onto every `uploads` document since #63 and this is its
+ * first reader (ADR 0019). index.js stores an absent Persona as the empty
+ * string, so that case is not an error — it is a run of Captures taken without
+ * one, and it says so rather than printing a blank band.
+ */
+function personaLabel(stage) {
+  const value = (stage ?? '').trim();
+  if (!value) return 'Unassigned Persona';
+  return value
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+}
+
+/**
+ * Lays a page's frames out: where cell `slot` starts, and how big it is.
+ *
+ * Returned by value rather than assigned into the drawing loop's scope so the
+ * arithmetic lives in one place and a caller cannot read a cell position that
+ * belongs to the previous page. The page's own margins and size are what it is
+ * measured from; only the bands *inside* a cell are fixed constants.
+ */
+function frameGridFor(doc) {
+  const left = doc.page.margins.left;
+  const width = doc.page.width - left - doc.page.margins.right;
+  const top = doc.page.margins.top + PERSONA_HEADER_HEIGHT;
+  const cellWidth = (width - FRAME_GUTTER * (FRAME_COLUMNS - 1)) / FRAME_COLUMNS;
+  const cellHeight =
+    (doc.page.height - doc.page.margins.bottom - top - FRAME_ROW_GAP * (FRAME_ROWS - 1)) / FRAME_ROWS;
+
+  return {
+    width,
+    cellWidth,
+    cellHeight,
+    cellAt(slot) {
+      return {
+        x: left + (slot % FRAME_COLUMNS) * (cellWidth + FRAME_GUTTER),
+        y: top + Math.floor(slot / FRAME_COLUMNS) * (cellHeight + FRAME_ROW_GAP),
+      };
+    },
+  };
+}
+
+/**
+ * The caption written about each slide, by Capture id (#124, ADR 0019).
+ *
+ * One definition for the same reason `includedCaptures` is one: the PDF draws
+ * these and the video speaks them, and a draft generated before #124 carries
+ * none at all.
+ */
+function captionsByCaptureId(draft) {
+  return new Map((draft.narrativeCaptions ?? []).map((c) => [c.captureId, c.caption]));
+}
+
+/**
+ * Assembles the Storyboard PDF: the synthesis, then the *included* Captures in
+ * curated order as a grid of six frames to a page, grouped under a header per
+ * Persona. Excluded Captures are not in the PDF — the same curation the
+ * narrative itself was built from (#86).
+ *
+ * Each frame carries its slide number, a label derived from the Capture's
+ * `tabUrl`, the caption #124 generated for it, and the Analyst's note if there
+ * is one. The two empty cases are decided rather than accidental:
+ *
+ * - **No note.** Nothing is drawn. 0 of 66 Captures in the real draft carry
+ *   one, so a `(no note)` placeholder would be the thing the page was mostly
+ *   made of.
+ * - **No caption.** `(no caption)` is drawn. #124 will not let a generation
+ *   reach `done` without one per slide, so a missing caption means a draft
+ *   written before #124 or a relaxed rule — either way the gap belongs on the
+ *   page, the same instinct as ADR 0018's malformed marker.
+ *
+ * A Persona with no included Captures does not appear at all, because the PDF
+ * only ever sees included Captures. The hand-built document made the opposite
+ * choice (a `NO CAPTURE EXISTS` page); nothing in curation records a Persona
+ * the Analyst meant to cover and could not, so there is nothing to draw from.
+ *
+ * A caption longer than its cap is ellipsised, not clipped silently: ADR 0019
+ * makes density a constraint on the prose and says the overflow has to be
+ * visible. #124's 45-word budget is what keeps it from happening — it comes to
+ * about five of the six lines the cap allows. A short caption hands the space
+ * it did not use to the note below it, which is the one band holding text
+ * nothing budgets: the Analyst typed it.
  *
  * `compress: false` keeps every page's content stream a plain, greppable
  * FlateDecode-free stream — deliberate, not an oversight: it is what lets a
- * test recover the text pdfkit wrote (order, slide labels, notes) without a
- * PDF-parsing dependency, the same way this file already avoids depending on
- * `reportsWorker.js`'s untested plumbing.
+ * test recover the text pdfkit wrote (order, frame labels, captions, notes)
+ * without a PDF-parsing dependency, the same way this file already avoids
+ * depending on `reportsWorker.js`'s untested plumbing.
  *
  * Exported for direct testing, same reasoning as buildNarrativeRequest.
  */
@@ -921,6 +1060,8 @@ async function buildStoryboardPdf(draft) {
     const snaps = await db.getAll(...refs);
     snaps.forEach((s) => { if (s.exists) uploadById[s.id] = s.data(); });
   }
+
+  const captionByCaptureId = captionsByCaptureId(draft);
 
   const doc = new PDFDocument({ autoFirstPage: false, margin: 50, compress: false });
   const chunks = [];
@@ -937,20 +1078,72 @@ async function buildStoryboardPdf(draft) {
   // draw the `#` and `**` characters onto a client-facing page (#121).
   renderMarkdown(doc, draft.narrativeText || '');
 
-  for (const c of included) {
-    doc.addPage();
-    doc.fontSize(16).text(`Slide ${c.order}`);
-    doc.moveDown(0.5);
+  let grid = null;
+  let slot = FRAMES_PER_PAGE;
+  let currentPersona = null;
 
+  function startGridPage(heading) {
+    doc.addPage();
+    grid = frameGridFor(doc);
+    doc.font('Helvetica-Bold').fontSize(14).fillColor('black')
+      .text(heading, doc.page.margins.left, doc.page.margins.top, {
+        width: grid.width, height: PERSONA_HEADER_HEIGHT, ellipsis: true,
+      });
+    slot = 0;
+  }
+
+  for (const c of included) {
     const upload = uploadById[c.captureId];
+    const persona = upload?.stage ?? '';
+
+    // A new Persona starts its own page: a header band dropped between two
+    // rows of an already-started grid reads as a caption, not as a division.
+    // A run that outgrows one page keeps the header, marked as a continuation,
+    // so no page of frames is unattributed.
+    if (currentPersona === null || persona !== currentPersona) {
+      startGridPage(personaLabel(persona));
+      currentPersona = persona;
+    } else if (slot >= FRAMES_PER_PAGE) {
+      startGridPage(`${personaLabel(persona)} (continued)`);
+    }
+
+    const { x, y } = grid.cellAt(slot);
+    slot += 1;
+
+    doc.font('Helvetica-Bold').fontSize(9).fillColor('black')
+      .text(frameLabel(c.order, upload?.tabUrl), x, y, {
+        width: grid.cellWidth, height: FRAME_LABEL_HEIGHT, lineBreak: false, ellipsis: true,
+      });
+
     const gcsPath = upload?.gcsPath ?? upload?.path ?? null;
     if (gcsPath) {
       const [bytes] = await storage.bucket(BUCKET).file(gcsPath).download();
-      doc.image(bytes, { fit: [480, 480] });
-      doc.moveDown(0.5);
+      doc.image(bytes, x, y + FRAME_LABEL_HEIGHT, { fit: [grid.cellWidth, FRAME_IMAGE_HEIGHT] });
     }
+
+    const captionY = y + FRAME_LABEL_HEIGHT + FRAME_IMAGE_HEIGHT + FRAME_BAND_GAP;
+    const caption = (captionByCaptureId.get(c.captureId) ?? '').trim();
+    doc.font('Helvetica').fontSize(8.5).fillColor(caption ? 'black' : '#888888');
+    const captionHeight = Math.min(
+      doc.heightOfString(caption || '(no caption)', { width: grid.cellWidth }),
+      FRAME_CAPTION_MAX_HEIGHT
+    );
+    doc.text(caption || '(no caption)', x, captionY, {
+      width: grid.cellWidth, height: FRAME_CAPTION_MAX_HEIGHT, ellipsis: true,
+    });
+
     if (c.note) {
-      doc.fontSize(11).text(c.note);
+      // Measured off where the caption actually ended, not off its cap: a
+      // typical caption leaves the note two or three more lines than a fixed
+      // band would, and the note is the one thing on this page a person wrote
+      // by hand.
+      const noteY = captionY + captionHeight + FRAME_BAND_GAP;
+      doc.font('Helvetica-Oblique').fontSize(8).fillColor('#444444')
+        .text(`Note: ${c.note}`, x, noteY, {
+          width: grid.cellWidth,
+          height: Math.max(0, y + grid.cellHeight - noteY),
+          ellipsis: true,
+        });
     }
   }
 
@@ -1055,9 +1248,7 @@ function pcmToWav(pcmBuffer, sampleRate, channels = 1, bitsPerSample = 16) {
  * Exported for direct testing, same reasoning as buildNarrativeRequest.
  */
 function buildNarrationText(draft) {
-  const captionByCaptureId = new Map(
-    (draft.narrativeCaptions ?? []).map((c) => [c.captureId, c.caption])
-  );
+  const captionByCaptureId = captionsByCaptureId(draft);
   const spoken = [
     draft.narrativeText ?? '',
     ...includedCaptures(draft).map((c) => captionByCaptureId.get(c.captureId) ?? ''),

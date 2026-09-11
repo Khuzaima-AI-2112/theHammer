@@ -32,4 +32,16 @@ function extractPdfText(buffer) {
   return out;
 }
 
-module.exports = { extractPdfText };
+/**
+ * How many pages the document has — the claim #125's layout is about.
+ *
+ * Each page is its own `/Type /Page` object in the body; the single
+ * `/Type /Pages` node that lists them is excluded by the word boundary, and
+ * nothing else in a pdfkit document writes either marker.
+ */
+function countPdfPages(buffer) {
+  const matches = buffer.toString('latin1').match(/\/Type \/Page\b/g);
+  return matches ? matches.length : 0;
+}
+
+module.exports = { extractPdfText, countPdfPages };
