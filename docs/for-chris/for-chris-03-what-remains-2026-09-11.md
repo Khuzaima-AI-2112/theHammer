@@ -17,7 +17,7 @@ should be fixed in the same change.
 **Cost:** you cannot onboard anyone — including yourself onto a new address —
 without waiting for a code to be passed to you by hand.
 
-### You cannot correct a caption (#123)
+### You cannot correct a caption (#129)
 
 You can edit the Storyboard's opening summary — that box exists and your edit is
 what lands in the PDF. **You cannot edit the 66 individual captions.** If the AI
@@ -141,10 +141,9 @@ mistakes, including #126).
 
 ---
 
-## 5. Recently finished, awaiting closure in the tracker
+## 5. Recently finished
 
-Complete and in production, not yet marked closed: **#121** (the PDF printed raw
+Closed on 11 September, and in production: **#121** (the PDF printed raw
 formatting characters), **#123** (the narrative sat in front of the slides
-rather than around them) and **#125** (six frames to a page). Mentioned so the
-open count here matches what you see if you look at the tracker yourself.
+rather than around them) and **#125** (six frames to a page).
 
