@@ -81,6 +81,17 @@ const limiter = rateLimit({
   max: 60,
   standardHeaders: true,
   legacyHeaders: false,
+  // Skipped under test, like exportLimiter (middleware/rateLimiters.js), but
+  // the argument is stronger here because this one keys on IP: every suite is
+  // one caller, and a 429 fails whichever test next reads a field off the
+  // error body — not the one that crossed the line. See lessons_learned 85.
+  // analystReportLimiter still does not skip; it keys on the caller and
+  // encodes a real product limit.
+  //
+  // cloudbuild.yaml pins NODE_ENV=production on the deployed revision, so this
+  // can never be true in production. rate-limit-skip.test.js asserts the
+  // limiter still fires when it isn't test.
+  skip: () => process.env.NODE_ENV === 'test',
   handler: (_req, res, _next, options) => {
     res.status(options.statusCode).json({
       error: 'Too many requests',

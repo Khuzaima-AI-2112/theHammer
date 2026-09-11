@@ -558,6 +558,9 @@ describe('POST /admin/storyboards/:id/finalize', () => {
     expect(inFlight.status).toBe('processing');
     expect(inFlight.reportType).toBe('storyboard');
     expect(inFlight.gcsPath).toBeNull();
+    // #127: and it says when to stop believing that `processing`, since the
+    // request doing the assembling is what Cloud Run would kill.
+    expect(Date.parse(inFlight.mustFinishBy)).toBeGreaterThan(Date.now());
 
     const res = await finalizing;
     expect(res.status).toBe(201);

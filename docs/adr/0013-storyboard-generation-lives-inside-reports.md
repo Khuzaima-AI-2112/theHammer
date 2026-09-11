@@ -134,6 +134,15 @@ row that is about to succeed. That is the same defect the video path has at
 `queued`, and #127 is where it is argued, because it wants one answer rather
 than two.
 
+*Answered in part, 2026-09-11 (#127):* a row whose work happens inside its own
+request is now stamped with an `mustFinishBy` deadline, and a read settles
+anything that outlived it to `error` (`lib/reportDeadline.js`). A killed
+finalize is therefore distinguishable from one about to succeed. Where the
+work itself should live is still open — that half of #127 is an architecture
+decision with infrastructure behind it, and this amendment's "if the dispatch
+hop is ever made real" remains the condition for moving finalize off the
+request.
+
 **The alternative #122 offered and this did not take**: capping the Captures a
 single Storyboard may finalize, the way ADR 0017 caps OCR pairs. Declined,
 not deferred — a cap is a product limit imposed to dodge an engineering cost,

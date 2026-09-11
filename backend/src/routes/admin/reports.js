@@ -7,6 +7,7 @@ const express = require('express');
 const { db } = require('../../lib/firestore');
 const { requireAnalyst } = require('../../middleware/requireAuth');
 const { refreshVideoReportStatus } = require('../../lib/shotstack');
+const { settleIfOverdue } = require('../../lib/reportDeadline');
 const collections = require('../../lib/collections');
 const { loadOwnedProject } = require('../../lib/ownership');
 const { resolveInternalSecret } = require('../../lib/internalSecret');
@@ -34,6 +35,23 @@ const { analystReportLimiter } = require('../../middleware/rateLimiters');
 // offering them separately billed twice for the same reading of the same two
 // images. They collapse into one.
 const OCR_REPORT_TYPE = 'storyboard_changes';
+
+/**
+ * What a `reports` row actually says right now, rather than what was last
+ * written to it.
+ *
+ * Two catch-ups, composed in cost order, and every read path through this file
+ * goes through here rather than picking one — a third reader picking only the
+ * Shotstack half is how a row goes stale in exactly one place (#127).
+ *
+ *  - `settleIfOverdue` is local arithmetic: a row whose request Cloud Run
+ *    killed without running its `catch` (lib/reportDeadline.js).
+ *  - `refreshVideoReportStatus` is a network call to Shotstack, and a no-op
+ *    for a row the first has just settled (lib/shotstack.js).
+ */
+async function freshReportData(ref, data) {
+  return refreshVideoReportStatus(ref, await settleIfOverdue(ref, data));
+}
 
 // Refused by name rather than falling through to "unknown report type", so a
 // caller still asking for one is told what replaced it.
@@ -169,7 +187,9 @@ router.get('/reports/:id/status', requireAnalyst, async (req, res, next) => {
     // Firestore, until this checks and (if the render has finished since
     // the last poll) persists it — see lib/shotstack.js. Every other
     // reportType passes through unchanged.
-    const data = await refreshVideoReportStatus(ref, snap.data());
+    // Without this, the portal's own poll is the thing that reads a `queued`
+    // row for ever and never notices nothing is behind it.
+    const data = await freshReportData(ref, snap.data());
 
     return res.json({
       status: data.status,
@@ -192,11 +212,17 @@ router.get('/reports/:id/status', requireAnalyst, async (req, res, next) => {
 // their bucket object either.
 router.get('/reports/:id/artifact', requireAnalyst, async (req, res, next) => {
   try {
-    const snap = await db.collection(collections.REPORTS).doc(req.params.id).get();
+    const ref = db.collection(collections.REPORTS).doc(req.params.id);
+    const snap = await ref.get();
     if (!snap.exists) return res.status(404).json({ error: 'report not found' });
 
-    const data = snap.data();
-    if (!await loadOwnedProject(req, res, data.projectId)) return;
+    if (!await loadOwnedProject(req, res, snap.data().projectId)) return;
+
+    // Ownership first, as the status route does and for #94's reason, then the
+    // same catch-up every other read gets. Without it this route answers "still
+    // queued" for ever about a request that died (#127) — the one sentence the
+    // 409 below is least able to afford being wrong about.
+    const data = await freshReportData(ref, snap.data());
 
     // A Report that is queued, processing or errored has no artifact to read.
     // Answered as a state rather than a 404 so the viewer can say which one it
@@ -246,8 +272,11 @@ router.get('/reports', requireAnalyst, async (req, res, next) => {
     // Analyst was away shows stale until something else happens to poll its
     // individual status. refreshVideoReportStatus() is a no-op for every row
     // that isn't exactly that case.
+    // …and to settle any row whose request died mid-work (#127), which is the
+    // same argument: a `queued` or `processing` row that outlived the request
+    // that was doing the work is never going to change on its own.
     const reports = await Promise.all(snap.docs.map(async (d) => {
-      const data = await refreshVideoReportStatus(d.ref, d.data());
+      const data = await freshReportData(d.ref, d.data());
       return { id: d.id, ...data };
     }));
     return res.json({ reports, total: reports.length });

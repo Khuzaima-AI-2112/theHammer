@@ -1161,3 +1161,53 @@ because a filter that matches nothing is not a failure, it is an empty run.
   an answer. If a filtered run reports zero failures *and* zero passes, the
   filter is the bug — and this is the same family as lesson 83's vacuous
   assertion and #125's caption test that passed while asserting nothing.
+
+### 85. The rate limiter that fails a different test than the one that tripped it
+
+**What happened:** #127 added one test to `storyboard-video.test.js`. The suite
+then failed — not in the new test, which passed, but four tests later, in a
+different `describe`, with:
+
+```
+narrative for draft undefined never settled
+```
+
+The draft id was `undefined`. Nothing about the narrative was broken: the
+`POST /admin/projects/:id/storyboards` in that test's `beforeEach` had been
+answered `429 Too many requests`, so `res.body` had no `id`, and the failure
+surfaced three calls later where that id was finally used.
+
+Two wrong turns before the cause: the suite was assumed to be racing, so the
+poll budget in `pollUntilSettled` was raised from 40 tries to 200 — which made
+it **worse**, because each try is another HTTP request against the same
+budget. It was then assumed to be a leaked `mockResolvedValueOnce` in the
+shared `generateContent` double, which it was not.
+
+**Root cause:** `index.js` applies a global limiter of **60 requests per IP per
+minute** to every route but `/health`, and a suite driving supertest is one IP.
+`pollUntilSettled` alone can spend 40 of those 60 in a single call. The video
+suite was already running one request under the ceiling, so *any* test added
+anywhere in the file pushed some other test over it.
+
+Nothing reports this honestly. The 429 is returned by middleware, so the
+handler never runs; supertest does not throw on a 4xx; and the body is an
+error object with none of the fields the test expects. The distance between
+the request that crossed the line and the assertion that fails is arbitrary.
+
+**Rule going forward:**
+- **A limiter keyed on IP has to skip under test.** `exportLimiter` already
+  did (`middleware/rateLimiters.js`) and the global one now does, guarded on
+  `NODE_ENV === 'test'`, which `cloudbuild.yaml` pins to `production` on every
+  deployed revision. `analystReportLimiter` still does not skip, and should
+  not: it keys on the caller and encodes a real product limit, so a suite that
+  needs more than ten uses a second Analyst.
+- **`undefined` in a test failure means a request failed, not that a value was
+  wrong.** `draft undefined`, `body.id undefined`, `status undefined` — read
+  the *previous* response before theorising about the one that failed.
+- **Raising a poll budget spends the thing that may be exhausted.** A retry
+  loop is only free when the resource is time. Here it was requests, and
+  patience made the failure more likely.
+- **Assert the response you depend on.** `createDraft` returned `res.body`
+  without checking `res.status`; one `expect(res.status).toBe(201)` in that
+  helper would have named this in seconds rather than in three rounds of
+  wrong theory.

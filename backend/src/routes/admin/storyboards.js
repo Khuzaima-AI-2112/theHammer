@@ -112,6 +112,7 @@ const {
 const { submitRender } = require('../../lib/shotstack');
 const { renderMarkdown } = require('../../lib/narrativeMarkdown');
 const { prefetchInOrder } = require('../../lib/prefetch');
+const { mustFinishBy } = require('../../lib/reportDeadline');
 const collections = require('../../lib/collections');
 const { loadOwnedProject, belongsToCaller } = require('../../lib/ownership');
 
@@ -1210,6 +1211,11 @@ router.post('/storyboards/:id/finalize', requireAnalyst, async (req, res, next) 
       status: 'processing',
       gcsPath: null,
       storyboardDraftId: draft.id,
+      // Assembly happens below, inside this request, so this request's own
+      // death is the row's deadline (#127). Cloud Run kills an overrunning
+      // request without running the `catch`, and a `processing` row nothing is
+      // working on reads exactly like one about to succeed.
+      mustFinishBy: mustFinishBy(),
       requestedBy: req.hammerUser.id,
       createdAt: nowISO(),
       updatedAt: nowISO(),
@@ -1388,6 +1394,10 @@ router.post('/storyboards/:id/video', requireAnalyst, async (req, res, next) => 
       gcsPath: null,
       storyboardDraftId: draft.id,
       shotstackRenderId: null,
+      // Synthesis, upload and submit all happen below, inside this request —
+      // ~200s of the 300s it is allowed (#127). If it is killed, nothing here
+      // gets to write `error`, so the row says when to stop believing it.
+      mustFinishBy: mustFinishBy(),
       requestedBy: req.hammerUser.id,
       createdAt: nowISO(),
       updatedAt: nowISO(),
@@ -1414,7 +1424,17 @@ router.post('/storyboards/:id/video', requireAnalyst, async (req, res, next) => 
       const timeline = buildShotstackTimeline(imageUrls, audioUrl);
       const renderId = await submitRender(timeline);
 
-      await reportRef.update({ status: 'processing', shotstackRenderId: renderId, updatedAt: nowISO() });
+      // The work has left the request: from here the render lives on
+      // Shotstack, where minutes are normal, and its liveness is
+      // refreshVideoReportStatus's to judge. Clearing the deadline is what
+      // stops this row being settled as overdue while it is legitimately
+      // rendering (#127).
+      await reportRef.update({
+        status: 'processing',
+        shotstackRenderId: renderId,
+        mustFinishBy: null,
+        updatedAt: nowISO(),
+      });
     } catch (err) {
       logger.error(`[Storyboard Video] generation failed for draft ${req.params.id}:`, err);
       await reportRef.update({ status: 'error', error: err.message, updatedAt: nowISO() });
