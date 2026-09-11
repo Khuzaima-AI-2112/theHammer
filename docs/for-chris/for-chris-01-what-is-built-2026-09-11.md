@@ -12,13 +12,9 @@ The 1 September edition said this, in bold:
 > **theHammer produces Captures. It does not produce the Storyboard.** The
 > Storyboard PDF is assembled by hand from the exported pictures.
 
-**That is no longer true.** theHammer now produces the Storyboard itself — you
+theHammer now produces the Storyboard itself — you
 choose which Captures tell the story, put them in order, say what you want the
-narrative to focus on, and it returns a finished PDF. There is a narrated video
-too.
-
-That is the headline of the last ten days. Everything else below is either what
-makes it trustworthy or what was found broken while getting there.
+narrative to focus on, and it returns a finished PDF.
 
 ---
 

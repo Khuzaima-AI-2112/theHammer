@@ -3,25 +3,6 @@
 **Date:** 11 September 2026
 **Replaces:** [the 1 September edition](for-chris-03-what-remains-2026-09-01.md)
 
----
-
-## How to read this
-
-Grouped by **what it costs you**, not by how hard it is, because the ordering is
-your decision rather than ours. Numbers in brackets are tracker numbers.
-
-**Twenty-two items are open**, against twenty-two on 1 September — but three of
-those are finished and simply not yet marked closed (section 5), so the real
-figure is **nineteen**. That flat-looking number badly understates the movement:
-**forty-five items were closed** in between, and most of what remains is smaller
-than what went.
-
-Four of the six items the last edition told you to expect are gone: the report
-figures are real, the "Last capture" column works, the extension identity trap
-is fixed, and the misleading refusal message names its reason. The Dashboard
-dashes turned out to be a real fault and are fixed too.
-
----
 
 ## 1. Things you will notice yourself
 
@@ -34,11 +15,7 @@ you by hand. The code is also still stored and logged in plain text, which
 should be fixed in the same change.
 
 **Cost:** you cannot onboard anyone — including yourself onto a new address —
-without waiting for us.
-
-**Still our recommendation to fix first.** It was the recommendation on
-1 September; ten days of higher-value work went in front of it, and that was the
-right call, but it should not survive another round.
+without waiting for a code to be passed to you by hand.
 
 ### You cannot correct a caption (#123)
 
@@ -171,37 +148,3 @@ formatting characters), **#123** (the narrative sat in front of the slides
 rather than around them) and **#125** (six frames to a page). Mentioned so the
 open count here matches what you see if you look at the tracker yourself.
 
----
-
-## 6. If you want a recommendation
-
-In order:
-
-1. **#35 — invitations.** Still the only thing stopping you working without us,
-   and it has waited long enough.
-2. **#126 — where a persona walk is recorded.** Needs your decision more than
-   our time, and it is the difference between a Storyboard that looks organised
-   and one that does not.
-3. **#123 — editing captions.** You will hit this the first time the AI gets a
-   screenshot wrong on a document you intend to send.
-4. **#18 and #5/#6/#20 — revocation and the capture-loop tests.** Before a
-   second customer, not after.
-5. **#122 — the finalize timeout.** Cheap, and the failure mode is silent.
-
----
-
-## One thing we would ask for
-
-The same request as last month, because it paid off twice.
-
-**Tell us when something on screen sends you the wrong way.** The three worst
-faults in the Storyboard PDF this month were each found by a person opening the
-document and looking at it — raw formatting characters on a client page, a
-73-page layout, and section headings that all said the same word. None was found
-by a test suite that was passing throughout.
-
-You are still the only person using this without knowing how it was built, which
-makes you the only one who can notice that kind of thing honestly. **And this
-month, please send us your hand-built Storyboard and a generated one side by
-side.** Your document has already settled one design argument outright. It will
-settle the next one too.

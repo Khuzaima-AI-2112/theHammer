@@ -20,7 +20,7 @@ Everything else here you have done before.
 - **Portal:** <https://thehammer-portal-282689937365.northamerica-northeast1.run.app/>
 - **Sign in everywhere as chris.frosztega@gmail.com.** The invitation is tied to
   that address and refuses any other.
-- **You need a current invitation code from us.** The Portal still cannot email
+- **You need a current invitation code.** The Portal still cannot email
   them (#35). Ask and it comes privately — single use, and it is the key to your
   Workspace, so do not forward it.
 - **Allow about 35 minutes.** Sections 1–2 are setup; after that each stands
@@ -48,7 +48,7 @@ Open the Portal, sign in with Google, enter the invitation code.
 **Working when:** the card's **ID** reads exactly `bnlcomhbnaecjjifmlpfilpohejhckmh`,
 and the popup shows a form with Project, Stage and Tool.
 
-> **Whenever we release:** deploying does not update your browser. Press the
+> **Whenever a new version is released:** deploying does not update your browser. Press the
 > reload arrow ↻ on The Hammer's card at `chrome://extensions`. This has caught
 > us twice — a fix looked broken when it simply had not loaded.
 
@@ -229,6 +229,6 @@ If you will open the developer console (`F12` on the Portal, or the **service
 worker** link on the extension's card), that text often settles a diagnosis on
 its own.
 
-**And tell us when something on screen sends you the wrong way.** The three
+**And say when something on screen sends you the wrong way.** The three
 worst faults in the Storyboard PDF were all found by a person opening the
 document and looking at it. None was found by a passing test.
