@@ -173,6 +173,22 @@
       color: var(--color-text-muted);
       line-height: 1.6;
     }
+    .gate-join {
+      display: flex;
+      gap: var(--space-2);
+      width: 100%;
+      margin-top: var(--space-1);
+    }
+    .gate-join .form-input {
+      flex: 1;
+      min-width: 0;
+      font-family: var(--font-mono);
+      font-size: 11px;
+    }
+    .gate-join .btn { flex-shrink: 0; }
+    .gate-error-block .gate-join-error {
+      color: var(--color-error);
+    }
     .gate-error-block .gate-email {
       font-family: var(--font-mono);
       font-size: 11px;

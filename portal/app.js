@@ -90,6 +90,74 @@ async function runAuthGuard() {
     }
   }
 
+  /**
+   * The way in for someone who has been invited but has no Workspace yet.
+   *
+   * #35: POST /admin/workspaces/join has always accepted a plain verified
+   * Firebase token — creating the users record is the whole point of the route.
+   * But the only box that called it sat in Workspace Settings, behind this very
+   * gate, so it could only be reached by someone already provisioned, who no
+   * longer needed it. An invited person had no way to let themselves in, and
+   * the instructions we sent told them to "enter the invitation code" against a
+   * screen that had never had a field for one. Put the field where the person
+   * who needs it actually lands.
+   */
+  function showInviteRedemption(user) {
+    showGateError(`
+      <h2>One more step</h2>
+      <p>You're signed in as <span class="gate-email">${esc(user.email || 'unknown')}</span>,
+         but this account isn't in a Workspace yet.</p>
+      <p>If you have an invitation code, enter it here.</p>
+      <div class="gate-join">
+        <input class="form-input" id="gateInviteToken" type="text"
+               placeholder="Invitation code" autocomplete="off" spellcheck="false">
+        <button class="btn btn-primary" id="gateJoinBtn">Join</button>
+      </div>
+      <p class="gate-join-error" id="gateJoinError" hidden></p>
+      <p>No code? Ask whoever invited you — the Portal cannot email them yet.</p>
+      <button class="btn btn-ghost" onclick="firebase.auth().signOut()">Sign Out</button>
+    `);
+
+    const input   = document.getElementById('gateInviteToken');
+    const btn     = document.getElementById('gateJoinBtn');
+    const errorEl = document.getElementById('gateJoinError');
+
+    async function submit() {
+      const token = input.value.trim();
+      errorEl.hidden = true;
+      if (!token) {
+        errorEl.textContent = 'Enter the invitation code you were sent.';
+        errorEl.hidden = false;
+        return;
+      }
+
+      btn.disabled = true;
+      input.disabled = true;
+      btn.textContent = 'Joining…';
+
+      try {
+        await redeemInvitation(token);
+        // The record now exists, so the gate has to ask /me again. A reload is
+        // the honest way to do that: half the app reads its state at start-up.
+        location.reload();
+      } catch (err) {
+        // The API's own words. It distinguishes an expired code from one
+        // raised for a different address, and both are things the person can
+        // act on — flattening them to "invalid" is what sends people to us.
+        errorEl.textContent = err.message || 'That code was not accepted.';
+        errorEl.hidden = false;
+        btn.disabled = false;
+        input.disabled = false;
+        btn.textContent = 'Join';
+        input.focus();
+      }
+    }
+
+    btn.addEventListener('click', submit);
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+    input.focus();
+  }
+
   firebase.auth().onAuthStateChanged(async (user) => {
     if (user) {
       status.textContent = 'Verifying identity…';
@@ -109,20 +177,33 @@ async function runAuthGuard() {
 
         const body = await res.json().catch(() => ({}));
 
-        if (!res.ok) {
+        // #35: a signed-in account with no users record is the ordinary state
+        // of someone who has just been invited — not a failure. It has to be
+        // told apart from a real refusal *by reason*, not by status: requireAuth
+        // answers 403 before /me runs, so `provisioned` is never present on
+        // this path and the screen that branched on it could never appear. What
+        // Chris saw instead was "unexpected error (HTTP 403)", which reads as a
+        // permissions refusal against his Google account and sent him looking
+        // in entirely the wrong place.
+        if (res.status === 403 && body.error === 'not provisioned') {
+          showInviteRedemption(user);
+          return;
+        }
+
+        if (res.status === 403 && String(body.error || '').includes('insufficient role')) {
           showGateError(`
-            <h2>Access denied</h2>
-            <p>The server returned an unexpected error (HTTP ${res.status}).</p>
+            <h2>Insufficient role</h2>
+            <p>The Admin Portal requires the <strong>admin</strong> role.</p>
+            <p>You're signed in as <span class="gate-email">${esc(user.email || 'unknown')}</span>.</p>
             <button class="btn btn-ghost" onclick="firebase.auth().signOut()">Sign Out</button>
           `);
           return;
         }
 
-        if (!body.provisioned) {
+        if (!res.ok) {
           showGateError(`
-            <h2>Account not provisioned</h2>
-            <p>You're signed in as <span class="gate-email">${esc(user.email || 'unknown')}</span></p>
-            <p>but this account hasn't been added to The Hammer yet.</p>
+            <h2>Access denied</h2>
+            <p>The server returned an unexpected error (HTTP ${res.status}).</p>
             <button class="btn btn-ghost" onclick="firebase.auth().signOut()">Sign Out</button>
           `);
           return;
@@ -163,10 +244,15 @@ async function runAuthGuard() {
       }
       uiContainer.style.display = 'block';
 
+      // Google only, deliberately. Every account here is created by invitation
+      // and signs in with Google, so the email/password option that used to sit
+      // beside it could never do anything but offer a password reset for an
+      // identity that has no password — which is exactly what Chris hit on
+      // 11 September, and it reads as "your email is already taken". A provider
+      // the product does not actually support is worse than no choice at all.
       ui.start('#firebaseui-auth-container', {
         signInOptions: [
-          firebase.auth.GoogleAuthProvider.PROVIDER_ID,
-          firebase.auth.EmailAuthProvider.PROVIDER_ID
+          firebase.auth.GoogleAuthProvider.PROVIDER_ID
         ],
         signInFlow: 'popup',
         callbacks: {
@@ -225,11 +311,28 @@ async function inviteToWorkspace() {
   }
 }
 
+/**
+ * Redeem an invitation code. Shared by the sign-in gate (where an unprovisioned
+ * person needs it) and the Workspace Settings box (where a provisioned one may
+ * be joining a second Workspace) — one call site each, and they must not drift:
+ * the gate is the only path for someone who cannot see Settings at all.
+ *
+ * Throws apiFetch's error, whose message is the API's own — 'Invitation has
+ * expired' and 'Invitation email does not match authenticated user' are
+ * distinct answers and both are actionable.
+ */
+async function redeemInvitation(token) {
+  return apiFetch('/admin/workspaces/join', {
+    method: 'POST',
+    body: JSON.stringify({ token }),
+  });
+}
+
 async function joinWorkspace() {
   const token = document.getElementById('wsJoinToken').value.trim();
   if (!token) return showToast('Token is required', 'error');
   try {
-    const res = await apiFetch('/admin/workspaces/join', { method: 'POST', body: JSON.stringify({ token }) });
+    await redeemInvitation(token);
     showToast(`Joined workspace successfully! Re-login required.`, 'success');
     document.getElementById('wsJoinToken').value = '';
   } catch (err) {

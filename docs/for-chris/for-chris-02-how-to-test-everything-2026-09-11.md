@@ -18,11 +18,11 @@ Everything else here you have done before.
 ## Before you start
 
 - **Portal:** <https://thehammer-portal-282689937365.northamerica-northeast1.run.app/>
-- **Sign in everywhere as chris.frosztega@gmail.com.** The invitation is tied to
-  that address and refuses any other.
-- **You need a current invitation code.** The Portal still cannot email
-  them (#35). Ask and it comes privately — single use, and it is the key to your
-  Workspace, so do not forward it.
+- **Sign in everywhere as chris.frosztega@gmail.com**, using **Sign in with
+  Google**. Your access is tied to that address and refuses any other.
+- **You do not need an invitation code.** Your account is already provisioned
+  directly. Earlier editions told you to enter a code; the Portal has never had
+  anywhere to enter one, which is what cost you the evening of 11 September.
 - **Allow about 35 minutes.** Sections 1–2 are setup; after that each stands
   alone.
 
@@ -33,9 +33,17 @@ evidence. This has cost us three investigations.
 
 ## 1. Sign in
 
-Open the Portal, sign in with Google, enter the invitation code.
+Open the Portal and click **Sign in with Google**. That is the whole step.
+
+*Ignore the email/password option on that box — your account is Google-only, so
+it can only ever offer you a password reset, which leads nowhere. It is being
+removed.*
 
 **Working when:** you land on the Dashboard with your name in the corner.
+
+*If you get **Access denied (HTTP 403)**, it means the server has no record of
+you rather than that you were refused. Sign out once on that screen and back in;
+if it persists, send me the screenshot.*
 
 ---
 
