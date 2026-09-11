@@ -201,6 +201,47 @@ describe('buildShotstackTimeline', () => {
   });
 });
 
+/**
+ * #124 narrowed narrativeText to the synthesis and moved the words about each
+ * screen into narrativeCaptions (ADR 0019). The narration has to follow them,
+ * or the video silently stops saying anything about the slides it shows.
+ */
+describe('buildNarrationText', () => {
+  const draft = {
+    narrativeText: 'The synthesis, spoken first.',
+    narrativeCaptions: [
+      { captureId: 'cap-b', caption: 'What the second screen shows.' },
+      { captureId: 'cap-a', caption: 'What the first screen shows.' },
+    ],
+    captures: [
+      { captureId: 'cap-a', order: 1, included: true },
+      { captureId: 'cap-skip', order: 2, included: false },
+      { captureId: 'cap-b', order: 3, included: true },
+    ],
+  };
+
+  test('speaks the synthesis, then each included slide caption in curated order', () => {
+    expect(storyboardsRouter.buildNarrationText(draft)).toBe(
+      'The synthesis, spoken first.\n\n'
+      + 'What the first screen shows.\n\n'
+      + 'What the second screen shows.'
+    );
+  });
+
+  test('says nothing about an excluded Capture', () => {
+    const withExcludedCaption = {
+      ...draft,
+      narrativeCaptions: [...draft.narrativeCaptions, { captureId: 'cap-skip', caption: 'Never spoken.' }],
+    };
+    expect(storyboardsRouter.buildNarrationText(withExcludedCaption)).not.toMatch(/Never spoken/);
+  });
+
+  test('a draft from before #124 narrates its narrativeText exactly as it did', () => {
+    const legacy = { narrativeText: 'One block of narrative, as it was.', captures: draft.captures };
+    expect(storyboardsRouter.buildNarrationText(legacy)).toBe('One block of narrative, as it was.');
+  });
+});
+
 describe('POST /admin/storyboards/:id/video', () => {
   let draft;
 

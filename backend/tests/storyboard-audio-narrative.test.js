@@ -33,6 +33,12 @@ const { clearDatabase, seedUser, seedProject, HEADERS } = require('./helpers/fix
 
 const TINY_WEBM = Buffer.from('fake webm bytes for a short walkthrough');
 
+/** Since #124 generation returns `{ synthesis, captions }` (ADR 0019), and
+ * every draft in this suite carries exactly one included Capture. */
+function narrativeJson(synthesis) {
+  return JSON.stringify({ synthesis, captions: [{ slide: 1, caption: 'The screen the walkthrough opens on.' }] });
+}
+
 async function seedUpload(id, projectId, data = {}) {
   await db.collection(collections.UPLOADS).doc(id).set({
     projectId,
@@ -170,7 +176,7 @@ describe('POST /admin/storyboards/:id/narrative/audio', () => {
     const client = getAIClient();
     client.models.generateContent
       .mockResolvedValueOnce({ text: 'Transcribed from a codecs-qualified type.' })
-      .mockResolvedValueOnce({ text: 'Narrative from codecs-qualified audio.' });
+      .mockResolvedValueOnce({ text: narrativeJson('Narrative from codecs-qualified audio.') });
 
     const res = await request(app)
       .post(`/admin/storyboards/${draft.id}/narrative/audio`)
@@ -188,7 +194,7 @@ describe('POST /admin/storyboards/:id/narrative/audio', () => {
     client.models.generateContent.mockClear();
     client.models.generateContent
       .mockResolvedValueOnce({ text: 'The Analyst opened the campaign, then walked through setup.' }) // transcription
-      .mockResolvedValueOnce({ text: 'Narrative generated from the audio transcript.' });               // generation
+      .mockResolvedValueOnce({ text: narrativeJson('Narrative generated from the audio transcript.') }); // generation
 
     const res = await request(app)
       .post(`/admin/storyboards/${draft.id}/narrative/audio`)
@@ -215,7 +221,7 @@ describe('POST /admin/storyboards/:id/narrative/audio', () => {
     const client = getAIClient();
     client.models.generateContent
       .mockResolvedValueOnce({ text: 'Transcribed walkthrough, visible before generation finishes.' })
-      .mockResolvedValueOnce({ text: 'Generated narrative.' });
+      .mockResolvedValueOnce({ text: narrativeJson('Generated narrative.') });
 
     await request(app)
       .post(`/admin/storyboards/${draft.id}/narrative/audio`)

@@ -1,11 +1,17 @@
 /**
- * AI narrative generation from a Storyboard draft (#86)
+ * AI narrative generation from a Storyboard draft (#86, #124)
  *
  * POST /admin/storyboards/:id/narrative takes a typed prompt, builds a
  * multimodal Gemini request from the draft's *included*, *ordered* Captures
  * (as gs:// image references) plus their notes, and writes the result back
  * onto the draft as narrativeStatus/narrativeText — not into the `reports`
  * collection (see storyboards.js's header comment and ADR 0013).
+ *
+ * Since #124 the model returns a structured `{ synthesis, captions }` rather
+ * than one block of prose (ADR 0019). The shared double answers the slide
+ * numbers it was sent (see helpers/genaiMock.js); `text` below is the
+ * synthesis half. A test that needs a specific — or malformed — response
+ * mocks that one call directly.
  *
  * Firestore: emulator. Cloud Storage: mocked (thumbnails only — the
  * narrative request references gs:// paths directly, no signed URL).
@@ -21,6 +27,9 @@ jest.mock('@google-cloud/storage', () => require('./helpers/gcsMock').createStor
 jest.mock('@google/genai', () => require('./helpers/genaiMock').createGenAIMock({
   text: 'Canned narrative: the Analyst opened the campaign, then saved it.'
 }));
+
+const CANNED_SYNTHESIS = 'Canned narrative: the Analyst opened the campaign, then saved it.';
+const CANNED_CAPTION = 'Canned caption for slide 1.';
 
 process.env.GCS_BUCKET = 'fake-bucket';
 
@@ -118,19 +127,141 @@ describe('buildNarrativeRequest', () => {
     const req = await storyboardsRouter.buildNarrativeRequest(curated, 'Tell the story of this campaign.');
     const parts = req.contents[0].parts;
 
+    // The Analyst's own words come first, ahead of the product's formatting
+    // instruction — ADR 0016's clearance turns on which of the two is steering.
     expect(parts[0]).toEqual({ text: 'Tell the story of this campaign.' });
+    expect(parts[1].text).toMatch(/caption/i);
 
-    // narr-cap-c (order 1, included) — image, then its note
-    expect(parts[1]).toEqual({ fileData: { mimeType: 'image/png', fileUri: 'gs://fake-bucket/narrative-proj/narr-cap-c.png' } });
-    expect(parts[2]).toEqual({ text: 'Slide 1 note: opening screen' });
+    // narr-cap-c (order 1, included) — slide marker, image, then its note
+    expect(parts[2]).toEqual({ text: 'Slide 1:' });
+    expect(parts[3]).toEqual({ fileData: { mimeType: 'image/png', fileUri: 'gs://fake-bucket/narrative-proj/narr-cap-c.png' } });
+    expect(parts[4]).toEqual({ text: 'Slide 1 note: opening screen' });
 
     // narr-cap-b (excluded) never appears anywhere in the parts
     expect(parts.some((p) => p.fileData?.fileUri.includes('narr-cap-b'))).toBe(false);
     expect(parts.some((p) => p.text?.includes('skip this one'))).toBe(false);
 
-    // narr-cap-a (order 3, included, no note) — image only, no stray note part
-    expect(parts[3]).toEqual({ fileData: { mimeType: 'image/png', fileUri: 'gs://fake-bucket/narrative-proj/narr-cap-a.png' } });
-    expect(parts).toHaveLength(4);
+    // narr-cap-a (order 3, included, no note) — marker and image, no stray note part
+    expect(parts[5]).toEqual({ text: 'Slide 3:' });
+    expect(parts[6]).toEqual({ fileData: { mimeType: 'image/png', fileUri: 'gs://fake-bucket/narrative-proj/narr-cap-a.png' } });
+    expect(parts).toHaveLength(7);
+  });
+
+  test('every included slide is numbered in the request, since a caption is keyed by that number', async () => {
+    const getRes = await request(app).get(`/admin/storyboards/${draft.id}`).set(HEADERS.analyst);
+
+    const req = await storyboardsRouter.buildNarrativeRequest(getRes.body, 'Tell the story.');
+    const markers = req.contents[0].parts
+      .map((p) => p.text)
+      .filter((t) => /^Slide \d+:$/.test(t ?? ''));
+
+    // Curated order values, not 1..n — slide 2 is excluded, and a caption for
+    // it would be a caption for a Capture that is not in the Storyboard.
+    expect(markers).toEqual(['Slide 1:', 'Slide 3:']);
+  });
+
+  test('asks for JSON against a schema, with an output budget that scales with the slide count', async () => {
+    const getRes = await request(app).get(`/admin/storyboards/${draft.id}`).set(HEADERS.analyst);
+
+    const req = await storyboardsRouter.buildNarrativeRequest(getRes.body, 'Tell the story.');
+
+    expect(req.config.responseMimeType).toBe('application/json');
+    expect(req.config.responseSchema.properties.captions).toBeDefined();
+    expect(req.config.responseSchema.required).toEqual(expect.arrayContaining(['synthesis', 'captions']));
+
+    // #124: the request used to send no generationConfig at all, on a thinking
+    // model whose reasoning tokens count against the budget (lib/models.js).
+    const { storyboardMaxOutputTokens } = require('../src/lib/models');
+    expect(req.config.maxOutputTokens).toBe(storyboardMaxOutputTokens(2));
+    expect(storyboardMaxOutputTokens(66)).toBeGreaterThan(storyboardMaxOutputTokens(2));
+  });
+});
+
+/**
+ * The half of #124 that can fail without a network: what comes back is JSON
+ * the model wrote, and every one of these cases ends as a slide that reaches a
+ * client with nothing written on it if it is not caught here.
+ */
+describe('parseNarrativeResponse', () => {
+  const included = [
+    { captureId: 'cap-first', order: 1 },
+    { captureId: 'cap-third', order: 3 },
+  ];
+
+  const valid = JSON.stringify({
+    synthesis: 'Two screens, one story.',
+    captions: [
+      { slide: 3, caption: 'The second one.' },
+      { slide: 1, caption: 'The first one.' },
+    ],
+  });
+
+  test('maps each caption onto its Capture id, in curated order', () => {
+    const parsed = storyboardsRouter.parseNarrativeResponse(valid, included);
+
+    expect(parsed.synthesis).toBe('Two screens, one story.');
+    // Keyed by captureId, not slide number: a later reorder moves the slide
+    // number and must not move the caption onto a different screenshot.
+    expect(parsed.captions).toEqual([
+      { captureId: 'cap-first', caption: 'The first one.' },
+      { captureId: 'cap-third', caption: 'The second one.' },
+    ]);
+  });
+
+  test('rejects a caption for a slide that is not in the Storyboard', () => {
+    const body = JSON.stringify({
+      synthesis: 'ok',
+      captions: [
+        { slide: 1, caption: 'a' },
+        { slide: 2, caption: 'a caption for an excluded Capture' },
+        { slide: 3, caption: 'c' },
+      ],
+    });
+    expect(() => storyboardsRouter.parseNarrativeResponse(body, included)).toThrow(/slide 2/i);
+  });
+
+  test('rejects a missing caption rather than finalizing a slide with nothing on it', () => {
+    const body = JSON.stringify({ synthesis: 'ok', captions: [{ slide: 1, caption: 'a' }] });
+    expect(() => storyboardsRouter.parseNarrativeResponse(body, included)).toThrow(/slide 3/i);
+  });
+
+  test('rejects two captions for the same slide', () => {
+    const body = JSON.stringify({
+      synthesis: 'ok',
+      captions: [
+        { slide: 1, caption: 'a' },
+        { slide: 1, caption: 'also a' },
+        { slide: 3, caption: 'c' },
+      ],
+    });
+    expect(() => storyboardsRouter.parseNarrativeResponse(body, included)).toThrow(/duplicate/i);
+  });
+
+  test('rejects text that is not JSON at all', () => {
+    expect(() => storyboardsRouter.parseNarrativeResponse('I am afraid I cannot do that.', included))
+      .toThrow(/json/i);
+  });
+
+  test('rejects an empty response — the shape of a budget spent entirely on thinking', () => {
+    expect(() => storyboardsRouter.parseNarrativeResponse('', included)).toThrow(/no text/i);
+  });
+
+  test('rejects a missing or blank synthesis', () => {
+    const body = JSON.stringify({ synthesis: '   ', captions: [{ slide: 1, caption: 'a' }, { slide: 3, caption: 'c' }] });
+    expect(() => storyboardsRouter.parseNarrativeResponse(body, included)).toThrow(/synthesis/i);
+  });
+
+  test('rejects a blank caption, which is the same empty slide by another route', () => {
+    const body = JSON.stringify({ synthesis: 'ok', captions: [{ slide: 1, caption: '' }, { slide: 3, caption: 'c' }] });
+    expect(() => storyboardsRouter.parseNarrativeResponse(body, included)).toThrow(/slide 1/i);
+  });
+
+  test('a Storyboard with no included Captures needs no captions', () => {
+    const body = JSON.stringify({ synthesis: 'Nothing was curated in.', captions: [] });
+    expect(storyboardsRouter.parseNarrativeResponse(body, [])).toEqual({
+      synthesis: 'Nothing was curated in.',
+      captions: [],
+    });
   });
 });
 
@@ -206,9 +337,52 @@ describe('POST /admin/storyboards/:id/narrative', () => {
 
     const settled = await pollUntilSettled(draft.id);
     expect(settled.narrativeStatus).toBe('done');
-    expect(settled.narrativeText).toBe('Canned narrative: the Analyst opened the campaign, then saved it.');
+    // narrativeText is the synthesis — the same field, still the free-form
+    // half, still Markdown (ADR 0018). The captions are new state beside it.
+    expect(settled.narrativeText).toBe(CANNED_SYNTHESIS);
+    expect(settled.narrativeCaptions).toEqual([
+      { captureId: 'gen-cap-a', caption: CANNED_CAPTION },
+    ]);
     expect(settled.narrativePrompt).toBe('Tell the story of this campaign.');
     expect(settled.narrativeError).toBeNull();
+  });
+
+  test('a caption for a Capture that is not in the Storyboard fails the run, rather than being dropped', async () => {
+    const client = getAIClient();
+    client.models.generateContent.mockResolvedValueOnce({
+      text: JSON.stringify({
+        synthesis: 'A synthesis that looks perfectly fine.',
+        captions: [{ slide: 1, caption: 'ok' }, { slide: 9, caption: 'a slide that does not exist' }],
+      })
+    });
+
+    await request(app)
+      .post(`/admin/storyboards/${draft.id}/narrative`)
+      .set(HEADERS.analyst)
+      .send({ prompt: 'Tell the story of this campaign.' });
+
+    const settled = await pollUntilSettled(draft.id);
+    expect(settled.narrativeStatus).toBe('error');
+    expect(settled.narrativeError).toMatch(/slide 9/i);
+    expect(settled.narrativeText).toBeNull();
+    expect(settled.narrativeCaptions).toBeNull();
+  });
+
+  test('a missing caption fails the run — never a done status with a slide left blank', async () => {
+    const client = getAIClient();
+    client.models.generateContent.mockResolvedValueOnce({
+      text: JSON.stringify({ synthesis: 'A synthesis and no captions at all.', captions: [] })
+    });
+
+    await request(app)
+      .post(`/admin/storyboards/${draft.id}/narrative`)
+      .set(HEADERS.analyst)
+      .send({ prompt: 'Tell the story of this campaign.' });
+
+    const settled = await pollUntilSettled(draft.id);
+    expect(settled.narrativeStatus).toBe('error');
+    expect(settled.narrativeError).toMatch(/slide 1/i);
+    expect(settled.narrativeText).toBeNull();
   });
 
   test('a generation failure surfaces as an error status, not a silent success', async () => {
@@ -233,7 +407,7 @@ describe('POST /admin/storyboards/:id/narrative', () => {
       .set(HEADERS.analyst)
       .send({ prompt: 'First pass.' });
     const first = await pollUntilSettled(draft.id);
-    expect(first.narrativeText).toBe('Canned narrative: the Analyst opened the campaign, then saved it.');
+    expect(first.narrativeText).toBe(CANNED_SYNTHESIS);
 
     await request(app)
       .patch(`/admin/storyboards/${draft.id}/narrative`)
@@ -241,7 +415,12 @@ describe('POST /admin/storyboards/:id/narrative', () => {
       .send({ narrativeText: 'A hand-edited correction.' });
 
     const client = getAIClient();
-    client.models.generateContent.mockResolvedValueOnce({ text: 'Second pass narrative.' });
+    client.models.generateContent.mockResolvedValueOnce({
+      text: JSON.stringify({
+        synthesis: 'Second pass narrative.',
+        captions: [{ slide: 1, caption: 'A second-pass caption.' }],
+      })
+    });
 
     await request(app)
       .post(`/admin/storyboards/${draft.id}/narrative`)
@@ -251,6 +430,10 @@ describe('POST /admin/storyboards/:id/narrative', () => {
     const second = await pollUntilSettled(draft.id);
     expect(second.narrativeText).toBe('Second pass narrative.');
     expect(second.narrativeText).not.toBe('A hand-edited correction.');
+    // The captions are replaced too, not left over from the first pass.
+    expect(second.narrativeCaptions).toEqual([
+      { captureId: 'gen-cap-a', caption: 'A second-pass caption.' },
+    ]);
   });
 });
 

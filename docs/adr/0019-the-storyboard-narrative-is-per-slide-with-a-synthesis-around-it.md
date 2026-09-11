@@ -12,8 +12,12 @@ of the three options as written.
 ## Decision
 
 Narrative generation returns **two things in one call**: a short free-form
-synthesis, and one caption per included Capture — `{ captureId, caption }`. The
-PDF draws each caption with its slide. Section headers come from **Capture
+synthesis, and one caption per included Capture. The model answers by slide
+number — the number already stated in the request — and the caption is stored
+against its `captureId`, so a reorder afterwards moves the slide number without
+moving the words.
+
+The PDF draws each caption with its slide. Section headers come from **Capture
 metadata** (`stage`, the Persona; `tool`), never from parsing the model's prose,
 and the per-frame label is derived from the Capture's `tabUrl` when the PDF is
 drawn rather than asked of the model.
@@ -104,3 +108,29 @@ draw.
   document they are ten of the fifty-two images and some of its best pages, but
   they require choosing which frames deserve one, which nothing in the current
   curation flow asks the Analyst for.
+
+## Amendment (2026-09-11, during #124's implementation)
+
+**Why the model answers by slide number and not by Capture id.** The Decision
+above was written expecting the model to key each caption by `captureId`. It
+does not, and the reason is worth keeping: a `captureId` is the URL-encoded
+object path of the screenshot, over a hundred characters long. Asking a model
+to echo sixty-six of those exactly, when the slide number is already stated
+beside each image and is unique within the draft, adds a failure mode for
+nothing. The mapping to `captureId` happens where it is free and reliable — in
+`parseNarrativeResponse`, against the curated set the request was built from.
+
+**`narrativeText` is now the synthesis, not the whole narrative.** That is the
+point of the decision, but it narrows a field three other things read:
+
+- **#89, the PDF** renders it as the opening pages, which is what it should be,
+  and draws no captions until #125.
+- **#90, the video** narrated `narrativeText` on the grounds that it was the
+  whole narrative. Left alone it would have gone on narrating only the
+  synthesis — a video that quietly stopped saying anything about the slides it
+  shows. `buildNarrationText` now speaks the synthesis, then each included
+  slide's caption in curated order. A pre-#124 draft carries no captions and
+  narrates exactly as it did.
+- **#87, the editor** still edits `narrativeText` alone, so the captions are
+  the one part of a client deliverable an Analyst cannot correct. That gap is
+  recorded on #123 and is not closed here.

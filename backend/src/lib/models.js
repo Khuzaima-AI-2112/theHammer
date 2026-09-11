@@ -104,6 +104,52 @@ const REPORT_MAX_OUTPUT_TOKENS = 2048;
 const OCR_MAX_PAIRS = 20;
 
 /**
+ * How long one Storyboard slide caption may run (#124, ADR 0019).
+ *
+ * The layout decides this number, not taste: the hand-built Softomedia
+ * Storyboard puts **six frames on a page**, which leaves each caption a fixed
+ * amount of room under its screenshot. Forty-five words is what fits there at
+ * a readable size — about the length of the captions in that document, which
+ * run two or three short sentences.
+ *
+ * It is an instruction to the model, not an enforced truncation. #125 draws
+ * the caption and is where an over-long one has to be made visible rather than
+ * clipped; a limit that silently cut the last sentence off a client-facing
+ * page would be the same class of defect as the Markdown that printed as
+ * syntax.
+ */
+const STORYBOARD_CAPTION_MAX_WORDS = 45;
+
+/**
+ * Output budget for a Storyboard narrative, which — unlike a Report's —
+ * grows with the Storyboard.
+ *
+ * Before #124 this call sent **no generationConfig at all**, on a thinking
+ * model whose reasoning tokens are billed at the output rate and count against
+ * this same budget (see DEFAULT_LLM_MODEL above). One block of prose fit
+ * inside the API default; a synthesis plus a caption for every one of 66
+ * Captures is a different size of answer, and a budget that runs out returns a
+ * structurally valid empty one — the failure this product keeps re-learning.
+ *
+ * The base covers the synthesis and the model's reasoning over the images; the
+ * per-slide term covers one caption at STORYBOARD_CAPTION_MAX_WORDS plus the
+ * JSON around it. The ceiling is not a cost control — it is the point past
+ * which a Storyboard is too large for one call and should be told so rather
+ * than truncated mid-answer.
+ */
+const STORYBOARD_NARRATIVE_BASE_TOKENS = 8192;
+const STORYBOARD_NARRATIVE_TOKENS_PER_SLIDE = 128;
+const STORYBOARD_NARRATIVE_MAX_TOKENS = 32768;
+
+function storyboardMaxOutputTokens(slideCount) {
+  const slides = Number.isFinite(slideCount) && slideCount > 0 ? Math.floor(slideCount) : 0;
+  return Math.min(
+    STORYBOARD_NARRATIVE_BASE_TOKENS + slides * STORYBOARD_NARRATIVE_TOKENS_PER_SLIDE,
+    STORYBOARD_NARRATIVE_MAX_TOKENS
+  );
+}
+
+/**
  * True only for an exact allowlisted id.
  *
  * Deliberately does not trim: callers trim before validating, and a predicate
@@ -123,5 +169,8 @@ module.exports = {
   RETIRED_MODEL_IDS,
   REPORT_MAX_OUTPUT_TOKENS,
   OCR_MAX_PAIRS,
+  STORYBOARD_CAPTION_MAX_WORDS,
+  STORYBOARD_NARRATIVE_MAX_TOKENS,
+  storyboardMaxOutputTokens,
   isSupportedLlmModel,
 };

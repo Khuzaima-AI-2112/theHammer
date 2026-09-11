@@ -86,3 +86,52 @@ be reviewed for the same defect. It is cleared, not fixed, for three reasons:
 Applying this guard there would reject phrasing an Analyst may have
 deliberately asked for. If Storyboard narratives ever gain a product-authored
 prompt, this clearance lapses.
+
+## Amendment (2026-09-11, during #124): the clearance is re-argued, not retained
+
+The lapse condition above fired. #124 adds `NARRATIVE_FORMAT_INSTRUCTION` to
+`buildNarrativeRequest` — a product-authored prompt, which is exactly what the
+clearance said it could not survive. Re-examined, its three reasons did not
+fail together:
+
+- **"The product supplies no prompt"** is gone in letter. What it was
+  protecting is not: #119's defect was a prompt that asked for a *voice* ("an
+  executive assistant"), and forward-looking filler is what that register is
+  made of. The new instruction asks for a *shape* — which slide a caption
+  belongs to, how many words it has, that the synthesis is not repeated in the
+  captions. It says nothing about stance, and the Analyst's own instruction is
+  still the first part of the request.
+- **"Their draft, not a figure presented to a Customer"** is simply false now,
+  and ADR 0018 already said so: the finalized narrative is the opening of a
+  72-page document whose stated purpose is to be handed to a client unedited.
+  This reason is withdrawn.
+- **"Grounded in the Captures themselves, not in two integers"** holds, and is
+  now the strongest of the three. The pressure that produced #119 — a model
+  asked to fill three sentences from almost no material — is still absent.
+
+## The decision: the guard still does not run over a Storyboard
+
+Not because the narrative is private any more, but for a reason the original
+clearance did not reach: **the guard's markers are a Storyboard's legitimate
+content.** `findForwardLookingClaims` fires on `recommend`, `should`, `focus
+on`, `next steps`. The hand-built Softomedia Storyboard that ADR 0019 was
+decided against closes on a page titled **Recommendations**, and its captions
+say plainly what the client should fix. An Analyst's Storyboard is advisory by
+nature; a Report is not.
+
+That inverts #119's asymmetry. There, a false positive cost a blander summary
+and a false negative put an intention in the Customer's mouth. Here a false
+positive would delete the most valuable page of the deliverable, and there is
+no invented commitment to catch: the Analyst asked for the advice, reads it in
+the editor (#87), and can edit it before finalizing.
+
+What stands in the guard's place is narrower and structural, not rhetorical:
+#124 refuses a response with a caption missing, duplicated, or aimed at a slide
+that is not in the Storyboard, so a run cannot reach `done` with a slide that
+would print blank.
+
+This answers, for the guard, the open question left at the foot of ADR 0018.
+
+**What would re-open it:** a product-authored instruction here that asks for a
+register or a stance rather than a shape, or a Storyboard that can be finalized
+without an Analyst having read the narrative.

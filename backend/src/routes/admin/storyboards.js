@@ -103,7 +103,10 @@ const logger = require('../../lib/logger');
 const { db } = require('../../lib/firestore');
 const { requireAnalyst } = require('../../middleware/requireAuth');
 const { getAIClient } = require('../../lib/vertex');
-const { DEFAULT_LLM_MODEL, TTS_MODEL, TTS_VOICE, OCR_MAX_PAIRS } = require('../../lib/models');
+const {
+  DEFAULT_LLM_MODEL, TTS_MODEL, TTS_VOICE, OCR_MAX_PAIRS,
+  STORYBOARD_CAPTION_MAX_WORDS, storyboardMaxOutputTokens,
+} = require('../../lib/models');
 const { submitRender } = require('../../lib/shotstack');
 const { renderMarkdown } = require('../../lib/narrativeMarkdown');
 const collections = require('../../lib/collections');
@@ -259,6 +262,9 @@ function serializeDraft(snap) {
     narrativeStatus: d.narrativeStatus ?? null,
     narrativePrompt: d.narrativePrompt ?? null,
     narrativeText: d.narrativeText ?? null,
+    // #124: one caption per included Capture, keyed by captureId so a reorder
+    // after generation moves the slide number without moving the words.
+    narrativeCaptions: d.narrativeCaptions ?? null,
     narrativeError: d.narrativeError ?? null,
     createdAt: isoOf(d.createdAt),
     updatedAt: isoOf(d.updatedAt),
@@ -486,28 +492,95 @@ router.patch('/storyboards/:id', requireAnalyst, async (req, res, next) => {
 });
 
 /**
+ * What a narrative generation must come back as (#124, ADR 0019).
+ *
+ * Two outputs from one call: the free-form synthesis the Storyboard opens with,
+ * and one caption per slide to be drawn beside its screenshot (#125). The
+ * schema is enforced by the API, so the instruction below carries only what a
+ * schema cannot say — what a caption is *for*, and how long it may be.
+ */
+/**
+ * The slides of a Storyboard: included only, in the Analyst's chosen order.
+ *
+ * One definition, because three things have to agree on it exactly — the
+ * request sends these slide numbers, the response is validated against them,
+ * and the PDF draws them. Two copies of the filter-and-sort would let the set
+ * the model was asked about drift from the set its answer is checked against,
+ * and the mismatch would read as a model that skipped a slide.
+ */
+function includedCaptures(draft) {
+  return [...(draft.captures ?? [])]
+    .filter((c) => c.included)
+    .sort((a, b) => a.order - b.order);
+}
+
+const NARRATIVE_SCHEMA = {
+  type: 'OBJECT',
+  properties: {
+    synthesis: {
+      type: 'STRING',
+      description: 'The narrative that opens the Storyboard: what these screens show, taken together. Markdown.',
+    },
+    captions: {
+      type: 'ARRAY',
+      description: 'One entry per slide, covering every slide and no others.',
+      items: {
+        type: 'OBJECT',
+        properties: {
+          slide: { type: 'INTEGER', description: 'The slide number exactly as stated in the request.' },
+          caption: { type: 'STRING', description: 'What this one screenshot shows.' },
+        },
+        required: ['slide', 'caption'],
+      },
+    },
+  },
+  required: ['synthesis', 'captions'],
+};
+
+/**
+ * The product's only words in this request — and the reason ADR 0016's
+ * clearance had to be re-argued rather than assumed (see its #124 amendment).
+ *
+ * #119's defect was a prompt that asked for a *voice* ("an executive
+ * assistant"), and forward-looking filler is what that register is made of.
+ * This asks for a *shape*: which slide a caption belongs to, and how much room
+ * it has. It says nothing about stance, and the Analyst's own instruction is
+ * still parts[0] — it comes first in the request because it is what steers.
+ */
+const NARRATIVE_FORMAT_INSTRUCTION = [
+  'Return a synthesis and one caption per slide.',
+  '',
+  `Each caption describes that one screenshot in at most ${STORYBOARD_CAPTION_MAX_WORDS} words —`,
+  'it is printed underneath the screenshot itself, so it has room for two or three short sentences.',
+  'Use the slide numbers exactly as they are stated above: one caption for every slide, and none for a number that was not given.',
+  'The synthesis is separate and is not repeated in the captions.',
+].join('\n');
+
+/**
  * Builds the multimodal Gemini request from a draft: the prompt, then each
  * *included* Capture in slide order as a gs:// image reference, with its note
  * (if any) as the text part immediately after it. Excluded Captures are not
  * sent — the AI only sees what the Analyst curated.
  *
  * No per-Capture tagging step exists anywhere in this — the AI receives the
- * ordered images and notes and infers its own structure.
+ * ordered images and notes and writes what each one shows. What it does *not*
+ * decide any more is where the sections fall: since #124 that comes from the
+ * Capture's own `stage`, at render time (ADR 0019, narrowing #84 story 11).
  *
  * Exported so tests can assert on the request shape directly, without a
  * mocked AI client or the timing of an async generation run.
  */
-// #119 reviewed this path for the embellishment the Reports narrative had, and
-// cleared it: the instruction below is the Analyst's own typed or transcribed
-// words, not a product-authored persona, and the result is a draft they read in
-// the editor rather than a figure shown to a Customer as measurement. The
-// clearance lapses if a product-authored prompt is ever added here. ADR 0016.
-async function buildNarrativeRequest(draft, prompt) {
-  const included = [...draft.captures]
-    .filter((c) => c.included)
-    .sort((a, b) => a.order - b.order);
+// #119 reviewed this path for the embellishment the Reports narrative had and
+// cleared it, on the grounds that the product supplied no prompt of its own.
+// #124 added one — NARRATIVE_FORMAT_INSTRUCTION — so that clearance lapsed by
+// its own terms and was re-argued rather than assumed: see ADR 0016's #124
+// amendment for why a request for a *shape* does not carry #119's defect, and
+// why narrativeGuard still must not run over a Storyboard.
 
-  const parts = [{ text: prompt }];
+async function buildNarrativeRequest(draft, prompt) {
+  const included = includedCaptures(draft);
+
+  const parts = [{ text: prompt }, { text: NARRATIVE_FORMAT_INSTRUCTION }];
 
   if (included.length > 0) {
     const refs = included.map((c) => db.collection(collections.UPLOADS).doc(c.captureId));
@@ -518,6 +591,10 @@ async function buildNarrativeRequest(draft, prompt) {
     for (const c of included) {
       const upload = uploadById[c.captureId];
       const gcsPath = upload?.gcsPath ?? upload?.path ?? null;
+      // The slide number is stated for every slide, not only the ones carrying
+      // a note — it is the key a caption comes back under, so an unnumbered
+      // image is one the model can only guess the number of.
+      parts.push({ text: `Slide ${c.order}:` });
       if (gcsPath) {
         parts.push({ fileData: { mimeType: 'image/png', fileUri: `gs://${BUCKET}/${gcsPath}` } });
       }
@@ -527,7 +604,84 @@ async function buildNarrativeRequest(draft, prompt) {
     }
   }
 
-  return { contents: [{ role: 'user', parts }] };
+  return {
+    contents: [{ role: 'user', parts }],
+    config: {
+      // Shared with the model's own reasoning tokens on a thinking model, and
+      // sized against the slide count because the answer grows with it — see
+      // storyboardMaxOutputTokens in lib/models.js.
+      maxOutputTokens: storyboardMaxOutputTokens(included.length),
+      responseMimeType: 'application/json',
+      responseSchema: NARRATIVE_SCHEMA,
+    },
+  };
+}
+
+/**
+ * Turns the model's JSON into the two things the draft stores, or throws.
+ *
+ * Pure, and exported, for the same reason `parseMarkdown` is split from
+ * `renderMarkdown` (ADR 0018): the validation fails in ways that have nothing
+ * to do with Vertex being reachable, and each of those ways is a slide that
+ * reaches a client with nothing written on it if it goes unnoticed.
+ *
+ * Captions come back keyed by **slide number** — short, already stated in the
+ * request, and not a 120-character URL-encoded document id the model would
+ * have to echo exactly 66 times. They are stored keyed by `captureId`, because
+ * the Analyst can reorder afterwards and a caption must follow its screenshot,
+ * not its position.
+ *
+ * @param {string} rawText the model's response text
+ * @param {{captureId: string, order: number}[]} included the curated slides
+ */
+function parseNarrativeResponse(rawText, included) {
+  if (typeof rawText !== 'string' || rawText.trim() === '') {
+    // The shape of a budget spent entirely on reasoning: a structurally valid,
+    // completely empty answer. lib/models.js documents why that happens.
+    throw new Error('the model returned no text');
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(rawText);
+  } catch (err) {
+    throw new Error(`the model did not return valid JSON: ${err.message}`);
+  }
+
+  const synthesis = typeof parsed?.synthesis === 'string' ? parsed.synthesis.trim() : '';
+  if (synthesis === '') throw new Error('the model returned no synthesis');
+
+  const captions = Array.isArray(parsed?.captions) ? parsed.captions : null;
+  if (!captions) throw new Error('the model returned no captions list');
+
+  const byOrder = new Map(included.map((c) => [c.order, c.captureId]));
+  const captionByCaptureId = new Map();
+
+  for (const entry of captions) {
+    const slide = entry?.slide;
+    const captureId = byOrder.get(slide);
+    if (!captureId) {
+      throw new Error(`the model returned a caption for slide ${slide}, which is not in this Storyboard`);
+    }
+    if (captionByCaptureId.has(captureId)) {
+      throw new Error(`the model returned a duplicate caption for slide ${slide}`);
+    }
+    const caption = typeof entry?.caption === 'string' ? entry.caption.trim() : '';
+    if (caption === '') throw new Error(`the model returned an empty caption for slide ${slide}`);
+    captionByCaptureId.set(captureId, caption);
+  }
+
+  // Checked last, and against the curated set rather than the response, so the
+  // error names the slide that would have been blank.
+  const missing = included.find((c) => !captionByCaptureId.has(c.captureId));
+  if (missing) {
+    throw new Error(`the model returned no caption for slide ${missing.order}`);
+  }
+
+  return {
+    synthesis,
+    captions: included.map((c) => ({ captureId: c.captureId, caption: captionByCaptureId.get(c.captureId) })),
+  };
 }
 
 /** The Project's configured llmModel, shared by narrative generation and
@@ -557,9 +711,18 @@ async function generateNarrative(draftId, prompt) {
     const client = getAIClient();
     const resp = await client.models.generateContent({ model: modelId, ...request });
 
+    const included = includedCaptures(draft);
+    // Throws into the catch below on anything malformed, so a Storyboard with
+    // a slide the model skipped never reaches 'done' — a caption missing here
+    // is a blank space on a page someone hands to a client (#124).
+    const { synthesis, captions } = parseNarrativeResponse(resp.text, included);
+
     await ref.update({
       narrativeStatus: 'done',
-      narrativeText: resp.text,
+      // Still the free-form half, still Markdown, still the field #87 edits and
+      // #89 renders — the captions are new state beside it, not a replacement.
+      narrativeText: synthesis,
+      narrativeCaptions: captions,
       narrativeError: null,
       updatedAt: nowISO(),
     });
@@ -750,9 +913,7 @@ router.post(
  * Exported for direct testing, same reasoning as buildNarrativeRequest.
  */
 async function buildStoryboardPdf(draft) {
-  const included = [...draft.captures]
-    .filter((c) => c.included)
-    .sort((a, b) => a.order - b.order);
+  const included = includedCaptures(draft);
 
   const uploadById = {};
   if (included.length > 0) {
@@ -876,6 +1037,35 @@ function pcmToWav(pcmBuffer, sampleRate, channels = 1, bitsPerSample = 16) {
 }
 
 /**
+ * What the video says out loud (#124).
+ *
+ * This used to be `narrativeText` alone, which was then the *whole* narrative.
+ * Since #124 `narrativeText` is only the synthesis and the words about each
+ * screen live in `narrativeCaptions` (ADR 0019), so narrating it alone would
+ * have quietly dropped everything said about the individual slides — a video
+ * that got shorter with nothing to show for it, which is the exact class of
+ * silent shortening this feature keeps producing.
+ *
+ * The synthesis opens, then each slide's caption in curated order — the order
+ * the images appear in on the timeline, so the words track the picture.
+ *
+ * A draft generated before #124 carries no captions and narrates exactly as it
+ * did before.
+ *
+ * Exported for direct testing, same reasoning as buildNarrativeRequest.
+ */
+function buildNarrationText(draft) {
+  const captionByCaptureId = new Map(
+    (draft.narrativeCaptions ?? []).map((c) => [c.captureId, c.caption])
+  );
+  const spoken = [
+    draft.narrativeText ?? '',
+    ...includedCaptures(draft).map((c) => captionByCaptureId.get(c.captureId) ?? ''),
+  ];
+  return spoken.filter((s) => typeof s === 'string' && s.trim() !== '').join('\n\n');
+}
+
+/**
  * Synthesizes narrationText into a WAV buffer via Vertex AI text-to-speech —
  * always the finalized narrative, never #88's raw recording (playing back
  * an operator's own voice would defeat the point of a narrative someone
@@ -963,7 +1153,7 @@ router.post('/storyboards/:id/video', requireAnalyst, async (req, res, next) => 
     }
 
     const draft = serializeDraft(snap);
-    const included = [...draft.captures].filter((c) => c.included).sort((a, b) => a.order - b.order);
+    const included = includedCaptures(draft);
 
     const reportRef = await db.collection(collections.REPORTS).add({
       projectId: draft.projectId,
@@ -982,7 +1172,7 @@ router.post('/storyboards/:id/video', requireAnalyst, async (req, res, next) => 
     });
 
     try {
-      const narrationBuffer = await synthesizeNarration(draft.narrativeText);
+      const narrationBuffer = await synthesizeNarration(buildNarrationText(draft));
       const audioPath = `${draft.projectId}/reports/${reportRef.id}/narration.wav`;
       await storage.bucket(BUCKET).file(audioPath).save(narrationBuffer, {
         metadata: { contentType: 'audio/wav' },
@@ -1014,9 +1204,11 @@ router.post('/storyboards/:id/video', requireAnalyst, async (req, res, next) => 
 });
 
 router.buildNarrativeRequest = buildNarrativeRequest;
+router.parseNarrativeResponse = parseNarrativeResponse;
 router.buildTranscriptionRequest = buildTranscriptionRequest;
 router.buildStoryboardPdf = buildStoryboardPdf;
 router.synthesizeNarration = synthesizeNarration;
+router.buildNarrationText = buildNarrationText;
 router.buildShotstackTimeline = buildShotstackTimeline;
 router.generateNarrative = generateNarrative;
 
