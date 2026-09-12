@@ -112,6 +112,7 @@ const {
 const { submitRender } = require('../../lib/shotstack');
 const { renderMarkdown } = require('../../lib/narrativeMarkdown');
 const { prefetchInOrder } = require('../../lib/prefetch');
+const { wavDurationSeconds, apportionNarration } = require('../../lib/narrationTiming');
 const collections = require('../../lib/collections');
 const { loadOwnedProject, belongsToCaller } = require('../../lib/ownership');
 
@@ -1325,19 +1326,50 @@ async function synthesizeNarration(narrationText) {
  * rather than Captures themselves, so the curated-order guarantee can be
  * tested directly without a GCS or Shotstack double.
  *
+ * `timing` is what `apportionNarration` worked out from the synthesized audio
+ * (lib/narrationTiming.js): how long each slide should hold the screen, so the
+ * slides last as long as the words about them (#128). Omitted — or null,
+ * when the audio's duration could not be read — every slide falls back to
+ * VIDEO_SLIDE_SECONDS, which is what produced 4.4 minutes of slides under
+ * 8.2 minutes of speech on the real draft.
+ *
  * Exported for direct testing, same reasoning as buildNarrativeRequest.
  */
-function buildShotstackTimeline(imageUrls, audioUrl) {
+function buildShotstackTimeline(imageUrls, audioUrl, timing = null) {
+  // Either the timing covers every slide or it is not used at all. Falling
+  // back slide by slide would mix apportioned lengths with the fixed four
+  // seconds in one timeline, which is worse than either on its own and would
+  // look like a rendering bug rather than a missing measurement.
+  const paced = Array.isArray(timing?.slideSeconds)
+    && timing.slideSeconds.length === imageUrls.length
+    && timing.slideSeconds.every((s) => Number.isFinite(s) && s > 0);
+
+  // The synthesis is about the whole run, so no one slide belongs to it
+  // (ADR 0019). It plays over the first slide, before that slide's own words
+  // begin — the alternative, a title card, is an asset this feature does not
+  // have and #128 did not ask for.
+  const leadIn = paced ? (timing.leadInSeconds ?? 0) : 0;
+
+  // Rounded up, not to nearest. Shotstack takes two decimals, and rounding 66
+  // clips to nearest can land the timeline a fraction *under* its soundtrack —
+  // which is this ticket's own defect, in miniature. Up costs at most 0.01s of
+  // silence per slide and cannot truncate.
+  const lengthOf = (i) => {
+    const seconds = paced ? timing.slideSeconds[i] : VIDEO_SLIDE_SECONDS;
+    return Math.ceil((seconds + (i === 0 ? leadIn : 0)) * 100) / 100;
+  };
+
   let start = 0;
-  const clips = imageUrls.map((src) => {
+  const clips = imageUrls.map((src, i) => {
+    const length = lengthOf(i);
     const clip = {
       asset: { type: 'image', src },
-      start,
-      length: VIDEO_SLIDE_SECONDS,
+      start: Math.round(start * 100) / 100,
+      length,
       fit: 'contain',
       transition: { in: 'fade', out: 'fade' },
     };
-    start += VIDEO_SLIDE_SECONDS;
+    start += length;
     return clip;
   });
 
@@ -1411,7 +1443,18 @@ router.post('/storyboards/:id/video', requireAnalyst, async (req, res, next) => 
         return makeSignedUrl(upload?.gcsPath ?? upload?.path ?? null, VIDEO_ASSET_SIGNED_URL_TTL_MS);
       }));
 
-      const timeline = buildShotstackTimeline(imageUrls, audioUrl);
+      // How long each slide holds, taken from the audio that was actually
+      // synthesized rather than from a constant (#128). The captions handed in
+      // are the same strings, in the same order, that buildNarrationText just
+      // spoke — anything else apportions a recording nobody made.
+      const captionByCaptureId = captionsByCaptureId(draft);
+      const timing = apportionNarration({
+        synthesis: draft.narrativeText ?? '',
+        captions: included.map((c) => captionByCaptureId.get(c.captureId) ?? ''),
+        audioSeconds: wavDurationSeconds(narrationBuffer),
+      });
+
+      const timeline = buildShotstackTimeline(imageUrls, audioUrl, timing);
       const renderId = await submitRender(timeline);
 
       await reportRef.update({ status: 'processing', shotstackRenderId: renderId, updatedAt: nowISO() });
@@ -1437,5 +1480,9 @@ router.generateNarrative = generateNarrative;
 // Exported so the suite asserts against the bound assembly actually uses,
 // rather than against a second copy of the number (#122).
 router.IMAGE_PREFETCH_AHEAD = IMAGE_PREFETCH_AHEAD;
+// Exported for the same reason: the fallback a timeline takes when the audio
+// could not be measured is asserted against the constant it actually uses,
+// not against a second copy of the number (#128).
+router.VIDEO_SLIDE_SECONDS = VIDEO_SLIDE_SECONDS;
 
 module.exports = router;

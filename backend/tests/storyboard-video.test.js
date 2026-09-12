@@ -38,11 +38,18 @@ const collections = require('../src/lib/collections');
 const { createShotstackMock } = require('./helpers/shotstackMock');
 const { clearDatabase, seedUser, seedProject, HEADERS } = require('./helpers/fixtures');
 
-const TTS_AUDIO_BASE64 = Buffer.from([0, 0, 0, 0, 0, 0, 0, 0]).toString('base64');
+// Audio with a real duration, which is the whole of what #128 could not see:
+// the double used to answer eight zero bytes, so the synthesized narration had
+// no length, and no test could observe it disagreeing with the timeline laid
+// under it. 8kHz is a real PCM rate and keeps the fixture small; the rate is
+// read from the mimeType below, exactly as Vertex's own answer is.
+const TTS_SAMPLE_RATE = 8000;
+const TTS_AUDIO_SECONDS = 30;
+const TTS_AUDIO_BASE64 = Buffer.alloc(TTS_SAMPLE_RATE * 2 * TTS_AUDIO_SECONDS).toString('base64');
 const TTS_RESPONSE = {
   candidates: [{
     content: {
-      parts: [{ inlineData: { mimeType: 'audio/L16;rate=24000', data: TTS_AUDIO_BASE64 } }]
+      parts: [{ inlineData: { mimeType: `audio/L16;rate=${TTS_SAMPLE_RATE}`, data: TTS_AUDIO_BASE64 } }]
     }
   }]
 };
@@ -175,6 +182,16 @@ describe('POST /admin/storyboards/:id/video — curated order end-to-end', () =>
     expect(clipSrcs[0]).toContain('order-cap-c.png');
     expect(clipSrcs[1]).toContain('order-cap-b.png');
     expect(clipSrcs.join(' ')).not.toContain('order-cap-a.png');
+
+    // #128, and the assertion that ticket says could not exist: the double
+    // now answers audio of a real length, so the pictures can be checked
+    // against it. Shotstack renders the timeline, so a timeline shorter than
+    // its soundtrack is narration paid for and thrown away — 46% of it, on
+    // the real draft, when every slide got a fixed four seconds.
+    const clips = postedTimeline.timeline.tracks[0].clips;
+    const timelineSeconds = clips.reduce((n, c) => n + c.length, 0);
+    expect(timelineSeconds).toBeCloseTo(TTS_AUDIO_SECONDS, 1);
+    expect(timelineSeconds).not.toBeCloseTo(clips.length * 4, 1);
   });
 });
 
@@ -198,6 +215,92 @@ describe('buildShotstackTimeline', () => {
       expect(clips[i].start).toBe(clips[i - 1].start + clips[i - 1].length);
     }
     expect(clips[0].start).toBe(0);
+  });
+
+  // #128. Given what the narration actually measured, each picture holds the
+  // screen for as long as the words about it — not the four seconds every
+  // slide used to get, which left 46% of the real draft's narration unplayed.
+  test('a slide lasts as long as its own share of the narration', () => {
+    const timeline = storyboardsRouter.buildShotstackTimeline(
+      ['https://example.com/a.png', 'https://example.com/b.png'],
+      'https://example.com/narration.wav',
+      { leadInSeconds: 5, slideSeconds: [9, 6] }
+    );
+
+    const clips = timeline.timeline.tracks[0].clips;
+    // The synthesis is about the whole run, so it plays over the first slide
+    // before that slide's own words start: 5 + 9, then 6.
+    expect(clips[0]).toMatchObject({ start: 0, length: 14 });
+    expect(clips[1]).toMatchObject({ start: 14, length: 6 });
+
+    // And the pictures last exactly as long as the audio under them, which is
+    // the property Shotstack cuts the soundtrack for want of.
+    expect(clips[clips.length - 1].start + clips[clips.length - 1].length).toBe(5 + 9 + 6);
+  });
+
+  test('falls back to fixed-length slides when the audio could not be measured', () => {
+    // wavDurationSeconds answers null for anything it does not recognise, and
+    // apportionNarration passes that through. Better a timeline that is wrong
+    // the old way than one of length nothing.
+    const timeline = storyboardsRouter.buildShotstackTimeline(
+      ['https://example.com/a.png', 'https://example.com/b.png'],
+      'https://example.com/narration.wav',
+      null
+    );
+
+    const lengths = timeline.timeline.tracks[0].clips.map((c) => c.length);
+    expect(lengths).toEqual([
+      storyboardsRouter.VIDEO_SLIDE_SECONDS,
+      storyboardsRouter.VIDEO_SLIDE_SECONDS,
+    ]);
+  });
+
+  test('timing that does not cover every slide is not used at all', () => {
+    // Falling back slide by slide would mix apportioned lengths with the fixed
+    // four seconds in one timeline — a video that paces the first half and not
+    // the second reads as a rendering bug, not as a missing measurement.
+    const urls = ['a', 'b', 'c'].map((n) => `https://example.com/${n}.png`);
+
+    for (const timing of [
+      { leadInSeconds: 5, slideSeconds: [9, 6] },          // one short
+      { leadInSeconds: 5, slideSeconds: [9, 6, 0] },       // a slide of nothing
+      { leadInSeconds: 5, slideSeconds: [9, 6, NaN] },     // an unmeasurable one
+    ]) {
+      const clips = storyboardsRouter
+        .buildShotstackTimeline(urls, 'https://example.com/narration.wav', timing)
+        .timeline.tracks[0].clips;
+
+      expect(clips.map((c) => c.length)).toEqual(
+        urls.map(() => storyboardsRouter.VIDEO_SLIDE_SECONDS)
+      );
+      // And the lead-in goes with it: it describes audio this timeline is no
+      // longer laid out against.
+      expect(clips[0].start).toBe(0);
+    }
+  });
+
+  // The rounding the clip lengths get is to two decimals, which Shotstack
+  // takes. Rounded to *nearest*, sixty-six of those can land the timeline a
+  // hundredth or two under its soundtrack — this ticket's own defect, small
+  // enough that no assertion above would notice.
+  test('rounding never lands the timeline under the audio, however many slides', () => {
+    const slideSeconds = Array.from({ length: 66 }, (_, i) => 7 + (i % 7) / 3);
+    const audioSeconds = slideSeconds.reduce((a, b) => a + b, 0) + 5;
+
+    const timeline = storyboardsRouter.buildShotstackTimeline(
+      slideSeconds.map((_, i) => `https://example.com/${i}.png`),
+      'https://example.com/narration.wav',
+      { leadInSeconds: 5, slideSeconds }
+    );
+
+    const clips = timeline.timeline.tracks[0].clips;
+    const end = clips[clips.length - 1].start + clips[clips.length - 1].length;
+    expect(end).toBeGreaterThanOrEqual(audioSeconds);
+
+    // And they still abut exactly, which rounding is the other way to break.
+    for (let i = 1; i < clips.length; i++) {
+      expect(clips[i].start).toBeCloseTo(clips[i - 1].start + clips[i - 1].length, 6);
+    }
   });
 });
 

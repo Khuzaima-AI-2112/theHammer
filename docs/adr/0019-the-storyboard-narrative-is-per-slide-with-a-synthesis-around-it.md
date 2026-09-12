@@ -134,3 +134,45 @@ point of the decision, but it narrows a field three other things read:
 - **#87, the editor** still edits `narrativeText` alone, so the captions are
   the one part of a client deliverable an Analyst cannot correct. That gap is
   recorded on #123 and is not closed here.
+
+## Consequence found later (2026-09-11, #128): per-slide words need per-slide pacing
+
+The bullet above fixed *what* the video says. It did not fix *when*. Every
+slide still held the screen for a fixed four seconds, which was defensible
+while the narration was one block of prose about the run — no picture owned
+any particular sentence, so no picture had a right length.
+
+Once the words are per-picture, the constant is a defect. On the real draft it
+made 4.4 minutes of pictures for 8.2 minutes of speech: Shotstack renders the
+timeline's length, so **46% of the narration was synthesized, paid for and
+discarded**, and what did play drifted — 33s adrift by slide 10, 98s by slide
+30, because a caption taking nine seconds and one taking three both got four.
+
+A slide now lasts its caption's share of the audio that was actually
+synthesized (`lib/narrationTiming.js`). The exact version — one TTS call per
+caption, each clip measured from its own audio — is not affordable while #127
+stands, and `@google/genai` offers no cheaper exactness: it exposes no timing
+or mark support at all, so one synthesis cannot be split by asking where the
+splits are. #124's 45-word cap is what makes apportioning good enough; it keeps
+the real draft's captions between 5.3s and 8.9s.
+
+**This bounds the drift rather than removing it**, and the distinction is worth
+keeping straight. Characters are a proxy for speaking time: a caption full of
+URLs or identifiers takes longer per character than prose. Only the endpoint is
+anchored — the pictures end where the audio ends — so each slide's start
+carries the accumulated error of the slides before it, pinned at both ends
+instead of growing without limit. A blank caption is worse than that: it is
+dropped from the speech but still holds the screen for `MIN_SLIDE_SECONDS`, so
+everything after it runs permanently that much late. With one soundtrack there
+is no way to both show a Capture the Analyst included and keep the words
+aligned; showing it wins, because a frame missing from a client deliverable is
+the worse failure. Exact alignment needs per-caption audio, which is #127's
+question again.
+
+**The synthesis plays over the first slide.** It is about the run as a whole,
+so no one picture belongs to it, and this ADR's own reasoning says so. On the
+real draft that makes the opening frame hold for 35.7s — 26.8s of synthesis
+plus its own 8.9s caption. That is a long time on one screenshot, and the
+alternative is a title card: an asset this feature does not have and #128 did
+not ask for. Recorded here so the next person choosing to build one knows why
+there isn't one.
