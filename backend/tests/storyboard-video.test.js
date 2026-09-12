@@ -71,6 +71,12 @@ async function createDraft(projectId, headers = HEADERS.analyst) {
   const res = await request(app)
     .post(`/admin/projects/${encodeURIComponent(projectId)}/storyboards`)
     .set(headers);
+  // Checked here so a refused create says so where it happened. Unchecked,
+  // this returned an error body, and the `undefined` id inside it failed some
+  // later test that had done nothing wrong — see lessons_learned 85. Either
+  // code is a success: the route is find-or-create, 201 for a new draft and
+  // 200 for resuming the Project's open one (#85).
+  expect([200, 201]).toContain(res.status);
   return res.body;
 }
 
@@ -320,6 +326,84 @@ describe('POST /admin/storyboards/:id/video', () => {
     const reportSnap = await db.collection(collections.REPORTS).doc(res.body.id).get();
     expect(projectSnap.data().workspaceId).toBeTruthy();
     expect(reportSnap.data().workspaceId).toBe(projectSnap.data().workspaceId);
+
+    // #127, asserted here for the same reason as the line above — so the
+    // render flow runs once. The row was stamped with a deadline while the
+    // ~200s of synthesis was happening inside this request; reaching
+    // `processing` means the work is Shotstack's now, where a render
+    // legitimately takes minutes, so the deadline is cleared and
+    // refreshVideoReportStatus owns its liveness from here.
+    expect(reportSnap.data().mustFinishBy).toBeNull();
+  });
+
+  test('a video row whose request died is settled as error by a later read, not polled for ever', async () => {
+    // What a killed request actually leaves: `queued`, with a deadline now in
+    // the past and nothing running. Written directly, because the only way to
+    // produce it for real is for Cloud Run to kill the request mid-synthesis.
+    const abandoned = await db.collection(collections.REPORTS).add({
+      projectId: 'video-proj',
+      workspaceId: 'video-workspace',
+      reportType: 'storyboard-video',
+      status: 'queued',
+      gcsPath: null,
+      storyboardDraftId: draft.id,
+      shotstackRenderId: null,
+      mustFinishBy: new Date(Date.now() - 60_000).toISOString(),
+      requestedBy: 'analyst-fixture-id',
+      createdAt: new Date(Date.now() - 400_000).toISOString(),
+      updatedAt: new Date(Date.now() - 400_000).toISOString(),
+      schemaVersion: 1,
+    });
+
+    try {
+      const statusRes = await request(app)
+        .get(`/admin/reports/${abandoned.id}/status`)
+        .set(HEADERS.analyst);
+      expect(statusRes.status).toBe(200);
+      expect(statusRes.body.status).toBe('error');
+
+      // Settled in Firestore, not just in the answer — the next reader of
+      // this row sees it too, which is the difference between reporting the
+      // failure and merely describing it.
+      const snap = await abandoned.get();
+      expect(snap.data().status).toBe('error');
+      expect(snap.data().error).toMatch(/did not finish/i);
+    } finally {
+      await abandoned.delete();
+    }
+  });
+
+  test('and the artifact route says so too, rather than "still queued" for ever', async () => {
+    // The viewer's own read path. Before #127 it answered
+    // "This report is still queued. There is no artifact yet." to every
+    // request, for ever, about work that had already died.
+    const overdue = await db.collection(collections.REPORTS).add({
+      projectId: 'video-proj',
+      workspaceId: 'video-workspace',
+      reportType: 'storyboard-video',
+      status: 'queued',
+      gcsPath: null,
+      storyboardDraftId: draft.id,
+      shotstackRenderId: null,
+      mustFinishBy: new Date(Date.now() - 60_000).toISOString(),
+      requestedBy: 'analyst-fixture-id',
+      createdAt: new Date(Date.now() - 400_000).toISOString(),
+      updatedAt: new Date(Date.now() - 400_000).toISOString(),
+      schemaVersion: 1,
+    });
+
+    try {
+      const res = await request(app)
+        .get(`/admin/reports/${overdue.id}/artifact`)
+        .set(HEADERS.analyst);
+
+      expect(res.status).toBe(409);
+      expect(res.body.status).toBe('error');
+      expect(res.body.error).toMatch(/did not finish/i);
+      expect(res.body.error).not.toMatch(/still queued/i);
+    } finally {
+      await overdue.delete();
+    }
   });
 
   test('a generation failure (e.g. text-to-speech) surfaces as an explicit error status', async () => {
@@ -339,6 +423,11 @@ describe('POST /admin/storyboards/:id/video', () => {
     const row = reportsRes.body.reports.find((r) => r.reportType === 'storyboard-video');
     expect(row.status).toBe('error');
     expect(row.error).toMatch(/Vertex AI TTS is unavailable/);
+
+    // #127: the deadline was stamped when the row was created, before the
+    // synthesis that failed — which is the only moment it can be stamped and
+    // still be there if the request never gets to write anything again.
+    expect(Date.parse(row.mustFinishBy)).toBeGreaterThan(Date.now());
   });
 });
 
