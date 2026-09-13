@@ -40,24 +40,16 @@ steps:
         # to be `npm install -g firebase-tools`, which resolved a fresh latest
         # on every build: a release could break the deploy with nobody having
         # touched the repo, and the version that built an image was not
-        # recorded anywhere.
+        # recorded anywhere. `npm ci` makes that record binding: it fails if
+        # package-lock.json has drifted from package.json.
         #
-        # `npm install`, not `npm ci`, and not for want of trying. ci is the
-        # right primitive — it enforces the lockfile rather than merely
-        # honouring it — but build 75c1a140 failed on it:
-        #
-        #   npm error `npm ci` can only install packages when your package.json
-        #   and package-lock.json are in sync.
-        #   npm error Missing: @emnapi/core@1.11.3 from lock file
-        #
-        # package-lock.json is generated on Windows, where npm resolves only
-        # this platform's optional dependencies, so it does not carry the
-        # linux-x64 ones this container needs. `npm install --package-lock-only`
-        # on Windows does not add them either. Making ci work means generating
-        # the lockfile on Linux; until somebody does that, ci fails every build
-        # and install succeeds. Do not swap this back without fixing the
-        # lockfile first (#9).
-        npm install
+        # Which means the lockfile must be written on Linux. A plain
+        # `npm install` on Windows drops the optional @emnapi entries this
+        # container needs, and ci here then fails. Regenerate it in this image
+        # (lesson 86, #118):
+        #   docker run --rm -v "$PWD/backend:/w" -w /w node:22-alpine \
+        #     npm install --package-lock-only
+        npm ci
         npm run test:emulator
     env:
       # No FIRESTORE_EMULATOR_HOST here, deliberately: emulators:exec exports it

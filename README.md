@@ -28,14 +28,14 @@ The repository is structured into distinct functional areas:
 To start the backend server locally:
 ```bash
 cd backend
-npm install
+npm ci                 # not `npm install`: see lesson 86
 npm run dev
 ```
 
 To run backend tests:
 ```bash
 cd backend
-npm install            # first time: brings in the pinned firebase-tools
+npm ci                 # first time: brings in the pinned firebase-tools
 npm run test:emulator
 ```
 
