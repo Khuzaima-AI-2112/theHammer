@@ -143,6 +143,7 @@ function keysEqual(provided, expected) {
   FROM node:20-alpine@sha256:<fetched-value>
   ```
 - Re-pin every 90 days or after a CVE disclosure affecting the base image.
+- **The tag in the re-pin comment is a second copy of the `FROM` tag, and has to move with it.** *Changed:* #21 found `backend/Dockerfile` on `FROM node:22-alpine` while its comment still pulled `node:20-alpine`. Re-pinning as written would have silently downgraded the deployed runtime a major version. The examples above say `node:20-alpine` because that was the tag in June; use whatever `FROM` names. `backend/tests/dockerfile-repin-matches-from.test.js` now fails the backend suite when the two disagree, in either Dockerfile.
 - This rule applies to **any** content-addressed identifier (OCI digests, git SHAs used as dependencies, npm `integrity` hashes). If you did not retrieve it from the authoritative source, do not commit it.
 
 ---
