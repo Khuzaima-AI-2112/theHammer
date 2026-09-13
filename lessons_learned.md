@@ -1264,3 +1264,11 @@ and surfaces only after a Cloud Build approval.
   `node_modules` onto a Windows bind mount dropped files (`TAR_ENTRY_ERROR`),
   producing a `Cannot find module` error that has nothing to do with the
   lockfile. Install on the container's own filesystem.
+- **Lesson 11 applies to comments too.** The first version of this fix put
+  the regeneration command, `$PWD` included, in a comment inside the test
+  step. Cloud Build substitutes the whole `args` string before bash ever sees
+  a `#`, so build `41007a6b` was refused at approval with `key in the template
+  "PWD" is not a valid built-in substitution`. None of the local checks could
+  see it: Docker, `npm ci` and Jest never read `cloudbuild.yaml`. Before
+  pushing a change to that file, search its diff for a `$` followed by a
+  letter.

@@ -46,9 +46,11 @@ steps:
         # Which means the lockfile must be written on Linux. A plain
         # `npm install` on Windows drops the optional @emnapi entries this
         # container needs, and ci here then fails. Regenerate it in this image
-        # (lesson 86, #118):
-        #   docker run --rm -v "$PWD/backend:/w" -w /w node:22-alpine \
+        # (lesson 86, #118), mounting backend/ from your checkout:
+        #   docker run --rm -v <repo>/backend:/w -w /w node:22-alpine \
         #     npm install --package-lock-only
+        # No shell variables in these comments: Cloud Build substitutes a
+        # dollar-name here too, and rejects the build (lesson 11).
         npm ci
         npm run test:emulator
     env:
