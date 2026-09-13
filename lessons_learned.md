@@ -494,6 +494,7 @@ Run this before starting any new sprint:
 - When `--detectOpenHandles` reports nothing but Jest still will not exit, use `process.getActiveResourcesInfo()` in an `afterAll` instead, and bisect by running each suite alone.
 - Set `METADATA_SERVER_DETECTION=none` for any offline suite so the credential probe never starts.
 - Be aware this is a workaround for an import-time side effect: a module-scope client construction runs on every `require` of the app, including in tests that never touch it. Prefer lazy construction for clients that need credentials.
+  *Changed:* #19 did that. Every client now comes from `src/lib/storage.js` on first use, and `METADATA_SERVER_DETECTION` is gone from `tests/setup/env.js`. The second rule above no longer applies to this suite. Mock `@google-cloud/storage` in any suite that reaches a bucket instead (lesson 88).
 
 ---
 
@@ -1304,3 +1305,37 @@ entries whose stat data says they are current.
 - **Verify attributes in throwaway clones, not the working tree.** A tree that
   was checked out before the change passes or fails for reasons that belong
   to its history, not to the rule.
+
+### 88. A workaround for a hang you cannot reproduce is removed by counting, not by waiting
+
+**What happened:** #19 made the Cloud Storage client lazy, so
+`METADATA_SERVER_DETECTION=none` (lesson 41) could be re-evaluated. The
+obvious test was to delete it and see whether Jest still exited. It did, but
+it also exited on `main`'s code with the setting deleted. The hang the setting
+existed for did not reproduce on this machine at all, so "it still exits"
+proved nothing about the fix.
+
+The removal was justified by counting what the setting contained instead: a
+run that recorded every real `Storage` and `GoogleGenAI` construction.
+`main` showed 8 in each of the 9 suites that load the app without mocking
+Storage, 72 in all. The branch showed none.
+
+The first counter was blind, and said "none" on both. It replaced
+`module.Storage` on the required package, but `@google-cloud/storage` exports
+through a non-configurable getter, so the assignment was silently ignored.
+Only the control run on `main` exposed it. The working counter maps the
+package name to a wrapper that subclasses the real export
+(`moduleNameMapper`), so a suite's own `jest.mock` still wins.
+
+**Root cause:** a check whose failure condition cannot occur on the machine
+running it passes whether or not the fix works. So does an instrument that
+never fires.
+
+**Rule going forward:**
+- **Before removing a workaround, confirm the failure it prevents still
+  reproduces without it.** If it does not, measure the cause it contained
+  instead of waiting for the symptom.
+- **Run every counter or guard against a known-bad case first.** A tally of
+  zero is only evidence once the same tally has shown a non-zero.
+- **Monkey-patching a package export can no-op silently.** Compiled
+  TypeScript exports are often getters. Wrap through the module resolver.

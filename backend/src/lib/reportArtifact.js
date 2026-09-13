@@ -21,16 +21,9 @@
  * Both are parsed here, in one place, rather than at the call site.
  */
 
-const { Storage } = require('@google-cloud/storage');
+const { getStorage } = require('./storage');
 
 const BUCKET = process.env.GCS_BUCKET || 'thehammer-storage-2026';
-
-/** Lazily constructed: module scope is what #19 is open about. */
-let storage = null;
-function getStorage() {
-  if (!storage) storage = new Storage();
-  return storage;
-}
 
 /**
  * How long a signed URL for a binary artifact is good for.

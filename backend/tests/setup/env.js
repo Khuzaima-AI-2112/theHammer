@@ -7,22 +7,29 @@
  * The suite is offline by design: Firestore goes to the emulator, and Cloud
  * Storage is mocked. Nothing here should ever reach a real Google endpoint.
  *
- * METADATA_SERVER_DETECTION deserves a note. The Cloud Storage client resolves
- * Application Default Credentials by probing the GCE metadata server. On a
- * developer machine nothing answers that address, so the connection attempt
- * stays pending: Jest finishes the run, waits on the open socket, and prints
- * "Jest did not exit one second after the test run has completed", which hangs
- * CI until the job times out. `--detectOpenHandles` cannot name it — a pending
- * outbound connection inside the auth library is not a libuv handle Jest tracks;
- * it shows up as ConnectWrap and TCPSocketWrap in getActiveResourcesInfo().
+ * No METADATA_SERVER_DETECTION here, and why it used to be (#19). A real
+ * Cloud Storage client resolves Application Default Credentials by probing the
+ * GCE metadata server. On a developer machine nothing answers, the connection
+ * stays pending, and Jest prints "Jest did not exit one second after the test
+ * run has completed". `--detectOpenHandles` cannot name it: the pending
+ * connection shows up only as ConnectWrap and TCPSocketWrap in
+ * getActiveResourcesInfo(). This file set METADATA_SERVER_DETECTION=none to
+ * contain that, because index.js and seven modules it loads each built a
+ * client at require time: 8 real clients in every suite that loaded the app
+ * without mocking '@google-cloud/storage', 72 across the suite.
  *
- * Consequence to know about: a future test that genuinely needs real credential
- * resolution must not use this setup file, or it will fail with an opaque
- * no-credentials error rather than resolving ADC.
+ * The clients are now built on first use (src/lib/storage.js), and a run that
+ * counted every real Storage and GoogleGenAI construction found none, so there
+ * was nothing left for the setting to contain. It also meant a test needing
+ * real credential resolution could not use this file. That restriction is gone.
+ *
+ * The way this comes back: a suite that reaches a bucket (a signed URL, a
+ * Capture upload, an export) without
+ * `jest.mock('@google-cloud/storage', () => require('./helpers/gcsMock').createStorageMock())`
+ * builds a real client. Mock it. Don't restore the setting to hide it.
  */
 process.env.NODE_ENV = 'test';
 process.env.FIRESTORE_EMULATOR_HOST = process.env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8085';
-process.env.METADATA_SERVER_DETECTION = 'none';
 
 // firebase-admin's initializeApp() resolves a project id from the environment,
 // and with no ADC on the machine it throws 'Unable to detect a Project Id'. The

@@ -3,7 +3,7 @@
 const logger = require('../lib/logger');
 
 
-const { Storage } = require('@google-cloud/storage');
+const { getStorage } = require('../lib/storage');
 const { GoogleGenAI } = require('@google/genai');
 const { db } = require('../lib/firestore');
 const { getAIClient } = require('../lib/vertex');
@@ -12,7 +12,6 @@ const { computeReportMetrics } = require('../lib/reportMetrics');
 const { CONFIG_DEFAULTS } = require('../lib/defaults');
 const { DEFAULT_LLM_MODEL, REPORT_MAX_OUTPUT_TOKENS } = require('../lib/models');
 const { buildReportNarrativePrompt, guardNarrative } = require('../lib/narrativeGuard');
-const gcs = new Storage();
 
 // This is a simplified MVP worker logic for generating standard reports
 async function generateStandardReport(reportId, projectId, reportType, dateRange) {
@@ -89,7 +88,7 @@ async function generateStandardReport(reportId, projectId, reportType, dateRange
     // Write to GCS
     const bucketName = process.env.GCS_BUCKET || `hammer-reports-${projectId}`;
     const gcsPath = `${projectId}/reports/${reportId}.json`;
-    const bucket = gcs.bucket(bucketName);
+    const bucket = getStorage().bucket(bucketName);
     const file = bucket.file(gcsPath);
 
     await file.save(JSON.stringify(resultData, null, 2), {

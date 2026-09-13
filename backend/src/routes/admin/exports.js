@@ -35,7 +35,7 @@
 const express = require('express');
 const archiver = require('archiver');
 const { Timestamp } = require('firebase-admin/firestore');
-const { Storage } = require('@google-cloud/storage');
+const { getStorage } = require('../../lib/storage');
 const { db } = require('../../lib/firestore');
 const { requireAdmin } = require('../../middleware/requireAuth');
 const { exportLimiter } = require('../../middleware/rateLimiters');
@@ -49,7 +49,6 @@ const router = express.Router({ mergeParams: true });
 // reason: a bounded job that fits in one request's memory and time budget.
 const MAX_CAPTURES = 50;
 
-const storage = new Storage();
 const BUCKET = process.env.GCS_BUCKET || 'thehammer-storage-2026';
 
 /** ISO instant → a file name fragment that is legal on Windows and sorts. */
@@ -154,7 +153,7 @@ router.get('/projects/:id/export', requireAdmin, exportLimiter, async (req, res,
     });
     archive.pipe(res);
 
-    const bucket = storage.bucket(BUCKET);
+    const bucket = getStorage().bucket(BUCKET);
     const index = ['number,file,uploadedAt,tool,stage,tabUrl'];
 
     for (let i = 0; i < rows.length; i++) {

@@ -12,6 +12,7 @@ This document provides a single-entry index of critical architectural topics and
 | **Settings & Configuration Defaults** | Baseline default constants for global configurations and per-user settings. | [`backend/src/lib/defaults.js`](../backend/src/lib/defaults.js) |
 | **Firestore Collections** | Centralized string constants for Firestore collections to prevent typos and ease renaming. | [`backend/src/lib/collections.js`](../backend/src/lib/collections.js) |
 | **Vertex AI Client Setup** | Unified Google GenAI / Vertex AI client factory enforcing project ID resolution and region configurations. | [`backend/src/lib/vertex.js`](../backend/src/lib/vertex.js) |
+| **Cloud Storage Client** | The one Cloud Storage client, constructed on first use so requiring the app never starts credential resolution (#19). Nothing else may call `new Storage()`; `backend/tests/storage-client-lazy.test.js` enforces it. | [`backend/src/lib/storage.js`](../backend/src/lib/storage.js) |
 | **Database Instance Singleton** | Bootstrapping point of Firebase Admin Firestore singleton shared across all routes. | [`backend/src/lib/firestore.js`](../backend/src/lib/firestore.js) |
 | **Structured Logging** | Central JSON logger library formatting messages for automated GCP Cloud Logging ingestion. | [`backend/src/lib/logger.js`](../backend/src/lib/logger.js) |
 | **Test Fixtures & Seeding** | Core helpers for database cleaning and user/project seeding across all unit and integration tests. | [`backend/tests/helpers/fixtures.js`](../backend/tests/helpers/fixtures.js) |

@@ -34,7 +34,7 @@ const express    = require('express');
 const multer     = require('multer');
 const crypto     = require('crypto');
 const rateLimit  = require('express-rate-limit');
-const { Storage } = require('@google-cloud/storage');
+const { getStorage } = require('./lib/storage');
 const collections = require('./lib/collections');
 
 const app  = express();
@@ -111,7 +111,6 @@ app.use(express.json());
 
 // ── GCS ──────────────────────────────────────────────────────────
 const BUCKET_NAME = process.env.GCS_BUCKET;
-const gcs = new Storage();
 
 // ── Upload limits ────────────────────────────────────────────────
 // The ceiling itself lives in lib/defaults.js, which megamind.md names the OSOT
@@ -492,13 +491,13 @@ app.post('/upload-url', requireAuth('user'), async (req, res, next) => {
 
     if (req.body.semanticData) {
       const jsonPath = objectPath.replace(/\.png$/, '.json');
-      const jsonFile = gcs.bucket(BUCKET_NAME).file(jsonPath);
+      const jsonFile = getStorage().bucket(BUCKET_NAME).file(jsonPath);
       jsonFile.save(JSON.stringify(req.body.semanticData), {
         contentType: 'application/json'
       }).catch(err => logger.error('[hammer-api] Semantic data write error:', err));
     }
 
-    const file = gcs.bucket(BUCKET_NAME).file(objectPath);
+    const file = getStorage().bucket(BUCKET_NAME).file(objectPath);
     const [signedUrl] = await file.getSignedUrl({
       version: 'v4', action: 'write',
       expires: Date.now() + 10 * 60 * 1000,
@@ -602,7 +601,7 @@ app.post('/capture', requireAuth('user'), requireMultipart, rejectOversizedUploa
                       ?? buildObjectPath(safeProject, safeUser, safeTool);
     const uploadedAt   = new Date().toISOString();
 
-    const blob = gcs.bucket(BUCKET_NAME).file(objectPath);
+    const blob = getStorage().bucket(BUCKET_NAME).file(objectPath);
     await blob.save(req.file.buffer, {
       resumable: false,
       metadata: {
@@ -616,7 +615,7 @@ app.post('/capture', requireAuth('user'), requireMultipart, rejectOversizedUploa
       try {
         const parsed = typeof req.body.semanticData === 'string' ? JSON.parse(req.body.semanticData) : req.body.semanticData;
         const jsonPath = objectPath.replace(/\.png$/, '.json');
-        const jsonFile = gcs.bucket(BUCKET_NAME).file(jsonPath);
+        const jsonFile = getStorage().bucket(BUCKET_NAME).file(jsonPath);
         jsonFile.save(JSON.stringify(parsed), {
           contentType: 'application/json'
         }).catch(err => logger.error('[hammer-api] Semantic data write error:', err));

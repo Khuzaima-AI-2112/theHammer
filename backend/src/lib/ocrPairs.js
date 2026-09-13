@@ -23,19 +23,12 @@
  *  - **Capped, and the coverage is stated.** See OCR_MAX_PAIRS in models.js.
  */
 
-const { Storage } = require('@google-cloud/storage');
+const { getStorage } = require('./storage');
 const { db } = require('./firestore');
 const collections = require('./collections');
 const { OCR_MAX_PAIRS } = require('./models');
 
 const BUCKET = process.env.GCS_BUCKET || 'thehammer-storage-2026';
-
-/** Lazily constructed: module scope is what #19 is open about. */
-let storage = null;
-function getStorage() {
-  if (!storage) storage = new Storage();
-  return storage;
-}
 
 /**
  * Fewer than two included Captures: there is no pair to compare.
