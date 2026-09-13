@@ -4,7 +4,8 @@
  * POST  /admin/projects/:id/storyboards  → find-or-create the Project's
  *                                           open draft
  * GET   /admin/storyboards/:id           → fetch a draft
- * PATCH /admin/storyboards/:id           → update checkboxes/order/notes
+ * PATCH /admin/storyboards/:id           → update checkboxes/order/notes, and
+ *                                           the Workflow dividers (#126)
  *
  * A draft is pre-populated once, at creation, with every Capture the
  * Project has at that moment, oldest first — the same ordering
@@ -53,9 +54,9 @@
  * requires narrativeStatus === 'done' (edited via #87 or not — both are
  * valid; an edit never changes the status) and is refused otherwise. It
  * assembles a PDF — the synthesis, then the *included* Captures in curated
- * order as a grid of six frames to a page, each with its own caption, grouped
- * under a header per Persona (#125, ADR 0019; until then it was a page per
- * Capture) — writes it to GCS, and creates a `reports` Firestore doc with
+ * order as a grid of six frames to a page, each with its own caption (#125;
+ * until then it was a page per Capture), grouped under the curator's Workflow
+ * headings (#126, ADR 0020) — writes it to GCS, and creates a `reports` Firestore doc with
  * `reportType: 'storyboard'`. ADR 0013 put Storyboard
  * generation's *eventual* artifact in the `reports` collection precisely so
  * it shows up in the existing Reports list (view/download) the same way any
@@ -116,6 +117,7 @@ const { mustFinishBy } = require('../../lib/reportDeadline');
 const { wavDurationSeconds, apportionNarration } = require('../../lib/narrationTiming');
 const collections = require('../../lib/collections');
 const { loadOwnedProject, belongsToCaller } = require('../../lib/ownership');
+const { validateWorkflows, workflowByCaptureId } = require('../../lib/workflows');
 
 const router = express.Router();
 
@@ -264,6 +266,9 @@ function serializeDraft(snap) {
     projectId: d.projectId,
     status: d.status,
     captures: [...(d.captures ?? [])].sort((a, b) => a.order - b.order),
+    // #126, ADR 0020: the curator's Workflow dividers, in list order. A draft
+    // made before them has none, and reads as an empty list without migration.
+    workflows: d.workflows ?? [],
     narrativeStatus: d.narrativeStatus ?? null,
     narrativePrompt: d.narrativePrompt ?? null,
     narrativeText: d.narrativeText ?? null,
@@ -488,7 +493,19 @@ router.patch('/storyboards/:id', requireAnalyst, async (req, res, next) => {
       return res.status(400).json({ error: 'captures must not repeat an order value' });
     }
 
-    await ref.update({ captures: nextCaptures, updatedAt: nowISO() });
+    const update = { captures: nextCaptures, updatedAt: nowISO() };
+
+    // Optional, so a caller that only curates frames cannot wipe the dividers
+    // by leaving them out; an empty list is how they are all deleted (#126).
+    // Checked against the draft's fixed frame count, which the checks above
+    // have just proved this PATCH matches.
+    if (req.body.workflows !== undefined) {
+      const checked = validateWorkflows(req.body.workflows, nextCaptures.length);
+      if (checked.error) return res.status(400).json({ error: checked.error });
+      update.workflows = checked.workflows;
+    }
+
+    await ref.update(update);
 
     const updatedSnap = await ref.get();
     const draft = await enrichWithSignedUrls(serializeDraft(updatedSnap));
@@ -569,8 +586,9 @@ const NARRATIVE_FORMAT_INSTRUCTION = [
  *
  * No per-Capture tagging step exists anywhere in this — the AI receives the
  * ordered images and notes and writes what each one shows. What it does *not*
- * decide any more is where the sections fall: since #124 that comes from the
- * Capture's own `stage`, at render time (ADR 0019, narrowing #84 story 11).
+ * decide is where the sections fall: that is the curator's Workflow dividers
+ * (ADR 0020, superseding ADR 0019's reading of `stage`). Each slide's Workflow
+ * name is sent as context, and the model has no way to answer back about it.
  *
  * Exported so tests can assert on the request shape directly, without a
  * mocked AI client or the timing of an async generation run.
@@ -593,6 +611,10 @@ async function buildNarrativeRequest(draft, prompt) {
     const uploadById = {};
     snaps.forEach((s) => { if (s.exists) uploadById[s.id] = s.data(); });
 
+    // The same lookup the PDF heads its pages from, so the name the model is
+    // told is the heading the caption ends up under.
+    const workflowOf = workflowByCaptureId(draft.captures, draft.workflows);
+
     for (const c of included) {
       const upload = uploadById[c.captureId];
       const gcsPath = upload?.gcsPath ?? upload?.path ?? null;
@@ -600,6 +622,13 @@ async function buildNarrativeRequest(draft, prompt) {
       // a note — it is the key a caption comes back under, so an unnumbered
       // image is one the model can only guess the number of.
       parts.push({ text: `Slide ${c.order}:` });
+      // Context, not a question (#126, ADR 0020): the curator has already
+      // decided where each Workflow starts, and nothing in the response schema
+      // gives the model a way to say otherwise.
+      const workflow = workflowOf.get(c.captureId);
+      if (workflow) {
+        parts.push({ text: `Slide ${c.order} workflow: ${workflow.name}` });
+      }
       if (gcsPath) {
         parts.push({ fileData: { mimeType: 'image/png', fileUri: `gs://${BUCKET}/${gcsPath}` } });
       }
@@ -928,7 +957,9 @@ const FRAME_IMAGE_HEIGHT = 112;
 const FRAME_CAPTION_MAX_HEIGHT = 56;
 const FRAME_BAND_GAP = 4;
 
-const PERSONA_HEADER_HEIGHT = 30;
+// Kept on every grid page, headed or not, so an untitled page's frames sit
+// exactly where a headed page's do.
+const SECTION_HEADER_HEIGHT = 30;
 
 /**
  * How many Capture images assembly keeps in the air at once (#122).
@@ -974,23 +1005,14 @@ function frameLabel(order, tabUrl) {
 }
 
 /**
- * The section header for a run of frames: the Persona they were captured in.
+ * The heading over a Workflow's frames (#126, ADR 0020): `Workflow 2 · Brand`.
  *
- * The Persona is stored on the Capture as `stage` — the field name CONTEXT.md
- * puts on the *Avoid* list, kept here only where it names the Firestore field.
- * It has been stamped onto every `uploads` document since #63 and this is its
- * first reader (ADR 0019). index.js stores an absent Persona as the empty
- * string, so that case is not an error — it is a run of Captures taken without
- * one, and it says so rather than printing a blank band.
+ * Frames above the first divider have no Workflow and get no heading at all —
+ * null, not a placeholder. ADR 0019 printed `Unassigned Persona` in that case,
+ * read from the Capture's `stage`, which turned out never to hold a Persona.
  */
-function personaLabel(stage) {
-  const value = (stage ?? '').trim();
-  if (!value) return 'Unassigned Persona';
-  return value
-    .split(/[-_\s]+/)
-    .filter(Boolean)
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(' ');
+function workflowHeading(workflow) {
+  return workflow ? `Workflow ${workflow.number} · ${workflow.name}` : null;
 }
 
 /**
@@ -1004,7 +1026,7 @@ function personaLabel(stage) {
 function frameGridFor(doc) {
   const left = doc.page.margins.left;
   const width = doc.page.width - left - doc.page.margins.right;
-  const top = doc.page.margins.top + PERSONA_HEADER_HEIGHT;
+  const top = doc.page.margins.top + SECTION_HEADER_HEIGHT;
   const cellWidth = (width - FRAME_GUTTER * (FRAME_COLUMNS - 1)) / FRAME_COLUMNS;
   const cellHeight =
     (doc.page.height - doc.page.margins.bottom - top - FRAME_ROW_GAP * (FRAME_ROWS - 1)) / FRAME_ROWS;
@@ -1035,9 +1057,10 @@ function captionsByCaptureId(draft) {
 
 /**
  * Assembles the Storyboard PDF: the synthesis, then the *included* Captures in
- * curated order as a grid of six frames to a page, grouped under a header per
- * Persona. Excluded Captures are not in the PDF — the same curation the
- * narrative itself was built from (#86).
+ * curated order as a grid of six frames to a page, each Workflow the curator
+ * marked starting its own page under a heading (#126, ADR 0020). Excluded
+ * Captures are not in the PDF — the same curation the narrative itself was
+ * built from (#86). The Capture's `stage` is not read.
  *
  * Each frame carries its slide number, a label derived from the Capture's
  * `tabUrl`, the caption #124 generated for it, and the Analyst's note if there
@@ -1051,10 +1074,9 @@ function captionsByCaptureId(draft) {
  *   written before #124 or a relaxed rule — either way the gap belongs on the
  *   page, the same instinct as ADR 0018's malformed marker.
  *
- * A Persona with no included Captures does not appear at all, because the PDF
- * only ever sees included Captures. The hand-built document made the opposite
- * choice (a `NO CAPTURE EXISTS` page); nothing in curation records a Persona
- * the Analyst meant to cover and could not, so there is nothing to draw from.
+ * A Workflow with no included Captures does not appear at all (ADR 0020); the
+ * builder shows it as empty instead. The hand-built document made the opposite
+ * choice (a `NO CAPTURE EXISTS` page).
  *
  * A caption longer than its cap is ellipsised, not clipped silently: ADR 0019
  * makes density a constraint on the prose and says the overflow has to be
@@ -1073,6 +1095,11 @@ function captionsByCaptureId(draft) {
  */
 async function buildStoryboardPdf(draft) {
   const included = includedCaptures(draft);
+
+  // Which Workflow each frame prints under. Every included frame has an entry
+  // (null above the first divider), so the frames can still be prefetched as
+  // one run below.
+  const workflowOf = workflowByCaptureId(draft.captures, draft.workflows);
 
   const uploadById = {};
   if (included.length > 0) {
@@ -1100,15 +1127,19 @@ async function buildStoryboardPdf(draft) {
 
   let grid = null;
   let slot = FRAMES_PER_PAGE;
-  let currentPersona = null;
+  // undefined, not null: null is a real value here (the untitled frames above
+  // the first divider), and the first frame must always start a page.
+  let currentWorkflow;
 
   function startGridPage(heading) {
     doc.addPage();
     grid = frameGridFor(doc);
-    doc.font('Helvetica-Bold').fontSize(14).fillColor('black')
-      .text(heading, doc.page.margins.left, doc.page.margins.top, {
-        width: grid.width, height: PERSONA_HEADER_HEIGHT, ellipsis: true,
-      });
+    if (heading) {
+      doc.font('Helvetica-Bold').fontSize(14).fillColor('black')
+        .text(heading, doc.page.margins.left, doc.page.margins.top, {
+          width: grid.width, height: SECTION_HEADER_HEIGHT, ellipsis: true,
+        });
+    }
     slot = 0;
   }
 
@@ -1130,17 +1161,19 @@ async function buildStoryboardPdf(draft) {
 
   for await (const { item: c, value: imageBytes } of frames) {
     const upload = uploadById[c.captureId];
-    const persona = upload?.stage ?? '';
+    const workflow = workflowOf.get(c.captureId);
+    const heading = workflowHeading(workflow);
 
-    // A new Persona starts its own page: a header band dropped between two
+    // A new Workflow starts its own page: a header band dropped between two
     // rows of an already-started grid reads as a caption, not as a division.
-    // A run that outgrows one page keeps the header, marked as a continuation,
-    // so no page of frames is unattributed.
-    if (currentPersona === null || persona !== currentPersona) {
-      startGridPage(personaLabel(persona));
-      currentPersona = persona;
+    // A Workflow that outgrows one page keeps its heading, marked as a
+    // continuation, so no page of its frames is unattributed. Untitled frames
+    // stay untitled on every page they fill.
+    if (workflow !== currentWorkflow) {
+      startGridPage(heading);
+      currentWorkflow = workflow;
     } else if (slot >= FRAMES_PER_PAGE) {
-      startGridPage(`${personaLabel(persona)} (continued)`);
+      startGridPage(heading && `${heading} (continued)`);
     }
 
     const { x, y } = grid.cellAt(slot);

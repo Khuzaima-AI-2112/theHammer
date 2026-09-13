@@ -176,3 +176,12 @@ plus its own 8.9s caption. That is a long time on one screenshot, and the
 alternative is a title card: an asset this feature does not have and #128 did
 not ask for. Recorded here so the next person choosing to build one knows why
 there isn't one.
+
+## Amendment (2026-09-13, #126): section headers no longer come from `stage`
+
+**Superseded in part by ADR 0020.** This ADR took `stage` to be the Persona.
+It is a phase (Beginning, During or After), and all 66 Captures in the real
+draft carry `beginning`. Section headers now come from **Workflows**, which the
+curator sets as dividers in the Storyboard builder. The per-slide captions, the
+synthesis, and the rule that the model does not choose section boundaries all
+stand unchanged.

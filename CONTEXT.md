@@ -100,6 +100,15 @@ hold in reality or one they adopt to demonstrate somebody else’s product. It
 labels work and controls nothing — unlike the portal’s Role, which controls
 what a person may do and labels nothing.
 _Avoid_: role, user type, actor, character, profile
+It is not a Stage: a Stage is a phase of the work, and never names the part
+being played.
+
+**Stage**:
+The phase of the work a Capture was taken in: Beginning, During or After, and
+nothing else. It says *when* in a piece of work the screen was seen, never
+*who* was working or *which* piece of work it was. It does not carry the
+Persona, and nothing may head or group a Storyboard by Stage as though it did.
+_Avoid_: persona, step, milestone, section
 
 **Tool**:
 The product a Capture is *of* — the software whose screens the Monitored User
@@ -107,15 +116,23 @@ is working in, such as Softomedia or theHammer's own portal. It names what is
 on the screen, not what the Monitored User is doing there or which run of work
 this is. Production rows carry workflow-shaped values
 (`04-Retailer_workflow_captures`, `TEST-verify-1`); that is drift, and a
-workflow is a Storyboard. Nothing may group Captures by Tool as though it
-named a run of work.
+workflow is a Workflow within a Storyboard. Nothing may group Captures by Tool
+as though it named a run of work.
 _Avoid_: app, target, workflow, run, batch, stage
 
 **Storyboard**:
-An ordered set of Captures, with a note against each one, that demonstrates
-a single workflow. A Session measures time; a Storyboard tells a story. The
-two do not have to agree.
+An ordered set of Captures, with a note against each one, that tells one
+story, divided into one or more Workflows. A Session measures time; a
+Storyboard tells a story. The two do not have to agree.
 _Avoid_: sequence, slideshow, deck, reel, walkthrough
+
+**Workflow**:
+One named piece of work demonstrated within a Storyboard, such as "Super
+Admin". It is a name chosen by whoever curates the Storyboard, and it belongs
+to the Storyboard, not to the Captures in it: a Capture has no Workflow until
+a Storyboard gives it one. It is not a Persona, though its name often is one,
+and it is not a Stage.
+_Avoid_: section, walk, walkthrough, chapter, persona, group
 
 **Report**:
 An artifact generated from a Project's Captures — a set of metrics, an OCR

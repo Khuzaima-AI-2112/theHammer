@@ -160,6 +160,26 @@ describe('buildNarrativeRequest', () => {
     expect(markers).toEqual(['Slide 1:', 'Slide 3:']);
   });
 
+  // #126, ADR 0020. The model is told which Workflow each slide sits in, as
+  // context; it is not asked to decide one.
+  test('each slide under a Workflow divider carries that Workflow\'s name', async () => {
+    const getRes = await request(app).get(`/admin/storyboards/${draft.id}`).set(HEADERS.analyst);
+    const curated = {
+      ...getRes.body,
+      // Position 1 sits between slide 1 and the excluded slide 2, so slide 1 is
+      // untitled and slide 3 is "Brand".
+      workflows: [{ id: 'wf-brand', name: 'Brand', position: 1 }],
+    };
+
+    const req = await storyboardsRouter.buildNarrativeRequest(curated, 'Tell the story.');
+    const texts = req.contents[0].parts.map((p) => p.text).filter(Boolean);
+
+    expect(texts).toContain('Slide 3 workflow: Brand');
+    expect(texts.some((t) => /^Slide 1 workflow:/.test(t))).toBe(false);
+    // Stated before the image it describes, next to the slide marker.
+    expect(texts.indexOf('Slide 3 workflow: Brand')).toBe(texts.indexOf('Slide 3:') + 1);
+  });
+
   test('asks for JSON against a schema, with an output budget that scales with the slide count', async () => {
     const getRes = await request(app).get(`/admin/storyboards/${draft.id}`).set(HEADERS.analyst);
 
@@ -383,6 +403,32 @@ describe('POST /admin/storyboards/:id/narrative', () => {
     expect(settled.narrativeStatus).toBe('error');
     expect(settled.narrativeError).toMatch(/slide 1/i);
     expect(settled.narrativeText).toBeNull();
+  });
+
+  test('the model\'s answer cannot touch the Workflow dividers, whatever it sends back', async () => {
+    const dividers = [{ id: 'wf-1', name: 'Super Admin', position: 0 }];
+    await request(app)
+      .patch(`/admin/storyboards/${draft.id}`)
+      .set(HEADERS.analyst)
+      .send({ captures: draft.captures.map(({ signedUrl, ...c }) => c), workflows: dividers });
+
+    const client = getAIClient();
+    client.models.generateContent.mockResolvedValueOnce({
+      text: JSON.stringify({
+        synthesis: 'A synthesis.',
+        captions: [{ slide: 1, caption: 'A caption.' }],
+        workflows: [{ id: 'wf-evil', name: 'Renamed by the model', position: 1 }],
+      })
+    });
+
+    await request(app)
+      .post(`/admin/storyboards/${draft.id}/narrative`)
+      .set(HEADERS.analyst)
+      .send({ prompt: 'Tell the story of this campaign.' });
+
+    const settled = await pollUntilSettled(draft.id);
+    expect(settled.narrativeStatus).toBe('done');
+    expect(settled.workflows).toEqual(dividers);
   });
 
   test('a generation failure surfaces as an error status, not a silent success', async () => {

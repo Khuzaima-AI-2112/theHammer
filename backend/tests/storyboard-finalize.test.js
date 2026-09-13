@@ -194,8 +194,9 @@ describe('buildStoryboardPdf', () => {
 /**
  * The Storyboard grid (#125, ADR 0019)
  *
- * Six frames to a page, each carrying its own caption, grouped under a header
- * derived from the Capture's `stage`. The layout this replaced put one Capture
+ * Six frames to a page, each carrying its own caption, grouped under the
+ * curator's Workflow dividers (#126, ADR 0020 — until then a header derived
+ * from the Capture's `stage`). The layout this replaced put one Capture
  * on a page and no prose on any of them, which made the real 66-Capture draft
  * 73 pages of which 66 were a heading and a screenshot.
  *
@@ -233,8 +234,9 @@ describe('buildStoryboardPdf — the grid', () => {
   });
 
   /** A draft `buildStoryboardPdf` can read, without going through the routes. */
-  function draftOf(ids, { captions = true, notes = {} } = {}) {
+  function draftOf(ids, { captions = true, notes = {}, workflows } = {}) {
     return {
+      workflows,
       id: 'grid-draft',
       projectId: 'finalize-proj',
       status: 'draft',
@@ -284,22 +286,68 @@ describe('buildStoryboardPdf — the grid', () => {
     expect(text).not.toContain('Slide 1');
   });
 
-  test('a section header on each Persona change, derived from the Capture stage', async () => {
-    // Seven Super Admin frames (a page and a continuation), then two Media
-    // Buyer ones: the change starts its own page rather than landing mid-grid.
+  // #126, ADR 0020. The headings come from the curator's dividers. Every
+  // fixture Capture above carries a `stage`, deliberately: none of it may reach
+  // a page.
+  test('a Workflow starts its own page, headed by number and name, with (continued) on overflow', async () => {
+    // Seven Super Admin frames (a page and a continuation), then two Brand ones:
+    // the change starts its own page rather than landing mid-grid.
     const ids = ALL.slice(0, 9);
-    const text = extractPdfText(await build(draftOf(ids)));
+    const workflows = [
+      { id: 'wf-a', name: 'Super Admin', position: 0 },
+      { id: 'wf-b', name: 'Brand', position: 7 },
+    ];
+    const text = extractPdfText(await build(draftOf(ids, { workflows })));
 
-    expect(text).toContain('Super Admin');
-    expect(text).toContain('Super Admin (continued)');
-    expect(text).toContain('Media Buyer');
-    expect(text.indexOf('Super Admin')).toBeLessThan(text.indexOf('Media Buyer'));
-    expect(await gridPages(ids)).toBe(3);
+    expect(text).toContain('Workflow 1 · Super Admin');
+    expect(text).toContain('Workflow 1 · Super Admin (continued)');
+    expect(text).toContain('Workflow 2 · Brand');
+    expect(text).not.toContain('Workflow 2 · Brand (continued)');
+    expect(text.indexOf('Workflow 1 · Super Admin')).toBeLessThan(text.indexOf('1 · /admin/grid-1'));
+    expect(text.indexOf('7 · /admin/grid-7')).toBeLessThan(text.indexOf('Workflow 2 · Brand'));
+    expect(text.indexOf('Workflow 2 · Brand')).toBeLessThan(text.indexOf('8 · /admin/grid-8'));
+    expect(await gridPages(ids, { workflows })).toBe(3);
   });
 
-  test('an absent Persona is stored as the empty string, and gets a named section anyway', async () => {
-    const text = extractPdfText(await build(draftOf(['grid-10'])));
-    expect(text).toContain('Unassigned Persona');
+  test('a draft with no dividers prints no heading at all, and stage is never read', async () => {
+    const ids = ALL.slice(0, 10);
+    const text = extractPdfText(await build(draftOf(ids)));
+
+    expect(text).not.toContain('Workflow');
+    expect(text).not.toContain('Unassigned Persona');
+    expect(text).not.toContain('Super Admin');
+    expect(text).not.toContain('Media Buyer');
+    expect(text).not.toContain('continued');
+    // Still six frames to a page without a heading to break on.
+    expect(await gridPages(ids)).toBe(2);
+  });
+
+  test('frames above the first divider print untitled, ahead of the first Workflow', async () => {
+    const ids = ALL.slice(0, 3);
+    const text = extractPdfText(await build(draftOf(ids, {
+      workflows: [{ id: 'wf-a', name: 'Super Admin', position: 2 }],
+    })));
+
+    expect(text.indexOf('2 · /admin/grid-2')).toBeLessThan(text.indexOf('Workflow 1 · Super Admin'));
+    expect(text.indexOf('Workflow 1 · Super Admin')).toBeLessThan(text.indexOf('3 · /admin/grid-3'));
+    expect(await gridPages(ids, { workflows: [{ id: 'wf-a', name: 'Super Admin', position: 2 }] })).toBe(2);
+  });
+
+  test('a Workflow with no included frames is left out, and the next one takes its number', async () => {
+    const ids = ALL.slice(0, 3);
+    const draft = draftOf(ids, {
+      workflows: [
+        { id: 'wf-a', name: 'Everything unticked', position: 0 },
+        { id: 'wf-b', name: 'Back to back', position: 1 },
+        { id: 'wf-c', name: 'Brand', position: 1 },
+      ],
+    });
+    draft.captures[0].included = false;
+    const text = extractPdfText(await build(draft));
+
+    expect(text).not.toContain('Everything unticked');
+    expect(text).not.toContain('Back to back');
+    expect(text).toContain('Workflow 1 · Brand');
   });
 
   test('a Capture with no note draws nothing; one with a note draws it', async () => {

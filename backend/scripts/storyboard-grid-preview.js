@@ -45,6 +45,9 @@ function serialize(snap) {
     projectId: d.projectId,
     status: d.status,
     captures: [...(d.captures ?? [])].sort((a, b) => a.order - b.order),
+    // Drawn since #126: without it every preview prints untitled, whatever
+    // dividers the curator set.
+    workflows: d.workflows ?? [],
     narrativeStatus: d.narrativeStatus ?? null,
     narrativeText: d.narrativeText ?? null,
     narrativeCaptions: d.narrativeCaptions ?? null,
