@@ -301,6 +301,63 @@ describe('PATCH /admin/storyboards/:id', () => {
     expect(res.status).toBe(400);
   });
 
+  // #126, ADR 0020 — Workflow dividers are curation, and survive leaving the
+  // page the same way ticks, order and notes do.
+  describe('Workflow dividers', () => {
+    const DIVIDERS = [
+      { id: 'wf-1', name: 'Super Admin', position: 0 },
+      { id: 'wf-2', name: 'Brand', position: 1 },
+    ];
+
+    test('a draft made before ADR 0020 has no dividers, and reads as an empty list', async () => {
+      const res = await request(app).get(`/admin/storyboards/${draft.id}`).set(HEADERS.analyst);
+      expect(res.body.workflows).toEqual([]);
+    });
+
+    test('persists added, renamed and moved dividers across a re-fetch', async () => {
+      const patchRes = await request(app)
+        .patch(`/admin/storyboards/${draft.id}`)
+        .set(HEADERS.analyst)
+        .send({ ...reordered(), workflows: DIVIDERS });
+      expect(patchRes.status).toBe(200);
+
+      const getRes = await request(app).get(`/admin/storyboards/${draft.id}`).set(HEADERS.analyst);
+      expect(getRes.body.workflows).toEqual(DIVIDERS);
+    });
+
+    test('an empty list deletes every divider', async () => {
+      await request(app).patch(`/admin/storyboards/${draft.id}`).set(HEADERS.analyst)
+        .send({ ...reordered(), workflows: DIVIDERS });
+      await request(app).patch(`/admin/storyboards/${draft.id}`).set(HEADERS.analyst)
+        .send({ ...reordered(), workflows: [] });
+
+      const getRes = await request(app).get(`/admin/storyboards/${draft.id}`).set(HEADERS.analyst);
+      expect(getRes.body.workflows).toEqual([]);
+    });
+
+    test('a PATCH that does not mention workflows leaves the dividers alone', async () => {
+      await request(app).patch(`/admin/storyboards/${draft.id}`).set(HEADERS.analyst)
+        .send({ ...reordered(), workflows: DIVIDERS });
+      await request(app).patch(`/admin/storyboards/${draft.id}`).set(HEADERS.analyst)
+        .send(reordered());
+
+      const getRes = await request(app).get(`/admin/storyboards/${draft.id}`).set(HEADERS.analyst);
+      expect(getRes.body.workflows).toEqual(DIVIDERS);
+    });
+
+    test('400 — a divider below the last frame is refused, and nothing is written', async () => {
+      const res = await request(app)
+        .patch(`/admin/storyboards/${draft.id}`)
+        .set(HEADERS.analyst)
+        .send({ ...reordered({ aNote: 'must not land' }), workflows: [{ id: 'wf-1', name: 'X', position: 3 }] });
+      expect(res.status).toBe(400);
+
+      const getRes = await request(app).get(`/admin/storyboards/${draft.id}`).set(HEADERS.analyst);
+      expect(getRes.body.workflows).toEqual([]);
+      expect(getRes.body.captures.some((c) => c.note === 'must not land')).toBe(false);
+    });
+  });
+
   test('403 — a plain user cannot patch a draft', async () => {
     const res = await request(app)
       .patch(`/admin/storyboards/${draft.id}`)

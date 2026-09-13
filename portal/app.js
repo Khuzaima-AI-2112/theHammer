@@ -1339,9 +1339,21 @@ function renderStoryboardDraft() {
   grid.style.display = 'grid';
   empty.style.display = 'none';
 
-  const sorted = [...storyboardDraft.captures].sort((a, b) => a.order - b.order);
+  const items = storyboardListItems(storyboardDraft.captures, storyboardDraft.workflows ?? []);
 
-  grid.innerHTML = sorted.map(c => `
+  grid.innerHTML = items.map((it, i) => it.kind === 'workflow' ? `
+    <div class="storyboard-workflow${it.number ? '' : ' empty'}" data-workflow-id="${esc(it.workflow.id)}">
+      <span class="storyboard-workflow-number">${it.number ? `Workflow ${it.number}` : 'Empty — not printed'}</span>
+      <input class="form-input storyboard-workflow-name" type="text" maxlength="120"
+             value="${esc(it.workflow.name)}" aria-label="Workflow name"
+             onchange="renameStoryboardWorkflow(${it.index}, this.value)">
+      <button class="btn btn-ghost" type="button" title="Move up" ${i === 0 ? 'disabled' : ''}
+              onclick="moveStoryboardWorkflow(${it.index}, -1)">↑</button>
+      <button class="btn btn-ghost" type="button" title="Move down" ${i === items.length - 1 ? 'disabled' : ''}
+              onclick="moveStoryboardWorkflow(${it.index}, 1)">↓</button>
+      <button class="btn btn-danger" type="button"
+              onclick="deleteStoryboardWorkflow(${it.index})">Remove</button>
+    </div>` : (c => `
     <div class="storyboard-card${c.included ? '' : ' excluded'}" data-capture-id="${esc(c.captureId)}">
       <div class="storyboard-thumb-wrap">
         <img class="storyboard-thumb" src="${esc(c.signedUrl || '')}" alt="Slide ${c.order}"
@@ -1361,9 +1373,110 @@ function renderStoryboardDraft() {
       </div>
       <textarea class="form-input storyboard-note" placeholder="Note for this slide…"
                 onchange="updateStoryboardNote('${esc(c.captureId)}', this.value)">${esc(c.note)}</textarea>
-    </div>`).join('');
+      <button class="btn btn-ghost storyboard-workflow-add" type="button"
+              onclick="addStoryboardWorkflow(${it.position})">Start a Workflow here</button>
+    </div>`)(it.capture)).join('');
 
   renderStoryboardNarrative();
+}
+
+/**
+ * The builder's list: frames in slide order, with the curator's Workflow
+ * dividers placed in it (#126, ADR 0020).
+ *
+ * A divider's `position` is how many frames sit above it, ticked or not. Each
+ * divider item carries `index` (its place in `workflows`, for the edit
+ * handlers) and `number` — its number among the Workflows that have an
+ * included frame, or null when it has none. That is the rule
+ * backend/src/lib/workflows.js prints by, so the number shown here is the one
+ * on the PDF, and an empty Workflow is the one the PDF leaves out.
+ */
+function storyboardListItems(captures, workflows) {
+  const sorted = [...captures].sort((a, b) => a.order - b.order);
+  const items = [];
+  let next = 0;
+  const placeDividersUpTo = (limit) => {
+    while (next < workflows.length && workflows[next].position <= limit) {
+      items.push({ kind: 'workflow', workflow: workflows[next], index: next, number: null });
+      next += 1;
+    }
+  };
+  sorted.forEach((capture, i) => {
+    placeDividersUpTo(i);
+    items.push({ kind: 'frame', capture, position: i });
+  });
+  placeDividersUpTo(Infinity);
+
+  let number = 0;
+  items.forEach((it, i) => {
+    if (it.kind !== 'workflow') return;
+    for (let j = i + 1; j < items.length && items[j].kind === 'frame'; j += 1) {
+      if (items[j].capture.included) {
+        number += 1;
+        it.number = number;
+        break;
+      }
+    }
+  });
+  return items;
+}
+
+/**
+ * Moves divider `index` one step (`direction` -1 up, +1 down) in a list of
+ * `frameCount` frames. Past a neighbouring divider in the same spot it swaps
+ * with it; otherwise it steps over one frame. Returns a new list.
+ */
+function moveWorkflowDivider(workflows, index, direction, frameCount) {
+  const list = workflows.map((w) => ({ ...w }));
+  const current = list[index];
+  const neighbour = list[index + direction];
+  if (!current) return list;
+  if (neighbour && neighbour.position === current.position) {
+    list[index] = neighbour;
+    list[index + direction] = current;
+    return list;
+  }
+  const position = current.position + direction;
+  if (position < 0 || position > frameCount) return list;
+  current.position = position;
+  return list;
+}
+
+/** Adds `divider` after any already at its position, keeping list order. Returns a new list. */
+function insertWorkflowDivider(workflows, divider) {
+  const at = workflows.findIndex((w) => w.position > divider.position);
+  const list = workflows.map((w) => ({ ...w }));
+  list.splice(at === -1 ? list.length : at, 0, { ...divider });
+  return list;
+}
+
+function addStoryboardWorkflow(position) {
+  if (!storyboardDraft) return;
+  const id = `wf-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  storyboardDraft.workflows = insertWorkflowDivider(storyboardDraft.workflows ?? [], { id, name: 'New Workflow', position });
+  renderStoryboardDraft();
+  document.querySelector(`[data-workflow-id="${id}"] .storyboard-workflow-name`)?.select();
+}
+
+function renameStoryboardWorkflow(index, name) {
+  const w = storyboardDraft?.workflows?.[index];
+  // A blank name is refused by the backend; keep the last one rather than
+  // letting Save fail over it.
+  if (w && name.trim()) w.name = name.trim();
+  renderStoryboardDraft();
+}
+
+function moveStoryboardWorkflow(index, direction) {
+  if (!storyboardDraft) return;
+  storyboardDraft.workflows = moveWorkflowDivider(
+    storyboardDraft.workflows ?? [], index, direction, storyboardDraft.captures.length);
+  renderStoryboardDraft();
+}
+
+function deleteStoryboardWorkflow(index) {
+  if (!storyboardDraft?.workflows) return;
+  storyboardDraft.workflows = storyboardDraft.workflows.filter((_, i) => i !== index);
+  renderStoryboardDraft();
 }
 
 /**
@@ -1659,12 +1772,18 @@ function findStoryboardCapture(captureId) {
 function toggleStoryboardCapture(captureId, included) {
   const c = findStoryboardCapture(captureId);
   if (c) c.included = included;
+  // Unticking the last frame under a divider makes that Workflow empty, and
+  // the numbers after it change (#126) — redraw so the list says so.
+  if (storyboardDraft?.workflows?.length) renderStoryboardDraft();
 }
 
 function updateStoryboardOrder(captureId, order) {
   const c = findStoryboardCapture(captureId);
   const n = parseInt(order, 10);
   if (c && Number.isInteger(n) && n >= 1) c.order = n;
+  // A divider stays at its place in the list, so a renumbered frame can move
+  // into a different Workflow (#126) — redraw so the builder shows where it went.
+  if (storyboardDraft?.workflows?.length) renderStoryboardDraft();
 }
 
 function updateStoryboardNote(captureId, note) {
@@ -1693,7 +1812,9 @@ async function saveStoryboardDraft() {
     }));
     storyboardDraft = await apiFetch(`/admin/storyboards/${encodeURIComponent(storyboardDraft.id)}`, {
       method: 'PATCH',
-      body: JSON.stringify({ captures })
+      // The dividers go with every save, like the frames: they are curation,
+      // and an empty list is how the last one is deleted (#126).
+      body: JSON.stringify({ captures, workflows: storyboardDraft.workflows ?? [] })
     });
     renderStoryboardDraft();
     showToast('Storyboard saved', 'success');
