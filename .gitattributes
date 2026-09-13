@@ -1,0 +1,18 @@
+# Line endings are decided here, not by each machine's core.autocrlf (#37).
+#
+# Every text file is stored with LF and checked out with LF, on Windows as on
+# Linux. Cloud Build clones on Linux, so LF is what the pipeline sees; making
+# every checkout match means an LF file written by any editor or tool adds
+# cleanly, with no "LF will be replaced by CRLF" warning, and a diff never
+# shows a whole file rewritten because two machines disagreed.
+#
+# Nothing tracked needs CRLF: there are no .cmd or .bat files, and Windows
+# PowerShell runs LF .ps1 scripts. If one is ever added, give it
+# `eol=crlf` below rather than changing the default.
+* text=auto eol=lf
+
+# Binaries are never converted. text=auto already detects these, but naming
+# the binary types in the tree removes the guess. Add a line when a new one
+# is committed.
+*.png   binary
+*.woff2 binary

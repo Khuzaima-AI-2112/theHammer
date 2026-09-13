@@ -34,6 +34,21 @@ git clone https://github.com/cfroszte/thehammer.git
 cd thehammer
 ```
 
+Line endings are LF everywhere, set by `.gitattributes` (#37, reasons in that
+file). A fresh clone needs nothing.
+
+**A clone made before `.gitattributes` existed** still has CRLF copies on
+Windows. They work, but adding an edited one warns `CRLF will be replaced by
+LF`. Refresh them once. `reset --hard` **discards uncommitted edits to tracked
+files**, so commit or stash first and check `git status` shows nothing
+modified. Untracked files, `node_modules` included, are left alone:
+
+```bash
+git status                  # must show no modified tracked files
+git rm -r -q --cached .
+git reset -q --hard
+```
+
 ### Install Dependencies
 ```bash
 # Install root workspace dependencies
