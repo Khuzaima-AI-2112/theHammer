@@ -1273,3 +1273,34 @@ and surfaces only after a Cloud Build approval.
   see it: Docker, `npm ci` and Jest never read `cloudbuild.yaml`. Before
   pushing a change to that file, search its diff for a `$` followed by a
   letter.
+
+### 87. Line endings were a per-machine setting, and the fix does not reach old clones
+
+**What happened:** every LF file added from Windows warned `LF will be
+replaced by CRLF`, because Git for Windows ships `core.autocrlf=true` in its
+system gitconfig. #37 was filed believing the source was committed with CRLF.
+It was not: `git ls-files --eol` showed all 351 text files already LF in the
+index. The CRLF lived only in Windows working copies, and a machine with
+`autocrlf=false` would have committed CRLF into it.
+
+A bare `* text=auto`, the issue's suggested minimum, would not have stopped the
+warning. On Windows it still checks out CRLF, so an LF file still does not
+round-trip. `* text=auto eol=lf` does: LF in the index and in every checkout.
+
+**Root cause:** the correctness of every checkout depended on configuration
+outside the repository. The attributes file fixes that for new clones only.
+An existing clone keeps its CRLF copies, Git reports it clean, and the warning
+flips to `CRLF will be replaced by LF` on the next edit.
+`git checkout-index --force --all` does **not** refresh them, because it skips
+entries whose stat data says they are current.
+
+**Rule going forward:**
+- **Check the index before believing a line-ending report.** `git ls-files
+  --eol` shows `i/` (stored) and `w/` (on disk) separately. A warning is about
+  the working copy, and says nothing about what was committed.
+- **Refresh an old clone by emptying the index**, with no uncommitted edits:
+  `git rm -r -q --cached .` then `git reset -q --hard` (DEVELOPER_GUIDE.md,
+  "Clone the Repository").
+- **Verify attributes in throwaway clones, not the working tree.** A tree that
+  was checked out before the change passes or fails for reasons that belong
+  to its history, not to the rule.
