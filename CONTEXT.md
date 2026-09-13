@@ -134,6 +134,20 @@ a Storyboard gives it one. It is not a Persona, though its name often is one,
 and it is not a Stage.
 _Avoid_: section, walk, walkthrough, chapter, persona, group
 
+**Caption**:
+The words about what one Capture in a Storyboard shows. The model writes it,
+and an Analyst may correct it or write one where none exists, but never blank
+it. It stays a Caption whoever last wrote it, and generating the Storyboard's
+narrative again replaces every Caption, corrected ones included.
+_Avoid_: description, label, slide text, note
+It is not a Note: a Caption says what is on the screen, a Note says what the
+Analyst makes of it.
+
+**Note**:
+The Analyst's own remark against one Capture in a Storyboard. It is never
+generated, and generating the narrative again never touches it.
+_Avoid_: comment, annotation, caption
+
 **Report**:
 An artifact generated from a Project's Captures — a set of metrics, an OCR
 pass, or a Storyboard — that is requested, queued and waited for. It has a

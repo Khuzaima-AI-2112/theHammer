@@ -185,3 +185,13 @@ draft carry `beginning`. Section headers now come from **Workflows**, which the
 curator sets as dividers in the Storyboard builder. The per-slide captions, the
 synthesis, and the rule that the model does not choose section boundaries all
 stand unchanged.
+
+## Amendment (2026-09-13, #129): an Analyst can correct a Caption
+
+**The editor gap in the 2026-09-11 amendment is closed.** An Analyst corrects
+one Caption on its builder card, or writes one for a slide that has none. The
+edit is saved by itself, marked as edited, and held to the same 45-word budget
+the model is given. A Caption cannot be blanked, for the timing reason in the
+#128 section above. Generating the narrative again still replaces every
+Caption, corrected ones included; the portal's confirmation now says how many
+corrected ones will be lost. The decisions are in #129's 2026-09-13 comment.

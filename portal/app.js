@@ -1371,6 +1371,7 @@ function renderStoryboardDraft() {
                  onchange="updateStoryboardOrder('${esc(c.captureId)}', this.value)">
         </label>
       </div>
+      ${storyboardCaptionBox(c)}
       <textarea class="form-input storyboard-note" placeholder="Note for this slide…"
                 onchange="updateStoryboardNote('${esc(c.captureId)}', this.value)">${esc(c.note)}</textarea>
       <button class="btn btn-ghost storyboard-workflow-add" type="button"
@@ -1549,8 +1550,11 @@ async function generateStoryboardNarrative() {
     return;
   }
 
-  if (storyboardDraft.narrativeText) {
-    const proceed = confirm('Regenerating replaces the current narrative, including any unsaved edits. Continue?');
+  // Edited Captions alone are enough to ask: a failed run blanks the synthesis
+  // but leaves the Captions, corrected ones included (#129).
+  if (storyboardDraft.narrativeText || editedCaptionCount(storyboardDraft) > 0) {
+    const proceed = confirm('Regenerating replaces the current narrative, including any unsaved edits.'
+      + editedCaptionsWarning(editedCaptionCount(storyboardDraft)) + ' Continue?');
     if (!proceed) return;
   }
 
@@ -1559,7 +1563,9 @@ async function generateStoryboardNarrative() {
       method: 'POST',
       body: JSON.stringify({ prompt })
     });
-    renderStoryboardNarrative();
+    // The whole builder, not just the narrative section: the Caption boxes lock
+    // while the words are being replaced (#129).
+    renderStoryboardDraft();
     startStoryboardNarrativePolling(storyboardDraft.id);
   } catch (err) {
     showToast(`Failed to start narrative generation: ${err.message}`, 'error');
@@ -1598,8 +1604,14 @@ function startStoryboardNarrativePolling(draftId) {
     try {
       const draft = await apiFetch(`/admin/storyboards/${encodeURIComponent(draftId)}`);
       if (!storyboardDraft || storyboardDraft.id !== draftId) return; // left the draft — drop the update
+      const statusChanged = draft.narrativeStatus !== storyboardDraft.narrativeStatus;
       storyboardDraft = draft;
-      renderStoryboardNarrative();
+      // A change brings the Caption boxes in, or locks them (#129). Only on a
+      // change, so a Note being typed doesn't lose focus every three seconds.
+      // The assignment above has already replaced any unsaved curation with the
+      // server's copy; the redraw shows that rather than causing it.
+      if (statusChanged) renderStoryboardDraft();
+      else renderStoryboardNarrative();
       if (draft.narrativeStatus === 'done' || draft.narrativeStatus === 'error') {
         clearInterval(activeStoryboardNarrativePoller);
       }
@@ -1626,8 +1638,9 @@ async function toggleStoryboardAudioRecording() {
   }
 
   if (!storyboardDraft) return;
-  if (storyboardDraft.narrativeText) {
-    const proceed = confirm('Recording a new walkthrough replaces the current narrative, including any unsaved edits. Continue?');
+  if (storyboardDraft.narrativeText || editedCaptionCount(storyboardDraft) > 0) {
+    const proceed = confirm('Recording a new walkthrough replaces the current narrative, including any unsaved edits.'
+      + editedCaptionsWarning(editedCaptionCount(storyboardDraft)) + ' Continue?');
     if (!proceed) return;
   }
 
@@ -1671,7 +1684,7 @@ async function uploadStoryboardAudio(blob, mimeType) {
       method: 'POST',
       body: formData
     });
-    renderStoryboardNarrative();
+    renderStoryboardDraft();
     startStoryboardNarrativePolling(storyboardDraft.id);
   } catch (err) {
     showToast(`Failed to transcribe recording: ${err.message}`, 'error');
@@ -1772,9 +1785,10 @@ function findStoryboardCapture(captureId) {
 function toggleStoryboardCapture(captureId, included) {
   const c = findStoryboardCapture(captureId);
   if (c) c.included = included;
-  // Unticking the last frame under a divider makes that Workflow empty, and
-  // the numbers after it change (#126) — redraw so the list says so.
-  if (storyboardDraft?.workflows?.length) renderStoryboardDraft();
+  // Always redrawn: an excluded slide shows no Caption box (#129), and unticking
+  // the last frame under a divider makes that Workflow empty and renumbers the
+  // ones after it (#126).
+  renderStoryboardDraft();
 }
 
 function updateStoryboardOrder(captureId, order) {
@@ -1789,6 +1803,117 @@ function updateStoryboardOrder(captureId, order) {
 function updateStoryboardNote(captureId, note) {
   const c = findStoryboardCapture(captureId);
   if (c) c.note = note;
+}
+
+// ── Captions (#129) ────────────────────────────────────────────────
+// Browser code cannot require backend/src/lib/models.js, so the budget is
+// written twice; storyboard-captions.test.js holds the two copies equal.
+const STORYBOARD_CAPTION_MAX_WORDS = 45;
+
+/** Words in a Caption, counted the way the server counts them. */
+function captionWordCount(text) {
+  const trimmed = text.trim();
+  return trimmed === '' ? 0 : trimmed.split(/\s+/).length;
+}
+
+/**
+ * What a card's Caption box shows: `editable` once the narrative is done,
+ * `readonly` while it is being replaced, `hidden` otherwise. After a failed run
+ * the stored Captions are the previous run's leftovers, and an excluded slide
+ * is neither printed nor narrated, so neither has anything to correct.
+ */
+function captionBoxState(draft, capture) {
+  if (!capture.included) return 'hidden';
+  if (draft.narrativeStatus === 'done') return 'editable';
+  if (draft.narrativeStatus === 'queued' || draft.narrativeStatus === 'generating') return 'readonly';
+  return 'hidden';
+}
+
+/** The stored Caption for one Capture, or null when it has none. */
+function storedCaption(captureId) {
+  return (storyboardDraft?.narrativeCaptions ?? []).find(n => n.captureId === captureId) ?? null;
+}
+
+/**
+ * One card's Caption box (#129). It saves by itself when the Analyst leaves it,
+ * unlike the Note below it, which waits for Save: a whole-draft save from a
+ * stale page would overwrite a regeneration that finished in the background.
+ */
+function storyboardCaptionBox(c) {
+  const state = captionBoxState(storyboardDraft, c);
+  if (state === 'hidden') return '';
+
+  const stored = storedCaption(c.captureId);
+  const caption = stored?.caption ?? '';
+  const words = captionWordCount(caption);
+  return `
+      <div class="storyboard-caption">
+        <div class="storyboard-caption-head">
+          <span>Caption${state === 'editable' ? ' · saves automatically' : ''}</span>
+          <span class="storyboard-caption-edited" ${stored?.edited ? '' : 'hidden'}>Edited</span>
+          <span class="storyboard-caption-count${words > STORYBOARD_CAPTION_MAX_WORDS ? ' over' : ''}">${words} / ${STORYBOARD_CAPTION_MAX_WORDS}</span>
+        </div>
+        <textarea class="form-input storyboard-caption-text" aria-label="Caption for slide ${c.order}"
+                  placeholder="No caption yet. Write one…" ${state === 'readonly' ? 'readonly' : ''}
+                  oninput="updateStoryboardCaptionCount(this)"
+                  onchange="saveStoryboardCaption('${esc(c.captureId)}', this)">${esc(caption)}</textarea>
+      </div>`;
+}
+
+/** Live word count under the budget, as the Analyst types. */
+function updateStoryboardCaptionCount(textEl) {
+  const countEl = textEl.closest('.storyboard-caption').querySelector('.storyboard-caption-count');
+  const words = captionWordCount(textEl.value);
+  countEl.textContent = `${words} / ${STORYBOARD_CAPTION_MAX_WORDS}`;
+  countEl.classList.toggle('over', words > STORYBOARD_CAPTION_MAX_WORDS);
+}
+
+/**
+ * Saves one Caption when the Analyst leaves its box. Only the Captions are
+ * taken from the response: Notes, ticks and slide numbers on this page may be
+ * unsaved, and replacing the whole draft would drop them.
+ */
+async function saveStoryboardCaption(captureId, textEl) {
+  if (!storyboardDraft) return;
+  const stored = storedCaption(captureId);
+  const caption = textEl.value.trim();
+
+  if (caption === (stored?.caption ?? '')) return;
+  if (caption === '') {
+    textEl.value = stored?.caption ?? '';
+    updateStoryboardCaptionCount(textEl);
+    showToast('A caption can be rewritten but not left blank', 'error');
+    return;
+  }
+  if (captionWordCount(caption) > STORYBOARD_CAPTION_MAX_WORDS) {
+    showToast(`A caption is ${STORYBOARD_CAPTION_MAX_WORDS} words at most. Shorten it to save.`, 'error');
+    return;
+  }
+
+  try {
+    const updated = await apiFetch(`/admin/storyboards/${encodeURIComponent(storyboardDraft.id)}/captions`, {
+      method: 'PATCH',
+      body: JSON.stringify({ captureId, caption })
+    });
+    storyboardDraft.narrativeCaptions = updated.narrativeCaptions;
+    setHidden(textEl.closest('.storyboard-caption').querySelector('.storyboard-caption-edited'), false);
+    showToast('Caption saved', 'success');
+  } catch (err) {
+    showToast(`Failed to save caption: ${err.message}`, 'error');
+  }
+}
+
+/** Corrected Captions a regeneration would replace, on any slide: an excluded
+ * slide's Caption is replaced too, even though its box is hidden. */
+function editedCaptionCount(draft) {
+  return (draft?.narrativeCaptions ?? []).filter(c => c.edited).length;
+}
+
+/** The sentence a replace-the-narrative confirm adds, so a correction is never
+ * discarded silently (#129). Empty when there is nothing to lose. */
+function editedCaptionsWarning(count) {
+  if (count === 0) return '';
+  return ` ${count} ${count === 1 ? 'caption' : 'captions'} you edited by hand will be replaced.`;
 }
 
 /**
