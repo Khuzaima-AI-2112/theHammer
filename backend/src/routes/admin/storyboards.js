@@ -845,6 +845,71 @@ router.patch('/storyboards/:id/narrative', requireAnalyst, async (req, res, next
 });
 
 /**
+ * An Analyst corrects one Caption by hand (#129). Its own route rather than a
+ * field on the draft PATCH, because generation writes `narrativeCaptions` too:
+ * a page saving the whole draft from a stale copy would overwrite a
+ * regeneration that finished in the background. The edited mark is what lets
+ * the portal warn before a regeneration replaces it.
+ */
+router.patch('/storyboards/:id/captions', requireAnalyst, async (req, res, next) => {
+  try {
+    const loaded = await loadOwnedDraft(req, res);
+    if (!loaded) return;
+    const { ref } = loaded;
+
+    const { captureId } = req.body ?? {};
+    // Trimmed as parseNarrativeResponse trims the model's. A blank Caption is
+    // refused rather than stored: it drops out of the narration but still holds
+    // the screen, so every slide after it plays late (ADR 0019, #128).
+    const caption = typeof req.body?.caption === 'string' ? req.body.caption.trim() : '';
+    if (caption === '') {
+      return res.status(400).json({ error: 'caption must be a non-blank string' });
+    }
+    // The budget the model is asked to keep is enforced on a hand edit: the PDF
+    // cell and the video's slide timing were both sized for it.
+    if (caption.split(/\s+/).length > STORYBOARD_CAPTION_MAX_WORDS) {
+      return res.status(400).json({ error: `caption must be ${STORYBOARD_CAPTION_MAX_WORDS} words or fewer` });
+    }
+
+    const editedCaption = { captureId, caption, edited: true };
+
+    // Read and written in one transaction: a regeneration that settles between
+    // a plain read and write would have its fresh Captions put back to the old.
+    await db.runTransaction(async (tx) => {
+      const draft = (await tx.get(ref)).data();
+
+      // Queued or generating, the Captions are about to be replaced. Errored,
+      // they are the previous run's leftovers: queueing blanks the synthesis,
+      // not them.
+      if (draft.narrativeStatus !== 'done') {
+        throw Object.assign(
+          new Error('captions can only be edited once the narrative has finished generating'), { status: 400 });
+      }
+      // Any slide in the draft, not only the included ones: ticking a slide is
+      // curation the page may not have saved yet. The portal hides the box on a
+      // slide it shows as excluded.
+      if (!(draft.captures ?? []).some((c) => c.captureId === captureId)) {
+        throw Object.assign(new Error('captureId must be a slide in this Storyboard'), { status: 400 });
+      }
+
+      // Every reader looks a Caption up by captureId, so one written for a slide
+      // the model never saw is appended rather than placed.
+      const current = draft.narrativeCaptions ?? [];
+      const narrativeCaptions = current.some((c) => c.captureId === captureId)
+        ? current.map((c) => (c.captureId === captureId ? editedCaption : c))
+        : [...current, editedCaption];
+      tx.update(ref, { narrativeCaptions, updatedAt: nowISO() });
+    });
+
+    const updatedSnap = await ref.get();
+    return res.json(await enrichWithSignedUrls(serializeDraft(updatedSnap)));
+  } catch (err) {
+    if (err.status === 400) return res.status(400).json({ error: err.message });
+    next(err);
+  }
+});
+
+/**
  * Builds the Gemini transcription request for one recorded audio clip, as a
  * gs:// reference plus an instruction to return the transcript verbatim.
  *
