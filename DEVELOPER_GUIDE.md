@@ -21,7 +21,7 @@ Welcome to `theHammer` repository! This guide provides step-by-step instructions
   rather than a missing tool. [Temurin 21](https://adoptium.net/) is what this
   project is developed against, and `cloudbuild.yaml` installs `openjdk21-jre`.
 - **Firebase CLI**: do **not** install it globally. It is pinned in
-  `backend/package.json` (`firebase-tools`, exact version) and `npm install`
+  `backend/package.json` (`firebase-tools`, exact version) and `npm ci`
   in `backend/` puts it on the path for the scripts below. A global or `npx`
   copy installed elsewhere resolves whatever is newest that day, which is how
   local testing breaks with nobody having touched the repository. Inside
@@ -39,9 +39,11 @@ cd thehammer
 # Install root workspace dependencies
 npm install
 
-# Install backend dependencies
+# Install backend dependencies. `npm ci`, not `npm install`: install on
+# Windows rewrites package-lock.json without entries the Linux build needs
+# (lesson 86).
 cd backend
-npm install
+npm ci
 cd ..
 ```
 
@@ -77,7 +79,7 @@ All backend tests execute against an offline local Firestore Emulator (no live c
 
 ```bash
 cd backend
-npm install        # first time, or after pulling: brings in the pinned CLI
+npm ci             # first time, or after pulling: brings in the pinned CLI
 npm run test:emulator
 ```
 

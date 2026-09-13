@@ -278,6 +278,7 @@ Run this before starting any new sprint:
 **Root cause:** The local developer machine (Windows) generated `package-lock.json` when installing `@google/genai`. This SDK has OS-specific native dependencies (like `@emnapi/runtime` for WebAssembly/C++). When the Docker build (using `node:20-alpine`) ran `npm ci`, it strictly enforced the Windows lockfile, completely skipping the download of the Alpine Linux binaries. When Node.js booted, it threw a `MODULE_NOT_FOUND` error for the missing binaries and crashed immediately.
 **Rule going forward:**
 - Use `npm install` instead of `npm ci` in cross-platform Dockerfiles (`alpine` / `debian`) if the `package-lock.json` is routinely generated on different host operating systems (like Windows). `npm install` gracefully evaluates the target OS and fetches the missing native binaries.
+  *Changed:* the Cloud Build test step no longer follows this. Its lockfile is generated on Linux, and it runs `npm ci` (#118, lesson 86). `backend/Dockerfile` still installs with `npm install --omit=dev`.
 
 ### 22. Cloud Build Smoke Tests must output Docker Logs before cleanup
 
@@ -1011,6 +1012,7 @@ npm error Missing: @emnapi/runtime@1.11.3 from lock file
 - **Ask what your check could not have seen.** "It worked locally" is a statement about one machine's platform, timing and filesystem. Before pushing a pipeline change, name the variable the local run held constant, because that is where the failure will come from.
 - **`set -euo pipefail` in every multi-command build step.** This one had none, so the failed install did not stop it; the step ran on and died at `firebase: not found`, which names neither the failure nor its cause. Three other steps in the same file already do this.
 - **A reverted improvement needs its reason recorded next to the code.** `npm ci` is still the better primitive and the next reader will want to switch back. The comment in `cloudbuild.yaml` says what happened and what would have to change first, so the attempt is not repeated blind (lesson 76's shape: leave the assertion where the decision lives).
+  *Changed:* #118 regenerated the lockfile on Linux and the step runs `npm ci` again. The comment described here was removed along with the workaround it explained. The one that replaced it records how to regenerate the lockfile. See lesson 86, which also corrects this lesson's diagnosis: the missing entries were the `@emnapi` optional peers, not the `linux-x64` bindings.
 
 ### 82. Fixing the model made the prose visible, and the prose was inventing commitments
 
@@ -1211,3 +1213,54 @@ the request that crossed the line and the assertion that fails is arbitrary.
   without checking `res.status`; one `expect(res.status).toBe(201)` in that
   helper would have named this in seconds rather than in three rounds of
   wrong theory.
+
+### 86. The lockfile was fixed on Linux, and one Windows `npm install` unfixes it
+
+**What happened:** #118 did what lesson 81 said: regenerate
+`backend/package-lock.json` inside `node:22-alpine` with
+`npm install --package-lock-only`, then switch the Cloud Build test step back
+to `npm ci`. Before the fix, `npm ci` in that image reproduced build
+`75c1a140` exactly. After it, the same command installed cleanly, and `npm ci`
+on Windows (npm 11) still passed and left the lockfile byte-identical.
+
+Lesson 81's diagnosis was slightly off. The old lockfile *did* carry the
+`linux-x64` bindings (`@unrs/resolver-binding-linux-x64-gnu` and `-musl`).
+What it lacked were the two packages the error names, `@emnapi/core` and
+`@emnapi/runtime`: optional peers of the wasm fallback binding. The
+regeneration added exactly those two entries and changed no version or
+integrity hash. The rest of the diff was `"peer": true` flags moving between
+entries, which is npm 10 and npm 11 disagreeing about notation, not about
+dependencies.
+
+Then the check lesson 81 asks for, "what could the local run not have seen",
+was pointed at the fix itself. On a Windows copy with the new lockfile, a plain
+`npm install` exited 0, reported one package added, and **deleted both
+`@emnapi` entries from the lockfile**. That leaves the tree one ordinary
+command away from the original failure. `README.md` and `DEVELOPER_GUIDE.md`
+both told developers to run exactly that command.
+
+**Root cause:** `npm install` on Windows does not merely tolerate a lockfile
+that is missing Linux-only optional peers; it *writes* one. The lockfile is not
+a file anyone edits, so a regression in it arrives inside an unrelated commit,
+and surfaces only after a Cloud Build approval.
+
+**Rule going forward:**
+- **Install with `npm ci` in `backend/`, not `npm install`.** It reads the
+  lockfile and never writes it. The setup docs now say so.
+- **Adding or upgrading a dependency is the one time the lockfile should change,
+  and it has to be regenerated in the image afterwards.** Run the `docker run`
+  line in `cloudbuild.yaml`'s test step, and check the diff still carries the
+  `@emnapi` entries before committing.
+- **A `package-lock.json` diff that removes entries nobody asked to remove is a
+  platform rewrite, not a cleanup.** Discard it.
+- **Verify a fix against the ordinary workflow, not only the failure.** The
+  ci-on-Linux check was the one the issue named, and it passed. The command
+  that undoes the fix was the one every developer runs first.
+- **Docker needs memory to prove anything here.** On an 8 GB machine with
+  ~1.5 GB free, WSL refused to start ("Insufficient system resources"), and
+  replaying the full test step (JRE + emulator + Jest) crashed the VM twice.
+  The `npm ci` check alone fits. The full replay needs other applications
+  closed, or it has to be left to Cloud Build. Separately, installing
+  `node_modules` onto a Windows bind mount dropped files (`TAR_ENTRY_ERROR`),
+  producing a `Cannot find module` error that has nothing to do with the
+  lockfile. Install on the container's own filesystem.
