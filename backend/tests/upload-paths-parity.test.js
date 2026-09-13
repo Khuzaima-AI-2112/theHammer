@@ -65,7 +65,7 @@ describe('POST /upload-url', () => {
     const res = await request(app)
       .post('/upload-url')
       .set(H)
-      .send({ project: 'parity-project', tool: 'Softomedia', stage: 'setup' });
+      .send({ project: 'parity-project', tool: 'Softomedia', stage: 'beginning' });
 
     expect(res.status).toBe(200);
     expect(res.body.path).toBeTruthy();
@@ -74,14 +74,14 @@ describe('POST /upload-url', () => {
     expect(snap.exists).toBe(true);
   });
 
-  test('keeps the Persona the extension sent', async () => {
+  test('keeps the Stage the extension sent', async () => {
     const res = await request(app)
       .post('/upload-url')
       .set(H)
-      .send({ project: 'parity-project', tool: 'Softomedia', stage: 'gads-expert' });
+      .send({ project: 'parity-project', tool: 'Softomedia', stage: 'during' });
 
     const snap = await uploadDoc(res.body.path).get();
-    expect(snap.data()?.stage).toBe('gads-expert');
+    expect(snap.data()?.stage).toBe('during');
   });
 
   // #102: the Capture records the Workspace of the Project it is filed under.
@@ -130,20 +130,20 @@ describe('POST /upload-url', () => {
 });
 
 describe('POST /capture', () => {
-  test('keeps the Persona the extension sent', async () => {
+  test('keeps the Stage the extension sent', async () => {
     const res = await request(app)
       .post('/capture')
       .set(H)
       .field('projectId', 'parity-project')
       .field('tool', 'Softomedia')
-      .field('stage', 'media-buyer')
+      .field('stage', 'after')
       .attach('file', Buffer.from('not-really-a-png'), 'shot.png');
 
     expect(res.status).toBe(200);
 
     const snap = await uploadDoc(res.body.path).get();
     expect(snap.exists).toBe(true);
-    expect(snap.data().stage).toBe('media-buyer');
+    expect(snap.data().stage).toBe('after');
   });
 
   // #102, and the parity this file exists to state: the fallback path stamps
