@@ -557,9 +557,9 @@ The following metrics are made visible to both Analysts and Admins in the **User
 
 ### 3.1 User Efficiency report (Sprint 7.5)
 
-For a given user, project, and date range:
+For a given user and project, over all time:
 
-- **Total sessions** — count of `session_events` in range.
+- **Total sessions** — count of `session_events`.
 - **Total session time (minutes)** — sum of `sessionDurationMinutes`.
 - **True active time (minutes)** — sum of `trueActiveMinutes` across sessions.
 - **Inactive time (minutes)** — `Total session time - True active time`.
@@ -567,7 +567,7 @@ For a given user, project, and date range:
 - **Captures per active hour** — `Total captures / (True active time in hours)`.
 - **Optionally:** Focused active time (if implemented) — `focusedActiveMinutes`, with the caveat that this is a stricter measure.
 
-All of these are rolled up per user and per project, and can be filtered by date range. Analysts see them in the JSON & HTML report; Admins see the same metrics rendered in the Portal’s report viewer.
+All of these are rolled up per user and per project, over all time: there is no date-range filter (#95). Analysts see them in the JSON & HTML report; Admins see the same metrics rendered in the Portal’s report viewer.
 
 ### 3.2 Admin Portal surfaces
 

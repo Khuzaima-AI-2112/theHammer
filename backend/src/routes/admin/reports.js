@@ -68,7 +68,10 @@ router.post('/reports/generate', requireAnalyst, analystReportLimiter, async (re
     // #95: dateRange was accepted, stored and forwarded, and nothing read it, so
     // a Report sent one was labelled with a period its figures ignored. Every
     // Report covers all time. Refused rather than ignored, so a caller still
-    // sending one learns it is not honoured.
+    // sending one learns it is not honoured — null included, since sending the
+    // field at all means the caller believes it exists. Checked before the
+    // Project is read: the answer is the same for any projectId, so it tells a
+    // caller nothing about whose Project that is.
     if (req.body.dateRange !== undefined) {
       return res.status(400).json({
         error: 'dateRange is not supported: a Report covers all of a Project\'s Captures, '

@@ -174,15 +174,18 @@ describe('a request that is allowed through', () => {
 // a Storyboard beside a dateRange is refused because any dateRange is.
 // ─────────────────────────────────────────────────────────────────
 describe('dateRange is not accepted (#95)', () => {
+  const RANGE = { from: '2026-09-01', to: '2026-09-08' };
+
   test.each([
-    ['a standard report', { reportType: 'project_progress' }],
-    ['an OCR report beside its Storyboard', { reportType: OCR_TYPE, storyboardId: DRAFT }],
-  ])('%s sent with a dateRange is refused and files no row', async (_label, fields) => {
+    ['a standard report', { reportType: 'project_progress', dateRange: RANGE }],
+    ['an OCR report beside its Storyboard', { reportType: OCR_TYPE, storyboardId: DRAFT, dateRange: RANGE }],
+    // Sending the field at all is refused, not only a truthy value: a caller
+    // sending null still believes the field exists.
+    ['a standard report with a null dateRange', { reportType: 'project_progress', dateRange: null }],
+  ])('%s is refused and files no row', async (_label, fields) => {
     const before = (await db.collection(collections.REPORTS).get()).size;
 
-    const res = await generate({
-      projectId: PROJECT, ...fields, dateRange: { from: '2026-09-01', to: '2026-09-08' },
-    }, ANALYST_2);
+    const res = await generate({ projectId: PROJECT, ...fields }, ANALYST_2);
 
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/dateRange/);
