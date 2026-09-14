@@ -40,9 +40,8 @@ under, what a Session belongs to, and what progress is reported against.
 _Avoid_: job, client, account, workstream, board
 
 **Workspace**:
-One Customer organisation's isolated tenant. It is the boundary for data
-isolation and for legal responsibility: everything inside one Workspace belongs
-to one Customer.
+The isolated space that Projects are filed in. It is the boundary for data
+isolation: nothing inside one Workspace can be reached from another.
 _Avoid_: account, tenant, org, company, team
 
 **Customer**:
