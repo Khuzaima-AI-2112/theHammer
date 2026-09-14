@@ -46,14 +46,13 @@ to one Customer.
 _Avoid_: account, tenant, org, company, team
 
 **Customer**:
-The organisation that pays for a Workspace and employs its Monitored Users. The
-Customer decides that monitoring happens and is responsible for telling its
-staff.
+The person who commissioned theHammer and decides what it is built to do. The
+Customer is also one of its two Monitored Users, not an organisation buying it.
 _Avoid_: client, account, company, user
 
 **Monitored User**:
-The person whose screen is captured and whose working time is measured. Almost
-always an employee of the Customer.
+One of the two people whose screens theHammer captures and whose working time
+it measures, each having agreed to it. Nobody else is captured.
 _Avoid_: employee, subject, end user, worker, user
 
 **Disclosure**:
