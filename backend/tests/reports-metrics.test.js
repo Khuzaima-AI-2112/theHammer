@@ -245,8 +245,8 @@ describe('POST /admin/reports/generate — Workspace isolation', () => {
   });
 
   // #103, ADR 0014: `reports` carries a denormalised workspaceId so the
-  // Dashboard's pending-Reports tile can count one Customer's without an `in`
-  // filter over their Project ids. This is the first of the collection's three
+  // Dashboard's pending-Reports tile can count one Workspace's without an `in`
+  // filter over its Project ids. This is the first of the collection's three
   // writers; the other two are in storyboard-finalize and storyboard-video,
   // asserted the same way. A fourth writer copies this test.
   it('stamps the Report with the Workspace of the Project it is generated for', async () => {

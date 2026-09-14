@@ -4,7 +4,7 @@
  * added the field (#102, and `reports` in #103).
  *
  * Background: `uploads` and `reports` carried only a `projectId`, so counting
- * or listing them for one Customer meant an `in` filter over that Customer's
+ * or listing them for one Workspace meant an `in` filter over that Workspace's
  * Project ids — capped at 30 values. ADR 0014 chose a denormalised
  * `workspaceId`, stamped at write time from the Project the caller has already
  * been proved to own. Records written before that stamp carry nothing, and an
@@ -20,7 +20,7 @@
  * **It never guesses.** A record whose Project is gone, whose Project carries no
  * Workspace of its own, or which names no Project at all is reported and left
  * alone. Here a wrong stamp is worse than no stamp: it does not merely fail, it
- * grants one Customer's Admin sight of another Customer's record.
+ * grants one Workspace's Admin sight of another Workspace's record.
  *
  * **A dry run writes nothing**, and that is the default. Re-running is safe:
  * already-stamped records are skipped, so an interrupted run is simply repeated.
