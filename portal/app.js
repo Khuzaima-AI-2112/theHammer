@@ -2220,8 +2220,8 @@ async function submitGenerateReport() {
   try {
     const res = await apiFetch('/admin/reports/generate', {
       method: 'POST',
-      // No dateRange alongside a storyboardId: the backend refuses the pair
-      // rather than resolving it, because the Storyboard is the selection.
+      // Never a dateRange: the backend refuses one (#95). A Report covers all
+      // of a Project's Captures, and an OCR Report the Storyboard it names.
       body: JSON.stringify(isOcr ? { projectId, reportType, storyboardId } : { projectId, reportType })
     });
     closeModal('generateReportModal');

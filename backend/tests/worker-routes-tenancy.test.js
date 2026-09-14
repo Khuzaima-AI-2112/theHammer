@@ -69,7 +69,6 @@ async function seedReport(id, projectId, requester) {
   await db.collection(collections.REPORTS).doc(id).set({
     projectId,
     reportType: 'project_progress',
-    dateRange: null,
     status: 'queued',
     gcsPath: null,
     requestedBy: `${requester}-requester`,

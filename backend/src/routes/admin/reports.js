@@ -60,9 +60,20 @@ const RETIRED_OCR_REPORT_TYPES = new Set(['ui_state_changes', 'text_entry_tracki
 // POST /reports/generate
 router.post('/reports/generate', requireAnalyst, analystReportLimiter, async (req, res, next) => {
   try {
-    const { projectId, reportType, dateRange, storyboardId } = req.body;
+    const { projectId, reportType, storyboardId } = req.body;
     if (!projectId || !reportType) {
       return res.status(400).json({ error: 'Missing projectId or reportType' });
+    }
+
+    // #95: dateRange was accepted, stored and forwarded, and nothing read it, so
+    // a Report sent one was labelled with a period its figures ignored. Every
+    // Report covers all time. Refused rather than ignored, so a caller still
+    // sending one learns it is not honoured.
+    if (req.body.dateRange !== undefined) {
+      return res.status(400).json({
+        error: 'dateRange is not supported: a Report covers all of a Project\'s Captures, '
+          + 'or an OCR Report the Storyboard it names.'
+      });
     }
 
     // #8: this route took a projectId on trust, which was survivable only while
@@ -91,13 +102,6 @@ router.post('/reports/generate', requireAnalyst, analystReportLimiter, async (re
     if (reportType === OCR_REPORT_TYPE) {
       if (!storyboardId) {
         return res.status(400).json({ error: `${OCR_REPORT_TYPE} requires a storyboardId` });
-      }
-      // Two selections, silently disagreeing, is worse than neither: the
-      // Storyboard's membership *is* the selection (#95).
-      if (dateRange) {
-        return res.status(400).json({
-          error: 'A storyboardId and a dateRange cannot both be given: the Storyboard is the selection.'
-        });
       }
       const draftSnap = await db.collection(collections.STORYBOARD_DRAFTS).doc(storyboardId).get();
       if (!draftSnap.exists || draftSnap.data().projectId !== projectId) {
@@ -130,7 +134,6 @@ router.post('/reports/generate', requireAnalyst, analystReportLimiter, async (re
       // Report written without it is counted by nobody.
       workspaceId: projectSnap.data().workspaceId,
       reportType,
-      dateRange: dateRange || null,
       // Which Storyboard's curated order this Report walks (#96). Null for
       // every other report type, which are scoped to the Project itself.
       storyboardId: storyboardId || null,
@@ -161,7 +164,7 @@ router.post('/reports/generate', requireAnalyst, analystReportLimiter, async (re
         'Content-Type': 'application/json',
         'X-Internal-Secret': internalSecret
       },
-      body: JSON.stringify({ reportId, projectId, reportType, dateRange, storyboardId })
+      body: JSON.stringify({ reportId, projectId, reportType, storyboardId })
     }).catch(err => logger.error('[Reports] Failed to trigger worker:', err));
 
     return res.status(202).json({ reportId, status: 'queued' });

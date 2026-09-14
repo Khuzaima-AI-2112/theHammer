@@ -853,8 +853,8 @@ async function workerTargetsAreOwned(req, res) {
 app.post('/worker/reports', express.json(), workerLimiter, requireWorkerAuth, async (req, res, next) => {
   try {
     if (!await workerTargetsAreOwned(req, res)) return;
-    const { reportId, projectId, reportType, dateRange } = req.body;
-    generateStandardReport(reportId, projectId, reportType, dateRange);
+    const { reportId, projectId, reportType } = req.body;
+    generateStandardReport(reportId, projectId, reportType);
     res.status(202).send();
   } catch (err) {
     next(err);
@@ -864,7 +864,7 @@ app.post('/worker/reports', express.json(), workerLimiter, requireWorkerAuth, as
 app.post('/worker/ocr', express.json(), workerLimiter, requireWorkerAuth, async (req, res, next) => {
   try {
     if (!await workerTargetsAreOwned(req, res)) return;
-    // #96: a storyboardId, not a dateRange — an OCR Report walks a Storyboard's
+    // #96: a storyboardId — an OCR Report walks a Storyboard's
     // curated order (ADR 0017). The worker re-checks that the Storyboard
     // belongs to this Project, because requireWorkerAuth also admits an Admin.
     const { reportId, projectId, reportType, storyboardId } = req.body;

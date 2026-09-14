@@ -137,7 +137,6 @@ async function seedReport(id, data = {}) {
     projectId: 'test-project',
     workspaceId: 'test-workspace',
     reportType: 'project_progress',
-    dateRange: null,
     status: 'queued',
     gcsPath: null,
     requestedBy: 'test-user',

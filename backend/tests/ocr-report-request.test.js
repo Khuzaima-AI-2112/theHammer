@@ -13,8 +13,8 @@
  *  - It names a **Storyboard**, not a Project. The Analyst decided which
  *    Captures belong together and in what order; pairing a Project's Captures
  *    by time compares unrelated pages.
- *  - A `dateRange` alongside a `storyboardId` is refused rather than resolved:
- *    the Storyboard's membership *is* the selection (#95).
+ *  - A `dateRange` is refused, beside a `storyboardId` or anywhere else (#95):
+ *    the Storyboard's membership *is* the selection.
  *  - Everything is checked before the row is written, for #105's reason.
  *
  * Firestore: emulator. Cloud Storage and Vertex AI: mocked.
@@ -112,16 +112,6 @@ describe('naming the Storyboard', () => {
     expect(res.body.error).toMatch(/storyboardId/);
   });
 
-  test('a storyboardId and a dateRange together are refused, not reconciled', async () => {
-    const res = await generate({
-      projectId: PROJECT, reportType: OCR_TYPE, storyboardId: DRAFT,
-      dateRange: { from: '2026-09-01', to: '2026-09-08' },
-    });
-
-    expect(res.status).toBe(400);
-    expect(res.body.error).toMatch(/Storyboard is the selection/i);
-  });
-
   test("a Storyboard belonging to another Project is refused", async () => {
     const res = await generate({
       projectId: PROJECT, reportType: OCR_TYPE, storyboardId: OTHER_DRAFT,
@@ -163,6 +153,7 @@ describe('a request that is allowed through', () => {
     expect(row.reportType).toBe(OCR_TYPE);
     expect(row.workspaceId).toBe(WORKSPACE);
     expect(row.status).toBe('queued');
+    expect(row).not.toHaveProperty('dateRange');
   });
 
   test('a standard report still needs no Storyboard and stores none', async () => {
@@ -171,6 +162,31 @@ describe('a request that is allowed through', () => {
     expect(res.status).toBe(202);
     const row = (await db.collection(collections.REPORTS).doc(res.body.reportId).get()).data();
     expect(row.storyboardId).toBeNull();
+    expect(row).not.toHaveProperty('dateRange');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────
+// #95: dateRange was accepted, stored and forwarded, and nothing ever read it,
+// so a Report sent one would have been labelled with a period its figures
+// ignored. It is gone, and a caller still sending one is told so rather than
+// silently ignored. That covers the OCR case ADR 0017 refused on its own:
+// a Storyboard beside a dateRange is refused because any dateRange is.
+// ─────────────────────────────────────────────────────────────────
+describe('dateRange is not accepted (#95)', () => {
+  test.each([
+    ['a standard report', { reportType: 'project_progress' }],
+    ['an OCR report beside its Storyboard', { reportType: OCR_TYPE, storyboardId: DRAFT }],
+  ])('%s sent with a dateRange is refused and files no row', async (_label, fields) => {
+    const before = (await db.collection(collections.REPORTS).get()).size;
+
+    const res = await generate({
+      projectId: PROJECT, ...fields, dateRange: { from: '2026-09-01', to: '2026-09-08' },
+    }, ANALYST_2);
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/dateRange/);
+    expect((await db.collection(collections.REPORTS).get()).size).toBe(before);
   });
 });
 

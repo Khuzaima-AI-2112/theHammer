@@ -13,7 +13,7 @@ const { DEFAULT_LLM_MODEL, REPORT_MAX_OUTPUT_TOKENS } = require('../lib/models')
 const { buildReportNarrativePrompt, guardNarrative } = require('../lib/narrativeGuard');
 
 // This is a simplified MVP worker logic for generating standard reports
-async function generateStandardReport(reportId, projectId, reportType, dateRange) {
+async function generateStandardReport(reportId, projectId, reportType) {
   const reportRef = db.collection(collections.REPORTS).doc(reportId);
   try {
     await reportRef.update({ status: 'processing', updatedAt: new Date().toISOString() });
