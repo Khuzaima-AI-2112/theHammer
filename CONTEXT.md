@@ -40,20 +40,17 @@ under, what a Session belongs to, and what progress is reported against.
 _Avoid_: job, client, account, workstream, board
 
 **Workspace**:
-One Customer organisation's isolated tenant. It is the boundary for data
-isolation and for legal responsibility: everything inside one Workspace belongs
-to one Customer.
+The isolated space that Projects are filed in. It is the boundary for data
+isolation: nothing inside one Workspace can be reached from another.
 _Avoid_: account, tenant, org, company, team
 
 **Customer**:
-The organisation that pays for a Workspace and employs its Monitored Users. The
-Customer decides that monitoring happens and is responsible for telling its
-staff.
+The person who commissioned theHammer, and one of its Monitored Users.
 _Avoid_: client, account, company, user
 
 **Monitored User**:
-The person whose screen is captured and whose working time is measured. Almost
-always an employee of the Customer.
+A person who has agreed to theHammer capturing their screen and measuring their
+working time. There are two, and nobody else is a Monitored User.
 _Avoid_: employee, subject, end user, worker, user
 
 **Disclosure**:
