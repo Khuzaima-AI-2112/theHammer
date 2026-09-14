@@ -53,30 +53,10 @@ A person who has agreed to theHammer capturing their screen and measuring their
 working time. There are two, and nobody else is a Monitored User.
 _Avoid_: employee, subject, end user, worker, user
 
-**Disclosure**:
-The screen that tells a Monitored User what theHammer collects, before any
-Capture is possible. It states facts; it does not ask permission.
-_Avoid_: consent prompt, consent screen, agreement, EULA
-
-**Acknowledgement**:
-A Monitored User's recorded confirmation that they have seen the Disclosure.
-It is not consent: a Monitored User cannot decline it and keep using theHammer.
-_Avoid_: consent, agreement, opt-in, acceptance
-
-**Restricted Mode**:
-The state a newly installed extension is in until an Acknowledgement is
-recorded. Captures are unavailable.
-_Avoid_: trial mode, limited mode, unregistered mode
-
-**Storage Lifetime**:
-The maximum period the storage bucket keeps any object, whatever else the
-system says. It is a hard ceiling, not a preference.
-_Avoid_: retention, TTL, expiry
-
 **Purge**:
 The complete removal of a Project and everything filed under it — its Captures
 and their images, its Sessions, Storyboards and Reports — at an Admin's
-request. Storage Lifetime is about time; a Purge is about intent, and does not
+request. Nothing expires on its own; a Purge is about intent, and does not
 wait.
 _Avoid_: delete, wipe, cascade, cleanup, archive
 
@@ -84,11 +64,6 @@ _Avoid_: delete, wipe, cascade, cleanup, archive
 The proportion of a Session during which the Monitored User's device was
 active, as opposed to idle or locked.
 _Avoid_: productivity score, efficiency score, utilisation
-
-**Disclosure Version**:
-The identifier of the Disclosure text a Monitored User acknowledged. A material
-change to what is collected produces a new version and re-prompts.
-_Avoid_: consent version, terms version, revision
 
 **Persona**:
 The part a Monitored User works in when a Capture is made. It is a part, not
@@ -157,3 +132,11 @@ A file an Admin downloads of a Project's Captures. It is produced and returned
 by the request that asks for it; there is no Export record, no status and
 nothing to queue. A Report is generated and waited for — an Export is not.
 _Avoid_: report, job, download job, batch
+
+## Retired terms
+
+Words the project used for things theHammer does not have. They are not in use.
+
+- **Disclosure**, **Acknowledgement**, **Restricted Mode**, **Disclosure
+  Version**: there is no Disclosure screen (ADR 0011).
+- **Storage Lifetime**: Captures are kept indefinitely (ADR 0010).
