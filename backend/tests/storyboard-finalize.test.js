@@ -580,6 +580,7 @@ describe('POST /admin/storyboards/:id/finalize', () => {
     const projectSnap = await db.collection(collections.PROJECTS).doc('finalize-proj').get();
     expect(projectSnap.data().workspaceId).toBeTruthy();
     expect(reportSnap.data().workspaceId).toBe(projectSnap.data().workspaceId);
+    expect(reportSnap.data()).not.toHaveProperty('dateRange'); // #95
   });
 
   // #122. Cloud Run kills a request that outruns `--timeout 300s` without

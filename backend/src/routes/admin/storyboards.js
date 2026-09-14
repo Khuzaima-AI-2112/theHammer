@@ -1305,7 +1305,6 @@ router.post('/storyboards/:id/finalize', requireAnalyst, async (req, res, next) 
       // workspaceId since #88, so the value is in hand.
       workspaceId: existing.workspaceId,
       reportType: 'storyboard',
-      dateRange: null,
       status: 'processing',
       gcsPath: null,
       storyboardDraftId: draft.id,
@@ -1518,7 +1517,6 @@ router.post('/storyboards/:id/video', requireAnalyst, async (req, res, next) => 
       // #103, ADR 0014 — the third writer, same source as finalize's above.
       workspaceId: existing.workspaceId,
       reportType: 'storyboard-video',
-      dateRange: null,
       status: 'queued',
       gcsPath: null,
       storyboardDraftId: draft.id,

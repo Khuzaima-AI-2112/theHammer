@@ -84,7 +84,6 @@ async function seedReport(id, projectId, reportType) {
   await db.collection(collections.REPORTS).doc(id).set({
     projectId,
     reportType,
-    dateRange: null,
     status: 'queued',
     gcsPath: null,
     requestedBy: 'analyst-fixture-id',

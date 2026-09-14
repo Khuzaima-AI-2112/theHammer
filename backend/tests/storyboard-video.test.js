@@ -429,6 +429,7 @@ describe('POST /admin/storyboards/:id/video', () => {
     const reportSnap = await db.collection(collections.REPORTS).doc(res.body.id).get();
     expect(projectSnap.data().workspaceId).toBeTruthy();
     expect(reportSnap.data().workspaceId).toBe(projectSnap.data().workspaceId);
+    expect(reportSnap.data()).not.toHaveProperty('dateRange'); // #95
 
     // #127, asserted here for the same reason as the line above — so the
     // render flow runs once. The row was stamped with a deadline while the

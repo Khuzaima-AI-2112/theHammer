@@ -1,5 +1,9 @@
 # An OCR Report is generated for a Storyboard, not for a Project
 
+> *Amended 2026-09-14 (#95).* `dateRange` is gone from every report request, not
+> only this one: `POST /admin/reports/generate` refuses any `dateRange`. The
+> rejection below still holds, as one case of that rule.
+
 Grilled 2026-09-08/09 while designing #96, after the Customer chose a capped
 build over an uncapped one (`deliverables/message-to-chris-ocr-report-cost-2026-09-08.md`).
 

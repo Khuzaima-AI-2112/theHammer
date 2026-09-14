@@ -54,7 +54,7 @@ async function seedUpload(id, projectId, userId) {
 
 async function seedReportDoc(id, projectId) {
   await db.collection(collections.REPORTS).doc(id).set({
-    projectId, reportType: 'project_progress', dateRange: null,
+    projectId, reportType: 'project_progress',
     status: 'queued', gcsPath: null, requestedBy: 'analyst-fixture-id',
     createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
     schemaVersion: 1,

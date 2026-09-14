@@ -89,7 +89,7 @@ test('an OCR request names a Storyboard and never a dateRange', () => {
   assert.match(body, /storyboardId/);
   assert.ok(
     !/dateRange/.test(body.replace(/\/\/[^\n]*/g, '')),
-    'the portal must not send a dateRange: the backend refuses it beside a storyboardId'
+    'the portal must not send a dateRange: the backend refuses any dateRange (#95)'
   );
   assert.match(REPORTS_ROUTES, /requires a storyboardId/);
 });
