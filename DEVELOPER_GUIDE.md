@@ -278,8 +278,8 @@ revision rollback, which needs no build at all.
 > `deploy.ps1` now stages into `gs://thehammer_cloudbuild/source`, where a
 > plain `gcloud builds submit` stages by default. This note used to blame
 > `gcloud builds submit` for them; the flag in `deploy.ps1` was the cause.
-> `infra/tests/build-source-staging.test.js` fails if anything stages there
-> again.
+> `infra/tests/build-source-staging.test.js` fails if anything in the repo
+> stages build source into the Captures bucket again.
 
 So a deploy that git cannot account for is not merely untidy: this document
 was the instruction that produced one.
