@@ -19,6 +19,8 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
 
+const { repoFiles } = require('./repo-files');
+
 const REPO = path.join(__dirname, '..', '..');
 const ROUTES = path.join(REPO, 'backend', 'src', 'routes');
 
@@ -131,11 +133,13 @@ test('every query that needs a composite index has one', () => {
     'Add the index to firestore.indexes.json.');
 });
 
+// Anywhere, not only infra/, which is where the one stray copy used to be (#10):
+// a second copy in any directory is a file someone can edit that nothing deploys.
 test('there is exactly one index file, so the wrong one cannot be edited', () => {
-  const stray = path.join(REPO, 'infra', 'firestore.indexes.json');
+  const indexFiles = repoFiles().filter((file) => path.posix.basename(file) === 'firestore.indexes.json');
 
-  assert.ok(!fs.existsSync(stray),
-    'infra/firestore.indexes.json is deployed by nothing — firebase.json names the root file');
+  assert.deepStrictEqual(indexFiles, ['firestore.indexes.json'],
+    'firebase.json deploys only the root firestore.indexes.json; any other copy is deployed by nothing');
 });
 
 test('firebase.json deploys the file these tests check', () => {
