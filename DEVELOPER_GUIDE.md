@@ -268,12 +268,18 @@ revision rollback, which needs no build at all.
 > - `infra/deploy.ps1` is retired for production. Its settings have drifted
 >   from the pipeline (`--min-instances 0`, `--memory 256Mi`, `API_KEY` via
 >   `--set-secrets`), so running it would have quietly changed the service's
->   configuration as well as its image.
+>   configuration as well as its image. It also named the **Captures** bucket
+>   as its build staging directory, which is how five source archives from
+>   June ended up there.
 > - `gcloud builds submit` bypasses the trigger, and with it the approval gate
->   and the record of which commit was deployed. It also stages a copy of the
->   repository into the project's default bucket — which is how five source
->   archives from June ended up sitting in the **Captures** bucket, still open
->   as #110.
+>   and the record of which commit was deployed.
+>
+> *Corrected 2026-09-14 (#110).* The five archives were deleted, and
+> `deploy.ps1` now stages into `gs://thehammer_cloudbuild/source`, where a
+> plain `gcloud builds submit` stages by default. This note used to blame
+> `gcloud builds submit` for them; the flag in `deploy.ps1` was the cause.
+> `infra/tests/build-source-staging.test.js` fails if anything in the repo
+> stages build source into the Captures bucket again.
 
 So a deploy that git cannot account for is not merely untidy: this document
 was the instruction that produced one.

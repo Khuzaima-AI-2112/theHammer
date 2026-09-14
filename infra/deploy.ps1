@@ -20,7 +20,9 @@ Write-Host "[deploy] Step B: CORS setup"
 gcloud storage buckets update "gs://$BucketName" --cors-file=infra/cors.json
 
 Write-Host "[deploy] Building"
-gcloud builds submit --tag $IMAGE --gcs-source-staging-dir "gs://$BucketName/source" ./backend
+# #110: staged into the Cloud Build bucket. This used "gs://$BucketName/source",
+# which put a full copy of backend/ into the Captures bucket on every run.
+gcloud builds submit --tag $IMAGE --gcs-source-staging-dir "gs://thehammer_cloudbuild/source" ./backend
 
 Write-Host "[deploy] Deploying"
 $deployArgs = @(
