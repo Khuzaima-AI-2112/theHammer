@@ -5,8 +5,8 @@
  *
  * A Workspace is the boundary for data isolation, and every route that takes a
  * record id from the request has to prove the record it found is in the
- * caller's Workspace before answering with it. `requireAdmin` proves the caller is an Admin, not
- * that they are an Admin *here*.
+ * caller's Workspace before answering with it. `requireAdmin` proves the caller
+ * is an Admin, not that they are an Admin *here*.
  *
  * Before this file the check was written at each call site as somebody noticed
  * it — seven route families, five spellings, and `denyForeignProject` existing
