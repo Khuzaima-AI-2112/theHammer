@@ -371,11 +371,8 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// The wait before each retry. One entry per retry, so an upload gets
-// RETRY_DELAYS_MS.length + 1 attempts: three, waiting 1s then 2s, and a Capture
-// that still fails is queued about 3s after its first attempt. This used to
-// read [1000, 2000, 4000] with three attempts, and the 4s was never reached
-// (#140).
+// The wait before each retry, one entry per retry: an upload gets
+// RETRY_DELAYS_MS.length + 1 attempts, and nothing waits after the last (#140).
 const RETRY_DELAYS_MS = [1000, 2000];
 
 async function withRetry(uploadFn) {
@@ -386,9 +383,9 @@ async function withRetry(uploadFn) {
     } catch (err) {
       lastErr = err;
       // #39: a 401 has already survived one refresh inside authedFetch, so the
-      // refresh token is revoked or expired. Two more attempts over three
-      // seconds cannot change that, and they end on a message about the
-      // network. Give up at once and let the caller say "sign in".
+      // refresh token is revoked or expired. Waiting out the retries cannot
+      // change that, and they end on a message about the network. Give up at
+      // once and let the caller say "sign in".
       if (isAuthExpired(err)) throw err;
       console.warn(`[Hammer SW] attempt ${attempt + 1} failed:`, err.message);
       if (attempt < RETRY_DELAYS_MS.length) {

@@ -160,8 +160,6 @@ test('CAP-04: the retry stops at three attempts, and gives up without waiting ag
   await exhaustRetries(t, sw);
 
   // withRetry sleeps only *between* attempts, so three attempts wait twice.
-  // RETRY_DELAYS_MS once carried a 4s third entry that this proved was never
-  // reached (#140); it now holds just the two waits.
   assert.strictEqual(attempts(sw), 3);
   assert.ok(reply.done, 'after the third failure the Capture is queued at once, with no further wait');
 

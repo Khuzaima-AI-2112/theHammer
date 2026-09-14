@@ -64,7 +64,7 @@ test('withRetry gives up immediately on a 401 instead of retrying it', async () 
   assert.strictEqual(attempts, 1,
     'the 401 already survived a refresh inside authedFetch; retrying it cannot change the answer');
   assert.ok(Date.now() - started < 500,
-    'giving up on a dead session must not cost the 3s of backoff a network failure does');
+    'giving up on a dead session must not cost the backoff a network failure does');
 });
 
 test('withRetry still retries a genuine transport failure', async () => {
