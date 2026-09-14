@@ -1,9 +1,9 @@
 # The Hammer
 
-A Chrome extension and backend that let a person capture screenshots of their
-work, and let their employer see progress and time across projects. This
-glossary fixes the words the project uses for the people, the data, and the
-disclosure obligations around both.
+A Chrome extension and backend that two people use from their own machines to
+take Captures of their own work, see progress and time across Projects, and
+curate Captures of another company's Tool into Storyboards the model narrates.
+This glossary fixes the words the project uses for the people and the data.
 
 ## Language
 
