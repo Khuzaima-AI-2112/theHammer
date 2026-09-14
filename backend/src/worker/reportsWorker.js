@@ -4,7 +4,6 @@ const logger = require('../lib/logger');
 
 
 const { getStorage } = require('../lib/storage');
-const { GoogleGenAI } = require('@google/genai');
 const { db } = require('../lib/firestore');
 const { getAIClient } = require('../lib/vertex');
 const collections = require('../lib/collections');

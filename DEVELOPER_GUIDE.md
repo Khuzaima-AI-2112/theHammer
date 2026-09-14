@@ -50,10 +50,10 @@ git reset -q --hard
 ```
 
 ### Install Dependencies
-```bash
-# Install root workspace dependencies
-npm install
+The root `package.json` has scripts only (`test:extension`, `test:portal`,
+`test:indexes`) and no dependencies, so there is nothing to install there (#10).
 
+```bash
 # Install backend dependencies. `npm ci`, not `npm install`: install on
 # Windows rewrites package-lock.json without entries the Linux build needs
 # (lesson 86).
