@@ -20,7 +20,7 @@
 //   — uploadBlobWithSignedUrl: userId removed from POST body.
 // Sprint 4 additions (retained):
 //   4.1 — offline queue in chrome.storage.local
-//   4.2 — exponential backoff retry (max 3, 1s/2s/4s)
+//   4.2 — exponential backoff retry (3 attempts, waiting 1s then 2s)
 //   4.3 — XHR upload with onprogress → chrome.runtime.sendMessage
 //   4.4 — atomic settings read
 //   4.5 — history: last 20 uploads
@@ -371,22 +371,27 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-const RETRY_DELAYS_MS = [1000, 2000, 4000];
+// The wait before each retry. One entry per retry, so an upload gets
+// RETRY_DELAYS_MS.length + 1 attempts: three, waiting 1s then 2s, and a Capture
+// that still fails is queued about 3s after its first attempt. This used to
+// read [1000, 2000, 4000] with three attempts, and the 4s was never reached
+// (#140).
+const RETRY_DELAYS_MS = [1000, 2000];
 
 async function withRetry(uploadFn) {
   let lastErr;
-  for (let attempt = 0; attempt < RETRY_DELAYS_MS.length; attempt++) {
+  for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
     try {
       return await uploadFn();
     } catch (err) {
       lastErr = err;
       // #39: a 401 has already survived one refresh inside authedFetch, so the
-      // refresh token is revoked or expired. Three more attempts over seven
+      // refresh token is revoked or expired. Two more attempts over three
       // seconds cannot change that, and they end on a message about the
       // network. Give up at once and let the caller say "sign in".
       if (isAuthExpired(err)) throw err;
       console.warn(`[Hammer SW] attempt ${attempt + 1} failed:`, err.message);
-      if (attempt < RETRY_DELAYS_MS.length - 1) {
+      if (attempt < RETRY_DELAYS_MS.length) {
         await sleep(RETRY_DELAYS_MS[attempt]);
       }
     }

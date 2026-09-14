@@ -159,12 +159,11 @@ test('CAP-04: the retry stops at three attempts, and gives up without waiting ag
   const reply = trackSettlement(sw.send({ type: 'CAPTURE' }));
   await exhaustRetries(t, sw);
 
-  // RETRY_DELAYS_MS is [1000, 2000, 4000], but withRetry only sleeps *between*
-  // attempts, so three attempts wait twice. The 4s entry is never reached. This
-  // pins what the worker does; service-worker.js's opening comment ("4.2 —
-  // exponential backoff retry (max 3, 1s/2s/4s)") overstates it.
+  // withRetry sleeps only *between* attempts, so three attempts wait twice.
+  // RETRY_DELAYS_MS once carried a 4s third entry that this proved was never
+  // reached (#140); it now holds just the two waits.
   assert.strictEqual(attempts(sw), 3);
-  assert.ok(reply.done, 'after the third failure the Capture is queued at once, not after a 4s wait');
+  assert.ok(reply.done, 'after the third failure the Capture is queued at once, with no further wait');
 
   await advance(t, sw, 60_000);
   assert.strictEqual(attempts(sw), 3, 'there is no fourth attempt, however long the worker waits');
