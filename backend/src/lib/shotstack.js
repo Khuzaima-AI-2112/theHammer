@@ -21,7 +21,7 @@
  * not) is the one time this writes anything.
  */
 
-const { Storage } = require('@google-cloud/storage');
+const { getStorage } = require('./storage');
 const logger = require('./logger');
 
 const SHOTSTACK_API_KEY = process.env.SHOTSTACK_API_KEY || '';
@@ -32,7 +32,6 @@ const SHOTSTACK_ENV = process.env.SHOTSTACK_ENV || 'stage'; // 'stage' is Shotst
 // doesn't.
 const SHOTSTACK_BASE_URL = process.env.SHOTSTACK_BASE_URL || `https://api.shotstack.io/edit/${SHOTSTACK_ENV}`;
 
-const storage = new Storage();
 const BUCKET = process.env.GCS_BUCKET || 'thehammer-storage-2026';
 
 function nowISO() { return new Date().toISOString(); }
@@ -119,7 +118,7 @@ async function refreshVideoReportStatus(reportRef, data) {
     const videoRes = await fetch(render.url);
     const videoBuffer = Buffer.from(await videoRes.arrayBuffer());
     const gcsPath = `${data.projectId}/reports/${reportRef.id}.mp4`;
-    await storage.bucket(BUCKET).file(gcsPath).save(videoBuffer, {
+    await getStorage().bucket(BUCKET).file(gcsPath).save(videoBuffer, {
       metadata: { contentType: 'video/mp4' },
     });
 

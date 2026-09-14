@@ -17,7 +17,7 @@
 
 const express = require('express');
 const { Timestamp } = require('firebase-admin/firestore');
-const { Storage } = require('@google-cloud/storage');
+const { getStorage } = require('../../lib/storage');
 const { db } = require('../../lib/firestore');
 const { requireAdmin } = require('../../middleware/requireAuth');
 const collections = require('../../lib/collections');
@@ -27,10 +27,7 @@ const router    = express.Router({ mergeParams: true });
 const MAX_LIMIT = 500;
 const DEF_LIMIT = 100;
 
-// GCS client — uses ADC (Application Default Credentials) on Cloud Run.
-const storage   = new Storage();
 const BUCKET    = process.env.GCS_BUCKET || 'thehammer-storage-2026';
-const bucket    = storage.bucket(BUCKET);
 
 // Signed URL lifetime: 15 minutes. Portal refreshes every 9 min via
 // visibilitychange handler so URLs are always valid when the tab is active.
@@ -39,7 +36,7 @@ const SIGNED_URL_TTL_MS = 15 * 60 * 1000;
 async function makeSignedUrl(gcsPath) {
   if (!gcsPath) return null;
   try {
-    const [url] = await bucket.file(gcsPath).getSignedUrl({
+    const [url] = await getStorage().bucket(BUCKET).file(gcsPath).getSignedUrl({
       version: 'v4',
       action:  'read',
       expires: Date.now() + SIGNED_URL_TTL_MS,

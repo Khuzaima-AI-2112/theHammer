@@ -31,15 +31,13 @@
 
 const logger = require('../lib/logger');
 
-const { Storage } = require('@google-cloud/storage');
+const { getStorage } = require('../lib/storage');
 const { db } = require('../lib/firestore');
 const { getAIClient } = require('../lib/vertex');
 const collections = require('../lib/collections');
 const { DEFAULT_LLM_MODEL, REPORT_MAX_OUTPUT_TOKENS } = require('../lib/models');
 const { selectComparablePairs, TooFewCapturesError } = require('../lib/ocrPairs');
 const { withRateLimitRetry } = require('../lib/retry');
-
-const gcs = new Storage();
 
 /**
  * The findings one comparison may report.
@@ -190,7 +188,7 @@ async function generateOcrReport(reportId, projectId, reportType, storyboardId, 
 
     const bucketName = process.env.GCS_BUCKET || `hammer-reports-${projectId}`;
     const gcsPath = `${projectId}/reports/${reportId}.json`;
-    await gcs.bucket(bucketName).file(gcsPath).save(JSON.stringify(resultData, null, 2), {
+    await getStorage().bucket(bucketName).file(gcsPath).save(JSON.stringify(resultData, null, 2), {
       metadata: { contentType: 'application/json' },
     });
 

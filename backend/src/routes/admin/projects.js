@@ -24,7 +24,7 @@
 
 const express  = require('express');
 const { FieldValue, Timestamp } = require('firebase-admin/firestore');
-const { Storage } = require('@google-cloud/storage');
+const { getStorage } = require('../../lib/storage');
 const { db }   = require('../../lib/firestore');
 const { requireAdmin } = require('../../middleware/requireAuth');
 const collections = require('../../lib/collections');
@@ -33,8 +33,6 @@ const { loadOwnedProject, callerWorkspace } = require('../../lib/ownership');
 const { purgeProjectContents, recordPurge } = require('../../lib/purge');
 
 const router = express.Router();
-
-const storage = new Storage();
 
 // No `|| 'thehammer-storage-2026'` fallback here, unlike the read paths in
 // exports.js and activity.js. This one deletes: a Purge that cannot be told
@@ -227,7 +225,7 @@ router.delete('/projects/:id', requireAdmin, async (req, res, next) => {
     if (!snap) return;
 
     const counts = await purgeProjectContents({
-      db, bucket: storage.bucket(BUCKET), projectId: id,
+      db, bucket: getStorage().bucket(BUCKET), projectId: id,
     });
 
     // #115: written while the facts are still available, and before the Project

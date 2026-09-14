@@ -101,7 +101,7 @@ const express = require('express');
 const multer = require('multer');
 const PDFDocument = require('pdfkit');
 const { Timestamp } = require('firebase-admin/firestore');
-const { Storage } = require('@google-cloud/storage');
+const { getStorage } = require('../../lib/storage');
 const logger = require('../../lib/logger');
 const { db } = require('../../lib/firestore');
 const { requireAnalyst } = require('../../middleware/requireAuth');
@@ -121,7 +121,6 @@ const { validateWorkflows, workflowByCaptureId } = require('../../lib/workflows'
 
 const router = express.Router();
 
-const storage = new Storage();
 const BUCKET = process.env.GCS_BUCKET || 'thehammer-storage-2026';
 
 // A short spoken walkthrough, not a file transfer — generous for a few
@@ -247,7 +246,7 @@ function isoOf(value) {
 async function makeSignedUrl(gcsPath, ttlMs = SIGNED_URL_TTL_MS) {
   if (!gcsPath) return null;
   try {
-    const [url] = await storage.bucket(BUCKET).file(gcsPath).getSignedUrl({
+    const [url] = await getStorage().bucket(BUCKET).file(gcsPath).getSignedUrl({
       version: 'v4',
       action: 'read',
       expires: Date.now() + ttlMs,
@@ -960,7 +959,7 @@ router.post(
       const mimeType = baseMimeType(req.file.mimetype);
       const ext = ACCEPTED_AUDIO_TYPES[mimeType];
       const audioPath = `${existing.projectId}/storyboards/${req.params.id}/audio.${ext}`;
-      await storage.bucket(BUCKET).file(audioPath).save(req.file.buffer, {
+      await getStorage().bucket(BUCKET).file(audioPath).save(req.file.buffer, {
         metadata: { contentType: mimeType },
       });
 
@@ -1218,7 +1217,7 @@ async function buildStoryboardPdf(draft) {
     // An Abandoned Upload has a row and no object. Nothing to fetch, and the
     // frame is drawn labelled but empty, exactly as before.
     if (!gcsPath) return null;
-    const [bytes] = await storage.bucket(BUCKET).file(gcsPath).download();
+    const [bytes] = await getStorage().bucket(BUCKET).file(gcsPath).download();
     return bytes;
   };
 
@@ -1324,7 +1323,7 @@ router.post('/storyboards/:id/finalize', requireAnalyst, async (req, res, next) 
     try {
       const pdfBuffer = await buildStoryboardPdf(draft);
       const gcsPath = `${draft.projectId}/reports/${reportRef.id}.pdf`;
-      await storage.bucket(BUCKET).file(gcsPath).save(pdfBuffer, {
+      await getStorage().bucket(BUCKET).file(gcsPath).save(pdfBuffer, {
         metadata: { contentType: 'application/pdf' },
       });
 
@@ -1537,7 +1536,7 @@ router.post('/storyboards/:id/video', requireAnalyst, async (req, res, next) => 
     try {
       const narrationBuffer = await synthesizeNarration(buildNarrationText(draft));
       const audioPath = `${draft.projectId}/reports/${reportRef.id}/narration.wav`;
-      await storage.bucket(BUCKET).file(audioPath).save(narrationBuffer, {
+      await getStorage().bucket(BUCKET).file(audioPath).save(narrationBuffer, {
         metadata: { contentType: 'audio/wav' },
       });
       const audioUrl = await makeSignedUrl(audioPath, VIDEO_ASSET_SIGNED_URL_TTL_MS);
