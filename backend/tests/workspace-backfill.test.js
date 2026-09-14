@@ -28,7 +28,7 @@
  *
  *   - **a dry run writes nothing**, and dry run is the default;
  *   - **it never guesses.** A record it cannot resolve is reported and left
- *     alone. A wrong stamp here does not merely fail — it hands one Customer's
+ *     alone. A wrong stamp here does not merely fail — it hands one Workspace's
  *     Admin a record belonging to another.
  *
  * Legacy rows are seeded in both shapes they really take: the field explicitly
