@@ -193,7 +193,8 @@ describe('multer error contract', () => {
 // them to the route; 1.x did not. Untreated they become a 500 and an
 // ERROR-severity log for what is an ordinary dropped upload, so the route
 // classifies them. These cases pin that classification: the abort path cannot
-// be provoked through supertest, but the decision it turns on can be.
+// be provoked through supertest, but the decision it turns on can be. The path
+// itself is exercised over a real socket in capture.client-disconnect.test.js.
 // ─────────────────────────────────────────────────────────────────
 describe('SEC-07 — client disconnects are not server errors', () => {
   test.each([
