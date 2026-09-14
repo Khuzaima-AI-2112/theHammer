@@ -135,9 +135,8 @@ _Avoid_: report, job, download job, batch
 
 ## Retired terms
 
-Words the project used for things theHammer no longer has. They are not in use.
+Words the project used for things theHammer does not have. They are not in use.
 
 - **Disclosure**, **Acknowledgement**, **Restricted Mode**, **Disclosure
   Version**: there is no Disclosure screen (ADR 0011).
-- **Storage Lifetime**: nothing expires on its own; Captures are kept
-  indefinitely (ADR 0010).
+- **Storage Lifetime**: Captures are kept indefinitely (ADR 0010).
