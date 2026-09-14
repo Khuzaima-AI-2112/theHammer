@@ -3,10 +3,10 @@
 /**
  * Workspace ownership — the one place the tenancy check lives (#99).
  *
- * A Workspace is one Customer's isolated tenant, and every route that takes a
- * record id from the request has to prove the record it found is the caller's
- * before answering with it. `requireAdmin` proves the caller is an Admin, not
- * that they are an Admin *here*.
+ * A Workspace is the boundary for data isolation, and every route that takes a
+ * record id from the request has to prove the record it found is in the
+ * caller's Workspace before answering with it. `requireAdmin` proves the caller
+ * is an Admin, not that they are an Admin *here*.
  *
  * Before this file the check was written at each call site as somebody noticed
  * it — seven route families, five spellings, and `denyForeignProject` existing
@@ -15,7 +15,7 @@
  * property of a route family, not of a route.
  *
  * **One answer for unreachable.** A Project that does not exist and a Project
- * belonging to another Customer are refused identically. The Admin routes used
+ * in another Workspace are refused identically. The Admin routes used
  * to split them — 404 for gone, 403 for foreign — which let an outsider sort
  * real Project ids from imaginary ones by reading the status code. The four
  * extension routes already merged them; this is the merged answer everywhere.

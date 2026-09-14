@@ -1,8 +1,8 @@
 /**
  * #7 — Workspace isolation (SEC-01 … SEC-12)
  *
- * A Workspace is one Customer's isolated tenant, and it is the boundary the
- * whole multi-Customer model rests on. Until this file existed the suite had
+ * A Workspace is the boundary for data isolation: nothing inside one can be
+ * reached from another. Until this file existed the suite had
  * no case that crossed it: every test authenticated inside the one Workspace
  * its own fixtures created, so a route that had forgotten to check ownership
  * looked exactly like one that checked it.
