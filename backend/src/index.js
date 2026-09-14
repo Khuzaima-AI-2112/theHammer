@@ -891,4 +891,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { app, sanitize, buildObjectPath, resumableObjectPath, sha256, rejectOversizedUpload, isClientDisconnect, analystReportLimiter, exportLimiter, stampLastCapture };
+module.exports = { app, sanitize, buildObjectPath, resumableObjectPath, sha256, rejectOversizedUpload, isClientDisconnect, DRAIN_BUDGET_BYTES, analystReportLimiter, exportLimiter, stampLastCapture };
