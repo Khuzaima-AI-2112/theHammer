@@ -76,7 +76,8 @@ function contentTypeFor(objectPath) {
  * a video through the API.
  *
  * `null` when the object is not there. The row is the claim and the object is
- * the evidence; Storage Lifetime can remove the second while the first stays.
+ * the evidence; anything that deletes objects outside theHammer can remove the
+ * second while the first stays.
  */
 async function readReportArtifact(gcsPath) {
   const location = parseGcsPath(gcsPath);

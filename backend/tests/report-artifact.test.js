@@ -186,8 +186,8 @@ describe('what the reader is told when there is nothing to show', () => {
   });
 
   test('a done Report whose object is gone is a 404, not a crash', async () => {
-    // The row is the claim; the object is the evidence. Storage Lifetime can
-    // remove the second while the first stays behind.
+    // The row is the claim; the object is the evidence. Anything that deletes
+    // objects outside theHammer can remove the second while the first stays.
     await seedReport('r-vanished', {
       projectId: PROJECT, workspaceId: WORKSPACE, status: 'done',
       gcsPath: `gs://fake-bucket/${PROJECT}/reports/r-vanished.json`,
